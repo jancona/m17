@@ -15,32 +15,37 @@ import (
 var (
 	serverArg   *string = flag.String("server", "", "Reflector server")
 	portArg     *uint   = flag.Uint("port", 17000, "Port the reflector listens on")
-	moduleArg   *string = flag.String("module", "C", "Module to connect to")
+	moduleArg   *string = flag.String("module", "T", "Module to connect to")
 	callsignArg *string = flag.String("callsign", "N0CALL", "User's callsign")
+	helpArg     *bool   = flag.Bool("h", false, "Print arguments")
 )
 
 func main() {
 	flag.Parse()
-	c, err := m17.NewM17Relay(*serverArg, *portArg, *moduleArg, *callsignArg, handleM17)
+	if *helpArg {
+		flag.Usage()
+		return
+	}
+	r, err := m17.NewM17Relay(*serverArg, *portArg, *moduleArg, *callsignArg, handleM17)
 	if err != nil {
 		fmt.Printf("Error creating client: %v", err)
 		os.Exit(1)
 	}
-	err = c.Connect()
+	err = r.Connect()
 	if err != nil {
 		fmt.Printf("Error connecting to %s:%d %s: %v", *serverArg, *portArg, *moduleArg, err)
 		os.Exit(1)
 	}
-	defer c.Close()
+	defer r.Close()
 
 	// handle responses from reflector
 	go func() {
-		c.Handle()
+		r.Handle()
 		// When Handle exits, we're done
 		os.Exit(0)
 	}()
 
-	handleConsoleInput(c)
+	handleConsoleInput(r)
 }
 
 func handleM17(buf []byte) error {

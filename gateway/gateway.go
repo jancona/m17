@@ -24,16 +24,23 @@ var (
 	logDestArg *string = flag.String("log", "", "Device/file for log (default stderr)")
 	serverArg  *string = flag.String("server", "", "Relay/reflector server")
 	portArg    *uint   = flag.Uint("port", 17000, "Port the relay/reflector listens on")
-	moduleArg  *string = flag.String("module", "C", "Module to connect to")
+	moduleArg  *string = flag.String("module", "T", "Module to connect to")
+	helpArg    *bool   = flag.Bool("h", false, "Print arguments")
 )
 
 func main() {
 	var err error
 
 	flag.Parse()
+
+	if *helpArg {
+		flag.Usage()
+		return
+	}
+
 	if *serverArg == "" {
 		flag.Usage()
-		log.Fatal("server argument is required")
+		log.Fatal("-server argument is required")
 	}
 	setupLogging()
 
