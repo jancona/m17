@@ -361,7 +361,15 @@ func (g *Gateway) Run() {
 					// copy(lsf, lsf[1:])
 					lsf = lsf[1:]
 					log.Printf("[DEBUG] lsf: %x", lsf)
-					log.Printf("[DEBUG] dest: %s, src: %s", m17.DecodeCallsign(lsf[0:6]), m17.DecodeCallsign(lsf[6:12]))
+					dst, err := m17.DecodeCallsign(lsf[0:6])
+					if err != nil {
+						log.Printf("[ERROR] Bad dst callsign: %v", err)
+					}
+					src, err := m17.DecodeCallsign(lsf[6:12])
+					if err != nil {
+						log.Printf("[ERROR] Bad src callsign: %v", err)
+					}
+					log.Printf("[DEBUG] dest: %s, src: %s", dst, src)
 
 					// if(!text_only)
 					// {

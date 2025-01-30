@@ -50,8 +50,14 @@ func main() {
 
 func handleM17(buf []byte) error {
 	// A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
-	dst := m17.DecodeCallsign(buf[4:10])
-	src := m17.DecodeCallsign(buf[10:16])
+	dst, err := m17.DecodeCallsign(buf[4:10])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Bad dst callsign: %v", err)
+	}
+	src, err := m17.DecodeCallsign(buf[10:16])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Bad src callsign: %v", err)
+	}
 	typ := buf[16]
 	msg := string(buf[17:])
 	if typ == 0x05 && dst == *callsignArg {
