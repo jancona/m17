@@ -2,10 +2,46 @@ package m17
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"math"
 )
 
 // m17.h
+/**
+ * @brief Preamble type (0 for LSF, 1 for BERT).
+ */
+type Pream byte
+
+const (
+	PREAM_LSF Pream = iota
+	PREAM_BERT
+)
+
+// M17 C library - frame type
+/**
+ * @brief Frame type (0 - LSF, 1 - stream, 2 - packet).
+ */
+type Frame byte
+
+const (
+	FRAME_LSF Frame = iota
+	FRAME_STR
+	FRAME_PKT
+)
+
+// M17 C library - payload
+/**
+ * @brief Structure holding Link Setup Frame data.
+ */
+type LSF struct {
+	Dst  [6]uint8
+	Src  [6]uint8
+	Type [2]uint8
+	Meta [112 / 8]uint8
+	CRC  [2]uint8
+}
+
 const (
 	// M17 C library - lib/lib.c
 	BasebandSamplesPerSymbol = 10                                              //samples per symbol
@@ -15,6 +51,15 @@ const (
 	SymbolsPerPayload        = 184                                             //symbols per payload in a frame
 	SymbolsPerFrame          = 192                                             //symbols per whole 40 ms frame
 	// RRCDeviation             = 7168.0                                          //.rrc file deviation for +1.0 symbol
+)
+
+// sync.c
+const (
+	SYNC_LSF = uint16(0x55F7)
+	SYNC_STR = uint16(0xFF5D)
+	SYNC_PKT = uint16(0x75FF)
+	SYNC_BER = uint16(0xDF55)
+	EOT_MRKR = uint16(0x555D)
 )
 
 // encode/symbols.c
@@ -239,7 +284,10 @@ func ViterbiChainback(out []uint8, pos int, l int) uint32 {
 	bitPos := l + 4
 
 	//  memset(out, 0, (len-1)/8+1);
-	for i := 0; i < (l-1)/8+1; i++ {
+	if (l-1)/8+1 > len(out) {
+		log.Printf("[INFO] Prevented array overflow (l-1)/8+1: %d len(out): %d\n(out: %#v, pos: %d, l: %d)", (l-1)/8+1, len(out), out, pos, l)
+	}
+	for i := 0; i < min(len(out), (l-1)/8+1); i++ {
 		out[i] = 0
 	}
 
@@ -312,4 +360,130 @@ func CRC(in []uint8) bool {
 	}
 
 	return uint16(crc&(0xFFFF)) == 0
+}
+
+func SendPacket(lsf LSF, packetData []byte, out io.Writer) error {
+	// var full_packet = make([]float32, 0, 36*192*10)   //full packet, symbols as floats - 36 "frames" max (incl. preamble, LSF, EoT), 192 symbols each, sps=10:
+	// var enc_bits = make([]uint8, SymbolsPerPayload*2) //type-2 bits, unpacked
+	// var rf_bits = make([]uint8, SymbolsPerPayload*2)  //type-4 bits, unpacked
+	// //encode LSF data
+	// conv_encode_LSF(enc_bits, &lsf)
+	// //fill preamble
+	// // memset((uint8_t*)full_packet, 0, 36*192*10*sizeof(float));
+	// AppendPreamble(full_packet, PREAM_LSF)
+
+	// //send LSF syncword
+	// AppendSyncword(full_packet, SYNC_LSF)
+
+	// //reorder bits
+	// reorder_bits(rf_bits, enc_bits)
+
+	// //randomize
+	// randomize_bits(rf_bits)
+
+	// //fill packet with LSF
+	// gen_data(full_packet, &pkt_sym_cnt, rf_bits)
+
+	// for numBytes := len(packet); numBytes > 0; {
+	// 	//send packet frame syncword
+	// 	GenSyncword(packet, &pkt_sym_cnt, SYNC_PKT)
+
+	// 	//the following examples produce exactly 25 bytes, which exactly one frame, but >= meant this would never produce a final frame with EOT bit set
+	// 	//echo -en "\x05Testing M17 packet mo\x00" | ./m17-packet-encode -S N0CALL -D ALL -C 10 -n 23 -o float.sym -f
+	// 	//./m17-packet-encode -S N0CALL -D ALL -C 10 -o float.sym -f -T 'this is a simple text'
+	// 	if numBytes > 25 { //fix for frames that, with terminating byte and crc, land exactly on 25 bytes (or %25==0)
+	// 		memcpy(pkt_chunk, &full_packet_data[pkt_cnt*25], 25)
+	// 		pkt_chunk[25] = pkt_cnt << 2
+	// 		fprintf(stderr, "FN:%02d (full frame)\n", pkt_cnt)
+
+	// 		//encode the packet frame
+	// 		conv_encode_packet_frame(enc_bits, pkt_chunk)
+
+	// 		//reorder bits
+	// 		reorder_bits(rf_bits, enc_bits)
+
+	// 		//randomize
+	// 		randomize_bits(rf_bits)
+
+	// 		//fill packet with frame data
+	// 		gen_data(full_packet, &pkt_sym_cnt, rf_bits)
+
+	// 		numBytes -= 25
+	// 	} else {
+	// 		memcpy(pkt_chunk, &full_packet_data[pkt_cnt*25], numBytes)
+	// 		memset(&pkt_chunk[numBytes], 0, 25-numBytes) //zero-padding
+
+	// 		//EOT bit set to 1, set counter to the amount of bytes in this (the last) frame
+	// 		if numBytes%25 == 0 {
+	// 			pkt_chunk[25] = (1 << 7) | ((25) << 2)
+
+	// 		} else {
+	// 			pkt_chunk[25] = (1 << 7) | ((numBytes % 25) << 2)
+
+	// 		}
+
+	// 		fprintf(stderr, "FN:-- (ending frame)\n")
+
+	// 		//encode the packet frame
+	// 		conv_encode_packet_frame(enc_bits, pkt_chunk)
+
+	// 		//reorder bits
+	// 		reorder_bits(rf_bits, enc_bits)
+
+	// 		//randomize
+	// 		randomize_bits(rf_bits)
+
+	// 		//fill packet with frame data
+	// 		gen_data(full_packet, &pkt_sym_cnt, rf_bits)
+
+	// 		numBytes = 0
+	// 	}
+
+	// 	//debug dump
+	// 	//for(uint8_t i=0; i<26; i++)
+	// 	//fprintf(stderr, "%02X", pkt_chunk[i]);
+	// 	//fprintf(stderr, "\n");
+
+	// 	pkt_cnt++
+	// }
+
+	return nil
+}
+
+/**
+ * @brief Generate symbol stream for a preamble.
+ *
+ * @param out Frame buffer (192 floats).
+ * @param cnt Pointer to a variable holding the number of written symbols.
+ * @param type Preamble type (pre-BERT or pre-LSF).
+ */
+func AppendPreamble(out []float32, typ Pream) {
+	if typ == PREAM_BERT { //pre-BERT
+		for i := 0; i < SymbolsPerFrame/2; i++ { //40ms * 4800 = 192
+			out = append(out, -3.0, +3.0)
+		}
+	} else { // type==PREAM_LSF //pre-LSF
+		for i := 0; i < SymbolsPerFrame/2; i++ { //40ms * 4800 = 192
+			out = append(out, +3.0, -3.0)
+		}
+	}
+}
+
+// Generate symbol stream for a syncword.
+func AppendSyncword(out []float32, syncword uint16) {
+	for i := 0; i < SymbolsPerSyncword*2; i += 2 {
+		out = append(out, float32(SymbolMap[(syncword>>(14-i))&3]))
+	}
+}
+
+/**
+ * @brief Reorder (interleave) 368 unpacked payload bits.
+ *
+ * @param outp Reordered, unpacked type-4 bits.
+ * @param inp Input unpacked type-2/3 bits.
+ */
+func reorder_bits(outp []uint8, inp []uint8) {
+	for i := 0; i < SymbolsPerPayload*2; i++ {
+		outp[i] = inp[IntrlSeq[i]]
+	}
 }

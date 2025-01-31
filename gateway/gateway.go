@@ -132,6 +132,14 @@ func (g Gateway) FromRelay(buf []byte) error {
 	// src := m17.DecodeCallsign(buf[10:16])
 	// typ := buf[16]
 	// data := buf[17:]
+	// lsf := m17.LSF{
+	// 	// A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
+	// 	Dst: [6]uint8([]byte(m17.DecodeCallsign(buf[4:10]))),
+	// 	Src: [6]uint8([]byte(m17.DecodeCallsign(buf[10:16]))),
+	// }
+
+	// // encode packet and send to g.out
+	// return m17.SendPacket(lsf, buf[16:], g.out)
 	return nil
 }
 
@@ -147,7 +155,9 @@ func (g *Gateway) FromClient(lsf []byte, buf []byte) error {
 		log.Printf("[INFO] binary.Read failed: %v", err)
 	}
 	log.Printf("[DEBUG] length: %d, crc: %x, CRC ok: %v, type %02X: %s", l, crc, m17.CRC(buf), t, text)
-	g.relay.SendMessage(lsf[0:6], text)
+	if m17.CRC(buf) {
+		g.relay.SendMessage(lsf[0:6], text)
+	}
 	return nil
 }
 
