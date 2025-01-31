@@ -107,7 +107,7 @@ func (c *Relay) Handle() {
 	}
 }
 
-func (c *Relay) SendMessage(dst []byte, message string) error {
+func (c *Relay) SendMessage(dst []byte, src []byte, message string) error {
 	msg := []byte(message)
 	if len(msg) > 821 {
 		msg = msg[:821]
@@ -115,7 +115,7 @@ func (c *Relay) SendMessage(dst []byte, message string) error {
 	cmd := make([]byte, 17+len(msg))
 	copy(cmd, []byte(magicM17))
 	copy(cmd[4:10], dst)
-	copy(cmd[10:16], c.EncodedCallsign)
+	copy(cmd[10:16], src)
 	cmd[16] = 0x05
 	copy(cmd[17:], msg)
 	_, err := c.conn.Write(cmd)

@@ -21,12 +21,22 @@ var (
 	helpArg     *bool   = flag.Bool("h", false, "Print arguments")
 )
 
+var encodedCallsign []byte
+
 func main() {
 	flag.Parse()
 	if *helpArg {
 		flag.Usage()
 		return
 	}
+
+	var err error
+	encodedCallsign, err = m17.EncodeCallsign(*callsignArg)
+	if err != nil {
+		fmt.Printf("Bad callsign %s: %v", *callsignArg, err)
+		os.Exit(1)
+	}
+
 	r, err := m17.NewM17Relay(*serverArg, *portArg, *moduleArg, *callsignArg, handleM17)
 	if err != nil {
 		fmt.Printf("Error creating client: %v", err)
@@ -61,7 +71,7 @@ func handleM17(buf []byte) error {
 	}
 	typ := buf[16]
 	msg := string(buf[17:])
-	if typ == 0x05 && dst == *callsignArg {
+	if typ == 0x05 && (dst == *callsignArg || dst == m17.DestinationAll) {
 		fmt.Printf("\n%s %s: %s\n> ", time.Now().Format(time.DateTime), src, msg)
 	}
 	return nil
@@ -96,7 +106,7 @@ func handleConsoleInput(c *m17.Relay) {
 				if err != nil {
 					fmt.Printf("error encoding callsign: %v\n", err)
 				} else {
-					c.SendMessage(dst, message)
+					c.SendMessage(dst, encodedCallsign, message)
 				}
 			} else {
 				switch command {

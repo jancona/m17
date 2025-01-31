@@ -155,7 +155,8 @@ func (g *Gateway) FromClient(lsf []byte, buf []byte) error {
 	}
 	log.Printf("[DEBUG] length: %d, crc: %x, CRC ok: %v, type %02X: %s", l, crc, m17.CRC(buf), t, text)
 	if m17.CRC(buf) {
-		g.relay.SendMessage(lsf[0:6], text)
+		// TODO: Handle error?
+		g.relay.SendMessage(lsf[0:6], lsf[6:12], text)
 	}
 	return nil
 }
