@@ -112,6 +112,23 @@ var RandSeq = []uint8{
 	0x6E, 0x68, 0x2F, 0x35, 0xDA, 0x14, 0xEA, 0xCD, 0x76, 0x19, 0x8D, 0xD5, 0x80, 0xD1, 0x33, 0x87, 0x13, 0x57, 0x18, 0x2D, 0x29, 0x78, 0xC3,
 }
 
+/**
+ * @brief Randomize type-4 unpacked bits.
+ *
+ * @param inp Input 368 unpacked type-4 bits.
+ */
+func randomize_bits(inp *[SymbolsPerPayload * 2]uint8) {
+	for i := 0; i < SymbolsPerPayload*2; i++ {
+		if ((RandSeq[i/8] >> (7 - (i % 8))) & 1) != 0 { //flip bit if '1'
+			if inp[i] != 0 {
+				inp[i] = 0
+			} else {
+				inp[i] = 1
+			}
+		}
+	}
+}
+
 // phy/interleave.c
 // interleaver pattern
 var IntrlSeq = []uint16{
@@ -150,6 +167,94 @@ var PuncturePattern1 = []uint8{
 	1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1,
 }
 var PuncturePattern3 = []uint8{1, 1, 1, 1, 1, 1, 1, 0}
+
+/**
+ * @brief Encode M17 stream frame using convolutional encoder with puncturing.
+ *
+ * @param out Output array, unpacked.
+ * @param in Input - pointer to a struct holding the Link Setup Frame.
+ */
+func conv_encode_LSF(out *[SymbolsPerPayload * 2]uint8, in *LSF) {
+	p := 0                    //puncturing pattern index
+	pb := uint16(0)           //pushed punctured bits
+	var ud [240 + 4 + 4]uint8 //unpacked data
+
+	//unpack DST
+	for i := 0; i < 8; i++ {
+		ud[4+i] = ((in.Dst[0]) >> (7 - i)) & 1
+		ud[4+i+8] = ((in.Dst[1]) >> (7 - i)) & 1
+		ud[4+i+16] = ((in.Dst[2]) >> (7 - i)) & 1
+		ud[4+i+24] = ((in.Dst[3]) >> (7 - i)) & 1
+		ud[4+i+32] = ((in.Dst[4]) >> (7 - i)) & 1
+		ud[4+i+40] = ((in.Dst[5]) >> (7 - i)) & 1
+	}
+
+	//unpack SRC
+	for i := 0; i < 8; i++ {
+		ud[4+i+48] = ((in.Src[0]) >> (7 - i)) & 1
+		ud[4+i+56] = ((in.Src[1]) >> (7 - i)) & 1
+		ud[4+i+64] = ((in.Src[2]) >> (7 - i)) & 1
+		ud[4+i+72] = ((in.Src[3]) >> (7 - i)) & 1
+		ud[4+i+80] = ((in.Src[4]) >> (7 - i)) & 1
+		ud[4+i+88] = ((in.Src[5]) >> (7 - i)) & 1
+	}
+
+	//unpack TYPE
+	for i := 0; i < 8; i++ {
+		ud[4+i+96] = ((in.Type[0]) >> (7 - i)) & 1
+		ud[4+i+104] = ((in.Type[1]) >> (7 - i)) & 1
+	}
+
+	//unpack META
+	for i := 0; i < 8; i++ {
+		ud[4+i+112] = ((in.Meta[0]) >> (7 - i)) & 1
+		ud[4+i+120] = ((in.Meta[1]) >> (7 - i)) & 1
+		ud[4+i+128] = ((in.Meta[2]) >> (7 - i)) & 1
+		ud[4+i+136] = ((in.Meta[3]) >> (7 - i)) & 1
+		ud[4+i+144] = ((in.Meta[4]) >> (7 - i)) & 1
+		ud[4+i+152] = ((in.Meta[5]) >> (7 - i)) & 1
+		ud[4+i+160] = ((in.Meta[6]) >> (7 - i)) & 1
+		ud[4+i+168] = ((in.Meta[7]) >> (7 - i)) & 1
+		ud[4+i+176] = ((in.Meta[8]) >> (7 - i)) & 1
+		ud[4+i+184] = ((in.Meta[9]) >> (7 - i)) & 1
+		ud[4+i+192] = ((in.Meta[10]) >> (7 - i)) & 1
+		ud[4+i+200] = ((in.Meta[11]) >> (7 - i)) & 1
+		ud[4+i+208] = ((in.Meta[12]) >> (7 - i)) & 1
+		ud[4+i+216] = ((in.Meta[13]) >> (7 - i)) & 1
+	}
+
+	//unpack CRC
+	for i := 0; i < 8; i++ {
+		ud[4+i+224] = ((in.CRC[0]) >> (7 - i)) & 1
+		ud[4+i+232] = ((in.CRC[1]) >> (7 - i)) & 1
+	}
+
+	//encode
+	for i := 0; i < 240+4; i++ {
+		G1 := (ud[i+4] + ud[i+1] + ud[i+0]) % 2
+		G2 := (ud[i+4] + ud[i+3] + ud[i+2] + ud[i+0]) % 2
+
+		//printf("%d%d", G1, G2);
+
+		if PuncturePattern1[p] != 0 {
+			out[pb] = G1
+			pb++
+		}
+
+		p++
+		p %= len(PuncturePattern1)
+
+		if PuncturePattern1[p] != 0 {
+			out[pb] = G2
+			pb++
+		}
+
+		p++
+		p %= len(PuncturePattern1)
+	}
+
+	//printf("pb=%d\n", pb);
+}
 
 // viterbi.c
 const (
@@ -363,26 +468,27 @@ func CRC(in []uint8) bool {
 }
 
 func SendPacket(lsf LSF, packetData []byte, out io.Writer) error {
-	// var full_packet = make([]float32, 0, 36*192*10)   //full packet, symbols as floats - 36 "frames" max (incl. preamble, LSF, EoT), 192 symbols each, sps=10:
-	// var enc_bits = make([]uint8, SymbolsPerPayload*2) //type-2 bits, unpacked
-	// var rf_bits = make([]uint8, SymbolsPerPayload*2)  //type-4 bits, unpacked
-	// //encode LSF data
-	// conv_encode_LSF(enc_bits, &lsf)
-	// //fill preamble
-	// // memset((uint8_t*)full_packet, 0, 36*192*10*sizeof(float));
-	// AppendPreamble(full_packet, PREAM_LSF)
+	var full_packet = make([]float32, 36*192*10) //full packet, symbols as floats - 36 "frames" max (incl. preamble, LSF, EoT), 192 symbols each, sps=10:
+	var enc_bits [SymbolsPerPayload * 2]uint8    //type-2 bits, unpacked
+	var rf_bits [SymbolsPerPayload * 2]uint8     //type-4 bits, unpacked
+	var pkt_sym_cnt uint32
 
-	// //send LSF syncword
-	// AppendSyncword(full_packet, SYNC_LSF)
+	//encode LSF data
+	conv_encode_LSF(&enc_bits, &lsf)
+	//fill preamble
+	AppendPreamble(full_packet, PREAM_LSF)
 
-	// //reorder bits
-	// reorder_bits(rf_bits, enc_bits)
+	//send LSF syncword
+	AppendSyncword(full_packet, SYNC_LSF)
 
-	// //randomize
-	// randomize_bits(rf_bits)
+	//reorder bits
+	reorder_bits(&rf_bits, &enc_bits)
 
-	// //fill packet with LSF
-	// gen_data(full_packet, &pkt_sym_cnt, rf_bits)
+	//randomize
+	randomize_bits(&rf_bits)
+
+	//fill packet with LSF
+	gen_data(full_packet, &pkt_sym_cnt, &rf_bits)
 
 	// for numBytes := len(packet); numBytes > 0; {
 	// 	//send packet frame syncword
@@ -482,8 +588,23 @@ func AppendSyncword(out []float32, syncword uint16) {
  * @param outp Reordered, unpacked type-4 bits.
  * @param inp Input unpacked type-2/3 bits.
  */
-func reorder_bits(outp []uint8, inp []uint8) {
+func reorder_bits(outp *[SymbolsPerPayload * 2]uint8, inp *[SymbolsPerPayload * 2]uint8) {
 	for i := 0; i < SymbolsPerPayload*2; i++ {
 		outp[i] = inp[IntrlSeq[i]]
+	}
+}
+
+/**
+ * @brief Generate symbol stream for frame contents (without the syncword).
+ * Can be used for both LSF and data frames.
+ *
+ * @param out Output buffer (184 floats).
+ * @param cnt Pointer to a variable holding the number of written symbols.
+ * @param in Data input - unpacked bits (1 bit per byte).
+ */
+func gen_data(out []float32, cnt *uint32, in *[SymbolsPerPayload * 2]uint8) {
+	for i := 0; i < SymbolsPerPayload; i++ { //40ms * 4800 - 8 (syncword)
+		out[(*cnt)] = float32(SymbolMap[in[2*i]*2+in[2*i+1]])
+		(*cnt)++
 	}
 }

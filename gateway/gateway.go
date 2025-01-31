@@ -128,19 +128,18 @@ func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out
 func (g Gateway) FromRelay(buf []byte) error {
 	log.Printf("[DEBUG] received packet from relay: %x", buf)
 	// A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
-	// dst := m17.DecodeCallsign(buf[4:10])
-	// src := m17.DecodeCallsign(buf[10:16])
+	// dst,_ := m17.DecodeCallsign(buf[4:10])
+	// src,_ := m17.DecodeCallsign(buf[10:16])
 	// typ := buf[16]
 	// data := buf[17:]
-	// lsf := m17.LSF{
-	// 	// A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
-	// 	Dst: [6]uint8([]byte(m17.DecodeCallsign(buf[4:10]))),
-	// 	Src: [6]uint8([]byte(m17.DecodeCallsign(buf[10:16]))),
-	// }
+	lsf := m17.LSF{
+		// A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
+		Dst: [6]uint8(buf[4:10]),
+		Src: [6]uint8(buf[10:16]),
+	}
 
 	// // encode packet and send to g.out
-	// return m17.SendPacket(lsf, buf[16:], g.out)
-	return nil
+	return m17.SendPacket(lsf, buf[16:], g.out)
 }
 
 func (g *Gateway) FromClient(lsf []byte, buf []byte) error {
@@ -287,7 +286,7 @@ func (g *Gateway) Run() {
 					}
 					// log.Printf("[DEBUG] len(dSoftBit): %d, dSoftBit: %s", len(dSoftBit), m)
 					//decode
-					_, err := m17.ViterbiDecodePunctured(frameData, dSoftBit, m17.PuncturePattern3)
+					e, err := m17.ViterbiDecodePunctured(frameData, dSoftBit, m17.PuncturePattern3)
 					if err != nil {
 						log.Printf("Error calling ViterbiDecodePunctured: %v", err)
 					}
@@ -303,11 +302,11 @@ func (g *Gateway) Run() {
 					//                 fprintf(stderr, "   \033[93mFrame %d Viterbi error:\033[39m %1.1f\n", rx_last?lastFN+1:rx_fn, (float)e/0xFFFF);
 					//             }
 					// log.Printf("[DEBUG] FN%d, (%d)", rx_fn, rx_last)
-					// if rx_last != 0 {
-					// 	log.Printf("[DEBUG] Frame %d Viterbi error: %1.1f", lastFN+1, float32(e)/float32(0xFFFF))
-					// } else {
-					// 	log.Printf("[DEBUG] Frame %d Viterbi error: %1.1f", rx_fn, float32(e)/float32(0xFFFF))
-					// }
+					if rx_last != 0 {
+						log.Printf("[DEBUG] Frame %d Viterbi error: %1.1f", lastFN+1, float32(e)/float32(0xFFFF))
+					} else {
+						log.Printf("[DEBUG] Frame %d Viterbi error: %1.1f", rx_fn, float32(e)/float32(0xFFFF))
+					}
 					// log.Printf("[DEBUG] frameData: %x %s", frameData[1:26], frameData[1:26])
 
 					//copy data - might require some fixing
@@ -352,6 +351,11 @@ func (g *Gateway) Run() {
 							//     fprintf(stderr, "\n");
 							// }
 						}
+						// cleanup
+						lsf = make([]uint8, 30+1)         //complete LSF (one byte extra needed for the Viterbi decoder)
+						frameData = make([]uint8, 26+1)   //decoded frame data, 206 bits, plus 4 flushing bits
+						packetData = make([]uint8, 33*25) //whole packet data
+
 					}
 
 				} else { //if it is LSF
@@ -444,9 +448,8 @@ func (g *Gateway) Run() {
 				syncd = false
 				pushed = 0
 
-				for i := 0; i < 8; i++ {
-					last[i] = 0.0
-				}
+				last = make([]float32, 8)
+
 			}
 
 		}
