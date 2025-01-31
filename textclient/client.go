@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jancona/m17text/m17"
 )
@@ -61,7 +62,7 @@ func handleM17(buf []byte) error {
 	typ := buf[16]
 	msg := string(buf[17:])
 	if typ == 0x05 && dst == *callsignArg {
-		fmt.Printf("\n< %s: %s\n> ", src, msg)
+		fmt.Printf("\n%s %s: %s\n> ", time.Now().Format(time.DateTime), src, msg)
 	}
 	return nil
 }
@@ -86,7 +87,8 @@ func handleConsoleInput(c *m17.Relay) {
 			command, callsign, message, ok := parseInput(input)
 			if !ok {
 				// Ignore bad input
-				return
+				fmt.Printf("Error parsing command \"%s\"\n", command)
+				continue
 			}
 
 			if command == "" {
@@ -114,9 +116,10 @@ func handleConsoleInput(c *m17.Relay) {
 //	/command message
 //	callsign: message
 func parseInput(input string) (command, callsign, message string, ok bool) {
-	if input[0:1] == "/" {
+	if input[0] == '/' {
 		// It's a command
-		command, message, ok = strings.Cut(input[1:], " ")
+		command, message, _ = strings.Cut(input[1:], " ")
+		ok = true
 		return
 	}
 	callsign, message, ok = strings.Cut(input, ": ")
