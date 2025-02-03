@@ -159,7 +159,9 @@ func (g *Gateway) FromClient(lsf []byte, buf []byte) error {
 }
 
 func (g *Gateway) Run() {
-	m17.ProcessSamples(g.in, g.FromClient)
+	// m17.ProcessSamples(g.in, g.FromClient)
+	d := m17.NewDecoder()
+	d.DecodeSamples(g.in, g.FromClient)
 	g.Close()
 	// // Run until we're terminated then clean up
 	// log.Print("[DEBUG] client: Waiting for close signal")

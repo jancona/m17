@@ -1,6 +1,7 @@
 package m17
 
 import (
+	"container/ring"
 	"fmt"
 	"log"
 	"math"
@@ -54,47 +55,60 @@ const (
 	// RRCDeviation             = 7168.0                                          //.rrc file deviation for +1.0 symbol
 )
 
-// sync.c
 const (
-	SYNC_LSF = uint16(0x55F7)
-	SYNC_STR = uint16(0xFF5D)
-	SYNC_PKT = uint16(0x75FF)
-	SYNC_BER = uint16(0xDF55)
-	EOT_MRKR = uint16(0x555D)
+	LSFSync    = uint16(0x55F7)
+	StreamSync = uint16(0xFF5D)
+	PacketSync = uint16(0x75FF)
+	BERTSync   = uint16(0xDF55)
+	EOTMarker  = uint16(0x555D)
 )
 
-// encode/symbols.c
-// syncword patterns (RX)
-// TODO: Compute those at runtime from the consts below
 var (
-	LsfSyncSymbols = []int8{+3, +3, +3, +3, -3, -3, +3, -3}
-	StrSyncSymbols = []int8{-3, -3, -3, -3, +3, +3, -3, +3}
-	PktSyncSymbols = []int8{+3, -3, +3, +3, -3, -3, -3, -3}
+	LSFSyncSymbols    = []float64{+3, +3, +3, +3, -3, -3, +3, -3}
+	StreamSyncSymbols = []float64{-3, -3, -3, -3, +3, +3, -3, +3}
+	PacketSyncSymbols = []float64{+3, -3, +3, +3, -3, -3, -3, -3}
+	BERTSyncSymbols   = []float64{-3, +3, -3, -3, +3, +3, +3, +3}
 )
 
 // decode/symbols.c
 // dibits-symbols map (TX)
 var (
-	SymbolMap = []int8{+1, +3, -1, -3}
+	SymbolMap = []float32{+1, +3, -1, -3}
 
 	// symbol list (RX)
-	SymbolList = []int8{-3, -1, +1, +3}
+	SymbolList = []float32{-3, -1, +1, +3}
 
 	// End of Transmission symbol pattern
-	EOTSymbols = []int8{+3, +3, +3, +3, +3, +3, -3, +3}
+	EOTSymbols = []float32{+3, +3, +3, +3, +3, +3, -3, +3}
 )
 
-// math.c
+// Calculate distance between recent samples and sync patterns
+func SyncDistance(r *ring.Ring) (float32, uint16) {
+	var lsf, pkt, str, bert float64
 
-// Calculate L2 norm between two n-dimensional vectors of floats.
-func EuclNorm(in1 []float32, in2 []int8) float32 {
-	var tmp float32
-
-	for i := range in1 {
-		tmp += (in1[i] - float32(in2[i])) * (in1[i] - float32(in2[i]))
+	for i := 0; i < 8; i++ {
+		var v float64
+		if r.Value != nil {
+			v = float64(r.Value.(float32))
+		}
+		lsf += math.Pow(v-LSFSyncSymbols[i], 2)
+		pkt += math.Pow(v-PacketSyncSymbols[i], 2)
+		str += math.Pow(v-StreamSyncSymbols[i], 2)
+		bert += math.Pow(v-BERTSyncSymbols[i], 2)
+		r = r.Next()
 	}
 
-	return float32(math.Sqrt(float64(tmp)))
+	switch min(lsf, pkt, str, bert) {
+	case bert:
+		return float32(bert), BERTSync
+	case pkt:
+		return float32(pkt), PacketSync
+	case str:
+		return float32(str), StreamSync
+	// case lsf:
+	default:
+		return float32(lsf), LSFSync
+	}
 }
 
 // Utility function returning the absolute value of a difference between two fixed-point values.
@@ -301,7 +315,7 @@ func ViterbiDecodePunctured(out []uint8, in []uint16, punct []uint8) (int, error
 	if len(in) > 244*2 {
 		return 0, fmt.Errorf("input size %d exceeds max history", len(in))
 	}
-	// log.Printf("[DEBUG] ViterbiDecodePunctured len(out): %d, len(in): %d, len(punct): %d", len(out), len(in), len(punct))
+	log.Printf("[DEBUG] ViterbiDecodePunctured len(out): %d, len(in): %d, len(punct): %d", len(out), len(in), len(punct))
 
 	umsg := make([]uint16, 244*2) //unpunctured message
 	p := 0                        //puncturer matrix entry
@@ -329,7 +343,7 @@ func ViterbiDecodePunctured(out []uint8, in []uint16, punct []uint8) (int, error
 	// for i := 0; i < len(umsg); i++ {
 	// 	m += fmt.Sprintf("%04X", umsg[i])
 	// }
-	// log.Printf("[DEBUG] u: %d, len(umsg): %d, umsg: %s", u, len(umsg), m)
+	// log.Printf("[DEBUG] u: %d, len(umsg): %d", u, len(umsg))
 
 	ret, err := ViterbiDecode(out, umsg)
 	if err != nil {
@@ -390,10 +404,7 @@ func ViterbiChainback(out []uint8, pos int, l int) uint32 {
 	bitPos := l + 4
 
 	//  memset(out, 0, (len-1)/8+1);
-	if (l-1)/8+1 > len(out) {
-		log.Printf("[INFO] Prevented array overflow (l-1)/8+1: %d len(out): %d\n(out: %#v, pos: %d, l: %d)", (l-1)/8+1, len(out), out, pos, l)
-	}
-	for i := 0; i < min(len(out), (l-1)/8+1); i++ {
+	for i := 0; i < len(out); i++ {
 		out[i] = 0
 	}
 
