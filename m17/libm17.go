@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-
-	"github.com/sigurn/crc16"
 )
 
 // m17.h
@@ -33,16 +31,6 @@ const (
 )
 
 // M17 C library - payload
-/**
- * @brief Structure holding Link Setup Frame data.
- */
-type LSF struct {
-	Dst  [6]uint8
-	Src  [6]uint8
-	Type [2]uint8
-	Meta [112 / 8]uint8
-	CRC  [2]uint8
-}
 
 const (
 	// M17 C library - lib/lib.c
@@ -455,20 +443,4 @@ func ViterbiReset() {
 	// memset((uint8_t*)currMetricsData, 0, 4*M17_CONVOL_STATES);
 	// memset((uint8_t*)prevMetricsData, 0, 4*M17_CONVOL_STATES);
 
-}
-
-//
-
-// M17 CRC polynomial
-var m17CRCParams = crc16.Params{
-	Poly: 0x5935,
-	Init: 0xffff,
-	Name: "M17",
-}
-
-// Calculate CRC value.
-func CRC(in []uint8) bool {
-	table := crc16.MakeTable(m17CRCParams)
-
-	return crc16.Checksum(in, table) == 0
 }

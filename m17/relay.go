@@ -25,11 +25,11 @@ type Relay struct {
 	Callsign        string
 	conn            *net.UDPConn
 	connected       bool
-	handler         func([]byte) error
+	handler         func(Packet) error
 	done            bool
 }
 
-func NewM17Relay(server string, port uint, module string, callsign string, handler func([]byte) error) (*Relay, error) {
+func NewM17Relay(server string, port uint, module string, callsign string, handler func(p Packet) error) (*Relay, error) {
 	cs, err := EncodeCallsign(callsign)
 	if err != nil {
 		return nil, fmt.Errorf("bad callsign %s: %w", callsign, err)
@@ -86,7 +86,7 @@ func (c *Relay) Handle() {
 			}
 		}
 		buffer = buffer[:l]
-		// fmt.Printf("packet received from: %s, buffer:\n%#v\n%s\n", rmAddr, buffer, string(buffer[:4]))
+		// fmt.Printf("packet received, len: %d:\n%#v\n%s\n", l, buffer, string(buffer[:4]))
 		if l < 4 {
 			// too short
 			continue
@@ -102,22 +102,30 @@ func (c *Relay) Handle() {
 			c.sendPONG()
 		// case magicINFO:
 		case magicM17:
-			c.handler(buffer)
+			p := NewPacketFromBytes(buffer[4:])
+			c.handler(p)
 		}
 	}
 }
 
 func (c *Relay) SendMessage(dst []byte, src []byte, message string) error {
+	lsf := LSF{
+		Dst: dst,
+		Src: src,
+	}
+	lsf.CalcCRC()
+
 	msg := []byte(message)
 	if len(msg) > 821 {
 		msg = msg[:821]
 	}
-	cmd := make([]byte, 17+len(msg))
-	copy(cmd, []byte(magicM17))
-	copy(cmd[4:10], dst)
-	copy(cmd[10:16], src)
-	cmd[16] = 0x05
-	copy(cmd[17:], msg)
+	p := NewPacket(lsf, PacketTypeSMS, msg)
+
+	cmd := make([]byte, 0, LSFSize+1+len(msg)+2)
+	cmd = append(cmd, []byte(magicM17)...)
+	cmd = append(cmd, p.ToBytes()...)
+	// log.Printf("[DEBUG] p: %#v, cmd: %#v", p, cmd)
+
 	_, err := c.conn.Write(cmd)
 	if err != nil {
 		return fmt.Errorf("error sending text message: %w", err)

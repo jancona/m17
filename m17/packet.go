@@ -1,17 +1,156 @@
 package m17
 
 import (
+	"encoding/binary"
+	"fmt"
 	"io"
+	"unicode/utf8"
 )
 
-func SendPacket(lsf LSF, packetData []byte, out io.Writer) error {
+type LSFType byte
+type LSFDataType byte
+type LSFEncryptionType byte
+type LSFEncryptionSubtype byte
+
+const (
+	LSFTypePacket LSFType = iota
+	LSFTypeStream
+
+	LSFDataTypeReserved LSFDataType = iota
+	LSFDataTypeData
+	LSFDataTypeVoice
+	LSFDataTypeVoiceData
+
+	LSFEncryptionTypeNone LSFEncryptionType = iota
+	LSFEncryptionTypeScrambler
+	LSFEncryptionTypeAES
+	LSFEncryptionTypeOther
+)
+
+type PacketType rune
+
+const (
+	PacketTypeRAW     PacketType = 0x00
+	PacketTypeAX25    PacketType = 0x01
+	PacketTypeAPRS    PacketType = 0x02
+	PacketType6LoWPAN PacketType = 0x03
+	PacketTypeIPv4    PacketType = 0x04
+	PacketTypeSMS     PacketType = 0x05
+	PacketTypeWinlink PacketType = 0x06
+)
+
+const (
+	LSFSize = 30
+
+	metaSize = 112 / 8
+)
+
+// Link Setup Frame
+type LSF struct {
+	Dst  []byte
+	Src  []byte
+	Type []byte
+	Meta []byte
+	CRC  []byte
+}
+
+func NewLSFFromBytes(buf []byte) LSF {
+	var lsf LSF
+	lsf.Dst = buf[0:6]
+	lsf.Src = buf[6:12]
+	lsf.Type = buf[12:14]
+	lsf.Meta = buf[14 : 14+metaSize]
+	lsf.CRC = buf[14+metaSize : 14+metaSize+2]
+	return lsf
+}
+func NewLSF(dst string, src string, signed bool, can byte, typ LSFType, dt LSFDataType, et LSFEncryptionType, est LSFEncryptionSubtype, meta []byte) (LSF, error) {
+	var lsf = LSF{
+		Type: make([]byte, 2),
+	}
+	var err error
+
+	lsf.Dst, err = EncodeCallsign(dst)
+	if err != nil {
+		return lsf, fmt.Errorf("error encoding dst: %w", err)
+	}
+	lsf.Src, err = EncodeCallsign(src)
+	if err != nil {
+		return lsf, fmt.Errorf("error encoding src: %w", err)
+	}
+	t1 := can & 0x0f
+	if signed {
+		t1 |= 0x10
+	}
+	t2 := byte(typ&0x1) | byte(dt&0x3<<1) | byte(et&0x3<<3) | byte(est&0x3<<5)
+	lsf.Type[0] = t1
+	lsf.Type[1] = t2
+	lsf.Meta = meta[:metaSize]
+	lsf.CalcCRC()
+	return lsf, err
+}
+
+// Convert this LSF to a byte slice suitable for transmission
+func (l *LSF) ToBytes() []byte {
+	b := make([]byte, LSFSize)
+
+	copy(b[0:6], l.Dst)
+	copy(b[6:12], l.Src)
+	copy(b[12:14], l.Type)
+	copy(b[14:14+metaSize], l.Meta)
+	copy(b[14+metaSize:14+metaSize+2], l.CRC)
+	// log.Printf("[DEBUG] LSF.ToBytes(): %#v", b)
+
+	return b
+}
+
+// Calculate CRC for this LSF
+func (l *LSF) CalcCRC() {
+	a := l.ToBytes()
+	l.CRC, _ = binary.Append(nil, binary.BigEndian, CRC(a[:LSFSize-2]))
+}
+
+// M17 packet
+type Packet struct {
+	LSF     LSF
+	Type    PacketType
+	Payload []byte
+}
+
+func NewPacketFromBytes(buf []byte) Packet {
+	var p Packet
+	p.LSF = NewLSFFromBytes(buf[:LSFSize])
+	t, size := utf8.DecodeRune(buf[LSFSize:])
+	p.Type = PacketType(t)
+	p.Payload = buf[LSFSize+size:]
+	return p
+}
+func NewPacket(lsf LSF, t PacketType, data []byte) Packet {
+	p := Packet{
+		LSF:  lsf,
+		Type: t,
+	}
+	p.Payload = append(p.Payload, data...)
+	binary.Append(p.Payload, binary.BigEndian, CRC(data))
+	return p
+}
+
+// Convert this Packet to a byte slice suitable for transmission
+func (p *Packet) ToBytes() []byte {
+	b := make([]byte, LSFSize+1+len(p.Payload))
+	copy(b[:LSFSize], p.LSF.ToBytes())
+	size := utf8.EncodeRune(b[LSFSize:], rune(p.Type))
+	copy(b[LSFSize+size:], p.Payload)
+	return b
+}
+
+func SendPacket(p Packet, out io.Writer) error {
 	var full_packet = make([]float32, 36*192*10) //full packet, symbols as floats - 36 "frames" max (incl. preamble, LSF, EoT), 192 symbols each, sps=10:
 	var enc_bits [SymbolsPerPayload * 2]uint8    //type-2 bits, unpacked
 	var rf_bits [SymbolsPerPayload * 2]uint8     //type-4 bits, unpacked
 	var pkt_sym_cnt uint32
 
 	//encode LSF data
-	conv_encode_LSF(&enc_bits, &lsf)
+	conv_encode_LSF(&enc_bits, &p.LSF)
 	//fill preamble
 	AppendPreamble(full_packet, PREAM_LSF)
 

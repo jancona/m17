@@ -132,7 +132,7 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromClient func([]uint8, []uint8) 
 					// copy(lsf, lsf[1:])
 					d.lsf = d.lsf[1:]
 					log.Printf("[DEBUG] d.lsf: %x", d.lsf)
-					if !CRC(d.lsf) {
+					if CRC(d.lsf) != 0 {
 						log.Printf("[DEBUG] Bad LSF CRC.")
 					} else {
 						dst, err := DecodeCallsign(d.lsf[0:6])
@@ -184,7 +184,7 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromClient func([]uint8, []uint8) 
 						d.packetData = d.packetData[:(d.latestFrameNum+1)*25+frameNumOrByteCnt]
 						// fprintf(stderr, " \033[93mContent\033[39m\n");
 
-						if CRC(d.lsf) && CRC(d.packetData) {
+						if CRC(d.lsf) == 0 && CRC(d.packetData) == 0 {
 							fromClient(d.lsf, d.packetData)
 						}
 						// cleanup

@@ -124,21 +124,16 @@ func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out
 	return &g, nil
 }
 
-func (g Gateway) FromRelay(buf []byte) error {
-	log.Printf("[DEBUG] received packet from relay: %x", buf)
+func (g Gateway) FromRelay(p m17.Packet) error {
+	// log.Printf("[DEBUG] received packet from relay: %x", p)
 	// A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
 	// dst,_ := m17.DecodeCallsign(buf[4:10])
 	// src,_ := m17.DecodeCallsign(buf[10:16])
 	// typ := buf[16]
 	// data := buf[17:]
-	lsf := m17.LSF{
-		// A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
-		Dst: [6]uint8(buf[4:10]),
-		Src: [6]uint8(buf[10:16]),
-	}
 
 	// // encode packet and send to g.out
-	return m17.SendPacket(lsf, buf[16:], g.out)
+	return m17.SendPacket(p, g.out)
 }
 
 func (g *Gateway) FromClient(lsf []byte, buf []byte) error {
