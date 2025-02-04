@@ -2,7 +2,6 @@ package m17
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"unicode/utf8"
 )
@@ -63,31 +62,32 @@ func NewLSFFromBytes(buf []byte) LSF {
 	lsf.CRC = buf[14+metaSize : 14+metaSize+2]
 	return lsf
 }
-func NewLSF(dst string, src string, signed bool, can byte, typ LSFType, dt LSFDataType, et LSFEncryptionType, est LSFEncryptionSubtype, meta []byte) (LSF, error) {
-	var lsf = LSF{
-		Type: make([]byte, 2),
-	}
-	var err error
 
-	lsf.Dst, err = EncodeCallsign(dst)
-	if err != nil {
-		return lsf, fmt.Errorf("error encoding dst: %w", err)
-	}
-	lsf.Src, err = EncodeCallsign(src)
-	if err != nil {
-		return lsf, fmt.Errorf("error encoding src: %w", err)
-	}
-	t1 := can & 0x0f
-	if signed {
-		t1 |= 0x10
-	}
-	t2 := byte(typ&0x1) | byte(dt&0x3<<1) | byte(et&0x3<<3) | byte(est&0x3<<5)
-	lsf.Type[0] = t1
-	lsf.Type[1] = t2
-	lsf.Meta = meta[:metaSize]
-	lsf.CalcCRC()
-	return lsf, err
-}
+// func NewLSF(dst string, src string, signed bool, can byte, typ LSFType, dt LSFDataType, et LSFEncryptionType, est LSFEncryptionSubtype, meta []byte) (LSF, error) {
+// 	var lsf = LSF{
+// 		Type: make([]byte, 2),
+// 	}
+// 	var err error
+
+// 	lsf.Dst, err = EncodeCallsign(dst)
+// 	if err != nil {
+// 		return lsf, fmt.Errorf("error encoding dst: %w", err)
+// 	}
+// 	lsf.Src, err = EncodeCallsign(src)
+// 	if err != nil {
+// 		return lsf, fmt.Errorf("error encoding src: %w", err)
+// 	}
+// 	t1 := can & 0x0f
+// 	if signed {
+// 		t1 |= 0x10
+// 	}
+// 	t2 := byte(typ&0x1) | byte(dt&0x3<<1) | byte(et&0x3<<3) | byte(est&0x3<<5)
+// 	lsf.Type[0] = t1
+// 	lsf.Type[1] = t2
+// 	lsf.Meta = meta[:metaSize]
+// 	lsf.CalcCRC()
+// 	return lsf, err
+// }
 
 // Convert this LSF to a byte slice suitable for transmission
 func (l *LSF) ToBytes() []byte {
@@ -104,9 +104,10 @@ func (l *LSF) ToBytes() []byte {
 }
 
 // Calculate CRC for this LSF
-func (l *LSF) CalcCRC() {
+func (l *LSF) CalcCRC() []byte {
 	a := l.ToBytes()
 	l.CRC, _ = binary.Append(nil, binary.BigEndian, CRC(a[:LSFSize-2]))
+	return l.CRC
 }
 
 // M17 packet
@@ -130,7 +131,7 @@ func NewPacket(lsf LSF, t PacketType, data []byte) Packet {
 		Type: t,
 	}
 	p.Payload = append(p.Payload, data...)
-	binary.Append(p.Payload, binary.BigEndian, CRC(data))
+	p.Payload, _ = binary.Append(p.Payload, binary.BigEndian, CRC(data))
 	return p
 }
 

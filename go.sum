@@ -1,4 +1,6 @@
 github.com/hashicorp/logutils v1.0.0 h1:dLEQVugN8vlakKOUE3ihGLTZJRB4j+M2cdTm/ORI65Y=
 github.com/hashicorp/logutils v1.0.0/go.mod h1:QIAnNjmIWmVIIkWDTG1z5v++HQmx9WQRO+LraFDTW64=
+github.com/icza/gog v0.0.0-20241010132004-5da24f18211d h1:ZA56WhTKshNVDTPwit0Opb4FXRQUd5kcABgjAOa68ro=
+github.com/icza/gog v0.0.0-20241010132004-5da24f18211d/go.mod h1:xsNydfFX2ys7eKRjtg6cArkYGQ3GPKZn4GGwQ0cUk5E=
 github.com/sigurn/crc16 v0.0.0-20240131213347-83fcde1e29d1 h1:NVK+OqnavpyFmUiKfUMHrpvbCi2VFoWTrcpI7aDaJ2I=
 github.com/sigurn/crc16 v0.0.0-20240131213347-83fcde1e29d1/go.mod h1:9/etS5gpQq9BJsJMWg1wpLbfuSnkm8dPF6FdW2JXVhA=
