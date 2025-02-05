@@ -74,17 +74,24 @@ var (
 func SyncDistance(r *ring.Ring) (float32, uint16) {
 	var lsf, pkt, str, bert float64
 
+	// msg := "[DEBUG] ring: ["
 	for i := 0; i < 8; i++ {
 		var v float64
 		if r.Value != nil {
 			v = float64(r.Value.(float32))
 		}
+		// msg += fmt.Sprintf("%3.5f, ", v)
 		lsf += math.Pow(v-LSFSyncSymbols[i], 2)
 		pkt += math.Pow(v-PacketSyncSymbols[i], 2)
 		str += math.Pow(v-StreamSyncSymbols[i], 2)
 		bert += math.Pow(v-BERTSyncSymbols[i], 2)
 		r = r.Next()
 	}
+	lsf = math.Sqrt(lsf)
+	pkt = math.Sqrt(pkt)
+	str = math.Sqrt(str)
+	bert = math.Sqrt(bert)
+	// log.Printf(msg+"] lsf: %3.5f, pkt: %3.5f", lsf, pkt)
 
 	switch min(lsf, pkt, str, bert) {
 	case bert:
@@ -278,7 +285,6 @@ func ViterbiDecode(out []uint8, in []uint16) (int, error) {
 	if len(in) > 244*2 {
 		return 0, fmt.Errorf("input size %d exceeds max history", len(in))
 	}
-
 	ViterbiReset()
 
 	pos := 0
@@ -332,11 +338,12 @@ func ViterbiDecodePunctured(out []uint8, in []uint16, punct []uint8) (int, error
 	// 	m += fmt.Sprintf("%04X", umsg[i])
 	// }
 	// log.Printf("[DEBUG] u: %d, len(umsg): %d", u, len(umsg))
-
+	// log.Printf("[DEBUG] ViterbiDecode in:\nout: %#v, umsg: %#v", out, umsg)
 	ret, err := ViterbiDecode(out, umsg)
 	if err != nil {
 		return 0, err
 	}
+	// log.Printf("[DEBUG] ViterbiDecode out:\nout: %#v, umsg: %#v", out, umsg)
 	return ret - (u-len(in))*0x7FFF, nil
 }
 

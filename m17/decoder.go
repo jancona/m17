@@ -59,6 +59,7 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromClient func([]uint8, []uint8) 
 			d.last = d.last.Next()
 			//calculate euclidean norm
 			dist, typ := SyncDistance(d.last)
+			// log.Printf("[DEBUG] sample: %3.5f, dist: %3.5f, typ: %d", sample, dist, typ)
 			if dist < decoderDistThresh { //frame syncword detected
 				log.Printf("[DEBUG] sync distance: %f, type: %x", dist, typ)
 

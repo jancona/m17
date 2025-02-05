@@ -147,7 +147,7 @@ func (g *Gateway) FromClient(lsf []byte, buf []byte) error {
 	if err != nil {
 		log.Printf("[INFO] binary.Read failed: %v", err)
 	}
-	log.Printf("[DEBUG] length: %d, crc: %x, CRC ok: %v, type %02X: %s", l, crc, m17.CRC(buf), t, text)
+	log.Printf("[DEBUG] length: %d, crc: %x, CRC ok: %v, type %02X: %s", l, crc, m17.CRC(buf) == 0, t, text)
 	// TODO: Handle error?
 	g.relay.SendMessage(lsf[0:6], lsf[6:12], text)
 	return nil
