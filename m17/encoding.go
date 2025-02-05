@@ -1,20 +1,3 @@
-/*
-Copyright (C) 2024 Steve Miller KC1AWV
-
-This program is free software: you can redistribute it and/or modify it
-under the terms of the GNU General Public License as published by the Free
-Software Foundation, either version 3 of the License, or (at your option)
-any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT
-ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
-more details.
-
-You should have received a copy of the GNU General Public License along with
-this program. If not, see <http://www.gnu.org/licenses/>.
-*/
-
 package m17
 
 import (
@@ -29,12 +12,11 @@ const (
 	EncodedDestinationAll = 0xFFFFFFFFFFFF
 	MaxEncodedCallsign    = 0xEE6B27FFFFFF
 	SpecialEncodedRange   = 268697600000000 //40^9+40^8
-
 )
 
 var EncodedDestinationAllBytes = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
-const base40Chars = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/."
+const m17Chars = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/."
 
 func EncodeCallsign(callsign string) ([]byte, error) {
 	if len(callsign) > MaxCallsignLen {
@@ -48,52 +30,57 @@ func EncodeCallsign(callsign string) ([]byte, error) {
 	if callsign[0] == '#' {
 		start = 1
 	}
-	address := uint64(0)
 
-	for i := len(callsign) - 1; i >= start; i-- {
-		c := callsign[i]
-		val := 0
+	var address uint64 = 0 // the calculate address in host byte order
+	var ret = make([]byte, 6)
+
+	// process each char from the end to the beginning
+	for i := min(len(callsign), 9) - 1; i >= start; i-- {
+		var val byte = 0
 		switch {
-		case 'A' <= c && c <= 'Z':
-			val = int(c-'A') + 1
-		case '0' <= c && c <= '9':
-			val = int(c-'0') + 27
-		case c == '-':
-			val = 37
-		case c == '/':
-			val = 38
-		case c == '.':
-			val = 39
-		default:
-			return nil, fmt.Errorf("invalid character in callsign: %c", c)
-		}
+		case 'A' <= callsign[i] && callsign[i] <= 'Z':
+			val = callsign[i] - 'A' + 1
 
-		address = address*40 + uint64(val)
+		case '0' <= callsign[i] && callsign[i] <= '9':
+			val = callsign[i] - '0' + 27
+		case callsign[i] == '-':
+			val = 37
+		case callsign[i] == '/':
+			val = 38
+		case callsign[i] == '.':
+			val = 39
+		case 'a' <= callsign[i] && callsign[i] <= 'z':
+			val = callsign[i] - 'a' + 1
+		}
+		address = 40*address + uint64(val)
 	}
 
-	if start == 1 { //starts with a hash?
+	if start == 1 { // starts with a hash?
 		address += MaxEncodedCallsign + 1 //40^9
 	}
 
-	result := make([]byte, 6)
-	for i := 5; i >= 0; i-- {
-		result[i] = byte(address & 0xFF)
-		address >>= 8
+	for i := 5; i >= 0; i-- { // put it in network byte order
+		ret[i] = byte(address & 0xff)
+		address /= 0x100
 	}
-
-	return result, nil
+	return ret, nil
 }
 
 func DecodeCallsign(encoded []byte) (string, error) {
 	if len(encoded) != EncodedLen {
 		return "", fmt.Errorf("encoded callsign length (%d) != %d", len(encoded), EncodedLen)
 	}
-	var address uint64
-	for _, b := range encoded {
-		address = address*256 + uint64(b)
+	var callsign string
+	if encoded == nil { // nothing in , nothing out
+		return callsign, nil
+	}
+	// calculate the address in host byte order
+	var address uint64 = 0
+
+	for i := 0; i < 6; i++ {
+		address = address*0x100 + uint64(encoded[i])
 	}
 
-	callsign := ""
 	if address == EncodedDestinationAll {
 		return DestinationAll, nil
 	} else if address > MaxEncodedCallsign {
@@ -104,11 +91,10 @@ func DecodeCallsign(encoded []byte) (string, error) {
 		address -= MaxEncodedCallsign + 1
 	}
 
-	for address > 0 {
-		idx := address % 40
-		callsign += string(base40Chars[idx])
-		address /= 40
+	for i := 0; address != 0; i++ {
+		// the current character is the address modulus 40
+		callsign += string(m17Chars[address%40])
+		address /= 40 // keep dividing the address until there ’s nothing left
 	}
-
 	return callsign, nil
 }
