@@ -3,6 +3,7 @@ package m17
 import (
 	"encoding/binary"
 	"io"
+	"log"
 	"unicode/utf8"
 )
 
@@ -115,6 +116,7 @@ type Packet struct {
 	LSF     LSF
 	Type    PacketType
 	Payload []byte
+	CRC     uint16
 }
 
 func NewPacketFromBytes(buf []byte) Packet {
@@ -122,7 +124,12 @@ func NewPacketFromBytes(buf []byte) Packet {
 	p.LSF = NewLSFFromBytes(buf[:LSFSize])
 	t, size := utf8.DecodeRune(buf[LSFSize:])
 	p.Type = PacketType(t)
-	p.Payload = buf[LSFSize+size:]
+	p.Payload = buf[LSFSize+size : len(buf)-2]
+	_, err := binary.Decode(buf[len(buf)-2:], binary.BigEndian, &p.CRC)
+	if err != nil {
+		// should never happen
+		log.Printf("[ERROR] Error decoding CRC: %v", err)
+	}
 	return p
 }
 func NewPacket(lsf LSF, t PacketType, data []byte) Packet {
@@ -131,16 +138,22 @@ func NewPacket(lsf LSF, t PacketType, data []byte) Packet {
 		Type: t,
 	}
 	p.Payload = append(p.Payload, data...)
-	p.Payload, _ = binary.Append(p.Payload, binary.BigEndian, CRC(data))
+	p.CRC = CRC(data)
 	return p
 }
 
 // Convert this Packet to a byte slice suitable for transmission
 func (p *Packet) ToBytes() []byte {
-	b := make([]byte, LSFSize+1+len(p.Payload))
+	typ := utf8.AppendRune(nil, rune(p.Type))
+	b := make([]byte, LSFSize+len(typ)+len(p.Payload)+2)
 	copy(b[:LSFSize], p.LSF.ToBytes())
-	size := utf8.EncodeRune(b[LSFSize:], rune(p.Type))
-	copy(b[LSFSize+size:], p.Payload)
+	copy(b[LSFSize:], typ)
+	l := copy(b[LSFSize+len(typ):], p.Payload)
+	_, err := binary.Encode(b[LSFSize+len(typ)+l:], binary.BigEndian, p.CRC)
+	if err != nil {
+		// should never happen
+		log.Printf("[ERROR] Error encoding CRC: %v", err)
+	}
 	return b
 }
 
