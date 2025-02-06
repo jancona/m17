@@ -37,7 +37,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	r, err := m17.NewM17Relay(*serverArg, *portArg, *moduleArg, *callsignArg, handleM17)
+	r, err := m17.NewRelay(*serverArg, *portArg, *moduleArg, *callsignArg, handleM17)
 	if err != nil {
 		fmt.Printf("Error creating client: %v", err)
 		os.Exit(1)
@@ -71,8 +71,8 @@ func handleM17(p m17.Packet) error {
 		fmt.Fprintf(os.Stderr, "Bad src callsign: %v", err)
 	}
 	msg := string(p.Payload)
-	if p.Type == 0x05 && (dst == *callsignArg || dst == m17.DestinationAll) {
-		fmt.Printf("\n%s %s: %s\n> ", time.Now().Format(time.DateTime), src, msg)
+	if p.Type == m17.PacketTypeSMS && (dst == *callsignArg || dst == m17.DestinationAll) {
+		fmt.Printf("\n%s %s>%s: %s\n> ", time.Now().Format(time.DateTime), src, dst, msg)
 	}
 	return nil
 }

@@ -2,8 +2,10 @@ package m17
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log"
+	"math"
 	"unicode/utf8"
 )
 
@@ -64,32 +66,6 @@ func NewLSFFromBytes(buf []byte) LSF {
 	return lsf
 }
 
-// func NewLSF(dst string, src string, signed bool, can byte, typ LSFType, dt LSFDataType, et LSFEncryptionType, est LSFEncryptionSubtype, meta []byte) (LSF, error) {
-// 	var lsf = LSF{
-// 		Type: make([]byte, 2),
-// 	}
-// 	var err error
-
-// 	lsf.Dst, err = EncodeCallsign(dst)
-// 	if err != nil {
-// 		return lsf, fmt.Errorf("error encoding dst: %w", err)
-// 	}
-// 	lsf.Src, err = EncodeCallsign(src)
-// 	if err != nil {
-// 		return lsf, fmt.Errorf("error encoding src: %w", err)
-// 	}
-// 	t1 := can & 0x0f
-// 	if signed {
-// 		t1 |= 0x10
-// 	}
-// 	t2 := byte(typ&0x1) | byte(dt&0x3<<1) | byte(et&0x3<<3) | byte(est&0x3<<5)
-// 	lsf.Type[0] = t1
-// 	lsf.Type[1] = t2
-// 	lsf.Meta = meta[:metaSize]
-// 	lsf.CalcCRC()
-// 	return lsf, err
-// }
-
 // Convert this LSF to a byte slice suitable for transmission
 func (l *LSF) ToBytes() []byte {
 	b := make([]byte, LSFSize)
@@ -105,10 +81,11 @@ func (l *LSF) ToBytes() []byte {
 }
 
 // Calculate CRC for this LSF
-func (l *LSF) CalcCRC() []byte {
+func (l *LSF) CalcCRC() uint16 {
 	a := l.ToBytes()
-	l.CRC, _ = binary.Append(nil, binary.BigEndian, CRC(a[:LSFSize-2]))
-	return l.CRC
+	crc := CRC(a[:LSFSize-2])
+	l.CRC, _ = binary.Append(nil, binary.BigEndian, crc)
+	return crc
 }
 
 // M17 packet
@@ -138,18 +115,25 @@ func NewPacket(lsf LSF, t PacketType, data []byte) Packet {
 		Type: t,
 	}
 	p.Payload = append(p.Payload, data...)
-	p.CRC = CRC(data)
+	pb := p.PayloadBytes()
+	p.CRC = CRC(pb[:len(pb)-2])
 	return p
 }
 
 // Convert this Packet to a byte slice suitable for transmission
 func (p *Packet) ToBytes() []byte {
-	typ := utf8.AppendRune(nil, rune(p.Type))
-	b := make([]byte, LSFSize+len(typ)+len(p.Payload)+2)
+	pb := p.PayloadBytes()
+	b := make([]byte, LSFSize+len(pb))
 	copy(b[:LSFSize], p.LSF.ToBytes())
-	copy(b[LSFSize:], typ)
-	l := copy(b[LSFSize+len(typ):], p.Payload)
-	_, err := binary.Encode(b[LSFSize+len(typ)+l:], binary.BigEndian, p.CRC)
+	copy(b[LSFSize:], pb)
+	return b
+}
+
+// Convert the payload (type, message and CRC) to a byte slice suitable for transmission
+func (p *Packet) PayloadBytes() []byte {
+	b := utf8.AppendRune(nil, rune(p.Type))
+	b = append(b, p.Payload...)
+	b, err := binary.Append(b, binary.BigEndian, p.CRC)
 	if err != nil {
 		// should never happen
 		log.Printf("[ERROR] Error encoding CRC: %v", err)
@@ -157,19 +141,24 @@ func (p *Packet) ToBytes() []byte {
 	return b
 }
 
-func SendPacket(p Packet, out io.Writer) error {
-	var full_packet = make([]float32, 36*192*10) //full packet, symbols as floats - 36 "frames" max (incl. preamble, LSF, EoT), 192 symbols each, sps=10:
-	var enc_bits [SymbolsPerPayload * 2]uint8    //type-2 bits, unpacked
-	var rf_bits [SymbolsPerPayload * 2]uint8     //type-4 bits, unpacked
-	var pkt_sym_cnt uint32
+func (p *Packet) Send(out io.Writer) error {
+	var full_packet = make([]float32, 0, 36*192*10) //full packet, symbols as floats - 36 "frames" max (incl. preamble, LSF, EoT), 192 symbols each, sps=10:
+	var enc_bits [SymbolsPerPayload * 2]uint8       //type-2 bits, unpacked
+	var rf_bits [SymbolsPerPayload * 2]uint8        //type-4 bits, unpacked
+	// var pkt_sym_cnt uint32
+	var pkt_chunk = make([]uint8, 25+1) //chunk of Packet Data, up to 25 bytes plus 6 bits of Packet Metadata
+	var full_packet_data = p.PayloadBytes()
 
 	//encode LSF data
+	// lcrc := p.LSF.CalcCRC()
+	// pcrc := CRC(full_packet_data[:len(full_packet_data)-2])
+	// log.Printf("[DEBUG] lsf: %#v, lcrc: %x, packetData: %#v, pcrc: %x", p.LSF.ToBytes(), lcrc, full_packet_data, pcrc)
 	conv_encode_LSF(&enc_bits, &p.LSF)
 	//fill preamble
-	AppendPreamble(full_packet, PREAM_LSF)
+	full_packet = AppendPreamble(full_packet, PREAM_LSF)
 
 	//send LSF syncword
-	AppendSyncword(full_packet, LSFSync)
+	full_packet = AppendSyncword(full_packet, LSFSync)
 
 	//reorder bits
 	reorder_bits(&rf_bits, &enc_bits)
@@ -178,70 +167,110 @@ func SendPacket(p Packet, out io.Writer) error {
 	randomize_bits(&rf_bits)
 
 	//fill packet with LSF
-	gen_data(full_packet, &pkt_sym_cnt, &rf_bits)
+	full_packet = gen_data(full_packet, &rf_bits)
 
-	// for numBytes := len(packet); numBytes > 0; {
-	// 	//send packet frame syncword
-	// 	GenSyncword(packet, &pkt_sym_cnt, SYNC_PKT)
+	pkt_cnt := 0
+	numBytes := len(full_packet_data)
+	tmp := numBytes
+	// log.Printf("[DEBUG] numBytes: %d, full_packet_data: %#v", numBytes, full_packet_data)
+	for numBytes > 0 {
+		//send packet frame syncword
+		full_packet = gen_syncword(full_packet, PacketSync)
 
-	// 	//the following examples produce exactly 25 bytes, which exactly one frame, but >= meant this would never produce a final frame with EOT bit set
-	// 	//echo -en "\x05Testing M17 packet mo\x00" | ./m17-packet-encode -S N0CALL -D ALL -C 10 -n 23 -o float.sym -f
-	// 	//./m17-packet-encode -S N0CALL -D ALL -C 10 -o float.sym -f -T 'this is a simple text'
-	// 	if numBytes > 25 { //fix for frames that, with terminating byte and crc, land exactly on 25 bytes (or %25==0)
-	// 		memcpy(pkt_chunk, &full_packet_data[pkt_cnt*25], 25)
-	// 		pkt_chunk[25] = pkt_cnt << 2
-	// 		fprintf(stderr, "FN:%02d (full frame)\n", pkt_cnt)
+		//the following examples produce exactly 25 bytes, which exactly one frame, but >= meant this would never produce a final frame with EOT bit set
+		//echo -en "\x05Testing M17 packet mo\x00" | ./m17-packet-encode -S N0CALL -D ALL -C 10 -n 23 -o float.sym -f
+		//./m17-packet-encode -S N0CALL -D ALL -C 10 -o float.sym -f -T 'this is a simple text'
+		if numBytes > 25 { //fix for frames that, with terminating byte and crc, land exactly on 25 bytes (or %25==0)
+			// 		memcpy(pkt_chunk, &full_packet_data[pkt_cnt*25], 25)
+			copy(pkt_chunk, full_packet_data[pkt_cnt*25:pkt_cnt*25+25])
+			pkt_chunk[25] = uint8(pkt_cnt << 2)
+			log.Printf("[DEBUG] FN:%02d (full frame)", pkt_cnt)
 
-	// 		//encode the packet frame
-	// 		conv_encode_packet_frame(enc_bits, pkt_chunk)
+			//encode the packet frame
+			conv_encode_packet_frame(&enc_bits, pkt_chunk)
 
-	// 		//reorder bits
-	// 		reorder_bits(rf_bits, enc_bits)
+			//reorder bits
+			reorder_bits(&rf_bits, &enc_bits)
 
-	// 		//randomize
-	// 		randomize_bits(rf_bits)
+			//randomize
+			randomize_bits(&rf_bits)
 
-	// 		//fill packet with frame data
-	// 		gen_data(full_packet, &pkt_sym_cnt, rf_bits)
+			//fill packet with frame data
+			full_packet = gen_data(full_packet, &rf_bits)
 
-	// 		numBytes -= 25
-	// 	} else {
-	// 		memcpy(pkt_chunk, &full_packet_data[pkt_cnt*25], numBytes)
-	// 		memset(&pkt_chunk[numBytes], 0, 25-numBytes) //zero-padding
+			numBytes -= 25
+		} else {
+			// 		memcpy(pkt_chunk, &full_packet_data[pkt_cnt*25], numBytes)
+			copy(pkt_chunk, full_packet_data[pkt_cnt*25:pkt_cnt*25+numBytes])
+			// 		memset(&pkt_chunk[numBytes], 0, 25-numBytes) //zero-padding
+			for i := numBytes; i < 25; i++ {
+				pkt_chunk[i] = 0
+			}
 
-	// 		//EOT bit set to 1, set counter to the amount of bytes in this (the last) frame
-	// 		if numBytes%25 == 0 {
-	// 			pkt_chunk[25] = (1 << 7) | ((25) << 2)
+			//EOT bit set to 1, set counter to the amount of bytes in this (the last) frame
+			if numBytes%25 == 0 {
+				pkt_chunk[25] = (1 << 7) | ((25) << 2)
 
-	// 		} else {
-	// 			pkt_chunk[25] = (1 << 7) | ((numBytes % 25) << 2)
+			} else {
+				pkt_chunk[25] = uint8((1 << 7) | ((numBytes % 25) << 2))
 
-	// 		}
+			}
 
-	// 		fprintf(stderr, "FN:-- (ending frame)\n")
+			// 		fprintf(stderr, "FN:-- (ending frame)\n")
 
-	// 		//encode the packet frame
-	// 		conv_encode_packet_frame(enc_bits, pkt_chunk)
+			//encode the packet frame
+			conv_encode_packet_frame(&enc_bits, pkt_chunk)
 
-	// 		//reorder bits
-	// 		reorder_bits(rf_bits, enc_bits)
+			//reorder bits
+			reorder_bits(&rf_bits, &enc_bits)
 
-	// 		//randomize
-	// 		randomize_bits(rf_bits)
+			//randomize
+			randomize_bits(&rf_bits)
 
-	// 		//fill packet with frame data
-	// 		gen_data(full_packet, &pkt_sym_cnt, rf_bits)
+			//fill packet with frame data
+			full_packet = gen_data(full_packet, &rf_bits)
 
-	// 		numBytes = 0
-	// 	}
+			numBytes = 0
+		}
 
-	// 	//debug dump
-	// 	//for(uint8_t i=0; i<26; i++)
-	// 	//fprintf(stderr, "%02X", pkt_chunk[i]);
-	// 	//fprintf(stderr, "\n");
+		//debug dump
+		//for(uint8_t i=0; i<26; i++)
+		//fprintf(stderr, "%02X", pkt_chunk[i]);
+		//fprintf(stderr, "\n");
+		// log.Printf("[DEBUG] numBytes: %d", numBytes)
+		pkt_cnt++
+	}
 
-	// 	pkt_cnt++
+	numBytes = tmp //bring back the numBytes value
+	// fprintf (stderr, "PKT:");
+	// for i=0; i<pkt_cnt*25; i++    {
+	//     if ( (i != 0) && ((i%25) == 0) )
+	//         fprintf (stderr, "\n    ");
+
+	//     fprintf (stderr, " %02X", full_packet_data[i]);
 	// }
+	// fprintf(stderr, "\n");
+
+	//send EOT
+	full_packet = gen_eot(full_packet)
+
+	//debug mode - symbols multiplied by 7168 scaling factor
+	/*for(uint16_t i=0; i<pkt_sym_cnt; i++)
+	  {
+	      int16_t val=roundf(full_packet[i]*RRC_DEV);
+	      fwrite(&val, 2, 1, fp);
+	  }*/
+	// log.Printf("[DEBUG] Sending %#v", full_packet)
+
+	for _, val := range full_packet {
+		f := float32(math.Round(float64(val)))
+		// b, _ := binary.Append(nil, binary.LittleEndian, f)
+		// log.Printf("[DEBUG] val: %f, f: %5.3f, bytes: %v", val, f, b)
+		err := binary.Write(out, binary.LittleEndian, f)
+		if err != nil {
+			return fmt.Errorf("failed to send: %w", err)
+		}
+	}
 
 	return nil
 }
@@ -253,7 +282,7 @@ func SendPacket(p Packet, out io.Writer) error {
  * @param cnt Pointer to a variable holding the number of written symbols.
  * @param type Preamble type (pre-BERT or pre-LSF).
  */
-func AppendPreamble(out []float32, typ Pream) {
+func AppendPreamble(out []float32, typ Pream) []float32 {
 	if typ == PREAM_BERT { //pre-BERT
 		for i := 0; i < SymbolsPerFrame/2; i++ { //40ms * 4800 = 192
 			out = append(out, -3.0, +3.0)
@@ -263,13 +292,15 @@ func AppendPreamble(out []float32, typ Pream) {
 			out = append(out, +3.0, -3.0)
 		}
 	}
+	return out
 }
 
 // Generate symbol stream for a syncword.
-func AppendSyncword(out []float32, syncword uint16) {
+func AppendSyncword(out []float32, syncword uint16) []float32 {
 	for i := 0; i < SymbolsPerSyncword*2; i += 2 {
 		out = append(out, float32(SymbolMap[(syncword>>(14-i))&3]))
 	}
+	return out
 }
 
 /**
@@ -292,9 +323,87 @@ func reorder_bits(outp *[SymbolsPerPayload * 2]uint8, inp *[SymbolsPerPayload * 
  * @param cnt Pointer to a variable holding the number of written symbols.
  * @param in Data input - unpacked bits (1 bit per byte).
  */
-func gen_data(out []float32, cnt *uint32, in *[SymbolsPerPayload * 2]uint8) {
+func gen_data(out []float32, in *[SymbolsPerPayload * 2]uint8) []float32 {
+	// log.Printf("[DEBUG] gen_data(%#v, %#v)", out, *in)
 	for i := 0; i < SymbolsPerPayload; i++ { //40ms * 4800 - 8 (syncword)
-		out[(*cnt)] = float32(SymbolMap[in[2*i]*2+in[2*i+1]])
-		(*cnt)++
+		out = append(out, float32(SymbolMap[in[2*i]*2+in[2*i+1]]))
 	}
+	return out
+}
+
+/**
+ * @brief Generate symbol stream for a syncword.
+ *
+ * @param out Output buffer (8 floats).
+ * @param cnt Pointer to a variable holding the number of written symbols.
+ * @param syncword Syncword.
+ */
+func gen_syncword(out []float32, syncword uint16) []float32 {
+	for i := 0; i < SymbolsPerSyncword*2; i += 2 {
+		out = append(out, SymbolMap[(syncword>>(14-i))&3])
+	}
+	return out
+}
+
+// convol.c
+/**
+ * @brief Encode M17 packet frame using convolutional encoder with puncturing.
+ *
+ * @param out Output - unpacked array of bits, 368 type-3 bits.
+ * @param in Input - packed array of uint8_t, 206 type-1 bits
+ *   (200 bits of data, 1 bit End of Frame indicator, 5 bits frame/byte counter).
+ */
+func conv_encode_packet_frame(out *[368]byte, in []byte) [368]byte {
+	pp_len := len(PuncturePattern3)
+	p := 0                      //puncturing pattern index
+	var pb uint16 = 0           //pushed punctured bits
+	ud := make([]byte, 206+4+4) //unpacked data
+
+	//unpack data
+	for i := 0; i < 26; i++ {
+		for j := 0; j < 8; j++ {
+			if i <= 24 || j <= 5 {
+				ud[4+i*8+j] = (in[i] >> (7 - j)) & 1
+			}
+		}
+	}
+
+	//encode
+	for i := 0; i < 206+4; i++ {
+		G1 := (ud[i+4] + ud[i+1] + ud[i+0]) % 2
+		G2 := (ud[i+4] + ud[i+3] + ud[i+2] + ud[i+0]) % 2
+
+		//fprintf(stderr, "%d%d", G1, G2);
+
+		if PuncturePattern3[p] != 0 {
+			out[pb] = G1
+			pb++
+		}
+
+		p++
+		p %= pp_len
+
+		if PuncturePattern3[p] != 0 {
+			out[pb] = G2
+			pb++
+		}
+
+		p++
+		p %= pp_len
+	}
+	return *out
+	//fprintf(stderr, "pb=%d\n", pb);
+}
+
+/**
+ * @brief Generate symbol stream for the End of Transmission marker.
+ *
+ * @param out Output buffer (192 floats).
+ * @param cnt Pointer to a variable holding the number of written symbols.
+ */
+func gen_eot(out []float32) []float32 {
+	for i := 0; i < SymbolsPerFrame; i++ { //40ms * 4800 = 192
+		out = append(out, EOTSymbols[i%8])
+	}
+	return out
 }

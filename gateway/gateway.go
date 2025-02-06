@@ -7,24 +7,23 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/hashicorp/logutils"
 	"github.com/jancona/m17text/m17"
 )
 
-const (
-	gatewaySrcCall = "ABCDE" // Invalid callsign used for messages from the gateway to the reflector
-)
-
 var (
-	isDebugArg *bool   = flag.Bool("debug", false, "Emit debug log messages")
-	inArg      *string = flag.String("in", "", "M17 input (default stdin)")
-	outArg     *string = flag.String("out", "", "M17 output (default stdout)")
-	logDestArg *string = flag.String("log", "", "Device/file for log (default stderr)")
-	serverArg  *string = flag.String("server", "", "Relay/reflector server")
-	portArg    *uint   = flag.Uint("port", 17000, "Port the relay/reflector listens on")
-	moduleArg  *string = flag.String("module", "T", "Module to connect to")
-	helpArg    *bool   = flag.Bool("h", false, "Print arguments")
+	isDebugArg  *bool   = flag.Bool("debug", false, "Emit debug log messages")
+	inArg       *string = flag.String("in", "", "M17 input (default stdin)")
+	outArg      *string = flag.String("out", "", "M17 output (default stdout)")
+	logDestArg  *string = flag.String("log", "", "Device/file for log (default stderr)")
+	serverArg   *string = flag.String("server", "", "Relay/reflector server")
+	portArg     *uint   = flag.Uint("port", 17000, "Port the relay/reflector listens on")
+	moduleArg   *string = flag.String("module", "", "Module to connect to")
+	helpArg     *bool   = flag.Bool("h", false, "Print arguments")
+	callsignArg *string = flag.String("callsign", "GATEWAY", "Callsign used for messages from the gateway to the reflector")
 )
 
 func main() {
@@ -112,7 +111,7 @@ func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out
 		}
 	}
 
-	g.relay, err = m17.NewM17Relay(serverArg, portArg, moduleArg, gatewaySrcCall, g.FromRelay)
+	g.relay, err = m17.NewRelay(serverArg, portArg, moduleArg, *callsignArg, g.FromRelay)
 	if err != nil {
 		return nil, fmt.Errorf("error creating relay: %v", err)
 	}
@@ -125,7 +124,7 @@ func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out
 }
 
 func (g Gateway) FromRelay(p m17.Packet) error {
-	// log.Printf("[DEBUG] received packet from relay: %x", p)
+	// log.Printf("[DEBUG] received packet from relay: %#v", p)
 	// A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
 	// dst,_ := m17.DecodeCallsign(buf[4:10])
 	// src,_ := m17.DecodeCallsign(buf[10:16])
@@ -133,7 +132,7 @@ func (g Gateway) FromRelay(p m17.Packet) error {
 	// data := buf[17:]
 
 	// // encode packet and send to g.out
-	return m17.SendPacket(p, g.out)
+	return p.Send(g.out)
 }
 
 func (g *Gateway) FromClient(lsf []byte, buf []byte) error {
@@ -149,31 +148,36 @@ func (g *Gateway) FromClient(lsf []byte, buf []byte) error {
 	}
 	log.Printf("[DEBUG] length: %d, crc: %x, CRC ok: %v, type %02X: %s", l, crc, m17.CRC(buf) == 0, t, text)
 	// TODO: Handle error?
-	g.relay.SendMessage(lsf[0:6], lsf[6:12], text)
-	return nil
+	err = g.relay.SendMessage(lsf[0:6], lsf[6:12], text)
+	return err
 }
 
 func (g *Gateway) Run() {
-	// m17.ProcessSamples(g.in, g.FromClient)
+	signalChan := make(chan os.Signal, 1)
+	// handle responses from reflector
+	go func() {
+		g.relay.Handle()
+		// When Handle exits, we're done
+		<-signalChan
+	}()
 	d := m17.NewDecoder()
 	d.DecodeSamples(g.in, g.FromClient)
-	g.Close()
-	// // Run until we're terminated then clean up
-	// log.Print("[DEBUG] client: Waiting for close signal")
-	// // wait for a close signal then clean up
-	// signalChan := make(chan os.Signal, 1)
-	// cleanupDone := make(chan struct{})
-	// signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-	// go func() {
-	// 	<-signalChan
-	// 	log.Print("client: Received an interrupt, stopping...")
-	// 	// Cleanup goes here
-	// 	g.Close()
-	// 	close(cleanupDone)
-	// }()
-	// <-cleanupDone
+	// Run until we're terminated then clean up
+	log.Print("[DEBUG] client: Waiting for close signal")
+	// wait for a close signal then clean up
+	cleanupDone := make(chan struct{})
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-signalChan
+		log.Print("[DEBUG] client: Received an interrupt, stopping...")
+		// Cleanup goes here
+		close(cleanupDone)
+	}()
+	<-cleanupDone
 }
+
 func (g *Gateway) Close() {
+	log.Print("[DEBUG] Gateway.Close()")
 	g.done = true
 	g.relay.Close()
 	if g.in != os.Stdin {

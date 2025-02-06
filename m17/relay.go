@@ -29,18 +29,25 @@ type Relay struct {
 	done            bool
 }
 
-func NewM17Relay(server string, port uint, module string, callsign string, handler func(p Packet) error) (*Relay, error) {
+func NewRelay(server string, port uint, module string, callsign string, handler func(p Packet) error) (*Relay, error) {
 	cs, err := EncodeCallsign(callsign)
 	if err != nil {
 		return nil, fmt.Errorf("bad callsign %s: %w", callsign, err)
 	}
-	if len(module) != 1 || module[0] < 'A' || module[0] > 'Z' {
-		return nil, fmt.Errorf("module should be A-Z, got '%s'", module)
+	var m byte
+	switch {
+	case len(module) == 0:
+		m = 0
+	case len(module) > 1 || module[0] < 'A' || module[0] > 'Z':
+		return nil, fmt.Errorf("module must be A-Z or empty, got '%s'", module)
+	case len(module) == 1:
+		m = []byte(module)[0]
 	}
+
 	c := Relay{
 		Server:          server,
 		Port:            port,
-		Module:          []byte(module)[0],
+		Module:          m,
 		Callsign:        callsign,
 		EncodedCallsign: cs,
 		handler:         handler,
@@ -68,6 +75,7 @@ func (c *Relay) Connect() error {
 	return nil
 }
 func (c *Relay) Close() error {
+	log.Print("[DEBUG] Relay.Close()")
 	return c.conn.Close()
 }
 func (c *Relay) Handle() {
@@ -78,15 +86,15 @@ func (c *Relay) Handle() {
 		l, _, err := c.conn.ReadFromUDP(buffer)
 		if err != nil {
 			if err, ok := err.(net.Error); ok && err.Timeout() {
-				log.Printf("[DEBUG] discoverReceive: timeout: %v", err)
+				log.Printf("[DEBUG] Relay.Handle(): timeout: %v", err)
 				break
 			} else {
-				log.Printf("[DEBUG] discoverReceive: error reading from UDP: %v", err)
+				log.Printf("[DEBUG] Relay.Handle(): error reading from UDP: %v", err)
 				break
 			}
 		}
 		buffer = buffer[:l]
-		// fmt.Printf("packet received, len: %d:\n%#v\n%s\n", l, buffer, string(buffer[:4]))
+		// log.Printf("[DEBUG] Packet received, len: %d:\n%#v\n%s\n", l, buffer, string(buffer[:4]))
 		if l < 4 {
 			// too short
 			continue
@@ -103,6 +111,7 @@ func (c *Relay) Handle() {
 		// case magicINFO:
 		case magicM17:
 			p := NewPacketFromBytes(buffer[4:])
+			// log.Printf("[DEBUG] packet from relay: %#v", p)
 			c.handler(p)
 		}
 	}
@@ -110,14 +119,19 @@ func (c *Relay) Handle() {
 
 func (c *Relay) SendMessage(dst []byte, src []byte, message string) error {
 	lsf := LSF{
-		Dst: dst,
-		Src: src,
+		Dst:  dst,
+		Src:  src,
+		Type: []byte{0, 2},
 	}
 	lsf.CalcCRC()
 
 	msg := []byte(message)
-	if len(msg) > 821 {
-		msg = msg[:821]
+	if len(msg) > 820 {
+		msg = msg[:820]
+	}
+	// add a trailing NUL, if needed
+	if len(msg) == 0 || msg[len(msg)-1] != 0 {
+		msg = append(msg, 0)
 	}
 	p := NewPacket(lsf, PacketTypeSMS, msg)
 

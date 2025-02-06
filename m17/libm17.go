@@ -40,7 +40,7 @@ const (
 	SyncwordLen              = (BasebandSamplesPerSymbol * SymbolsPerSyncword) //syncword detector length
 	SymbolsPerPayload        = 184                                             //symbols per payload in a frame
 	SymbolsPerFrame          = 192                                             //symbols per whole 40 ms frame
-	// RRCDeviation             = 7168.0                                          //.rrc file deviation for +1.0 symbol
+	RRCDeviation             = 7168.0                                          //.rrc file deviation for +1.0 symbol
 )
 
 const (

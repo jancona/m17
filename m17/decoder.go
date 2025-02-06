@@ -59,7 +59,7 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromClient func([]uint8, []uint8) 
 			d.last = d.last.Next()
 			//calculate euclidean norm
 			dist, typ := SyncDistance(d.last)
-			// log.Printf("[DEBUG] sample: %3.5f, dist: %3.5f, typ: %d", sample, dist, typ)
+			// log.Printf("[DEBUG] sample: %3.5f, dist: %3.5f, typ: %x", sample, dist, typ)
 			if dist < decoderDistThresh { //frame syncword detected
 				log.Printf("[DEBUG] sync distance: %f, type: %x", dist, typ)
 
@@ -184,7 +184,7 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromClient func([]uint8, []uint8) 
 						copy(d.packetData[(d.latestFrameNum+1)*25:(d.latestFrameNum+1)*25+frameNumOrByteCnt], d.frameData[1:frameNumOrByteCnt+1])
 						d.packetData = d.packetData[:(d.latestFrameNum+1)*25+frameNumOrByteCnt]
 						// fprintf(stderr, " \033[93mContent\033[39m\n");
-
+						log.Printf("[DEBUG] d.lsf: %#v, d.packetData: %#v", d.lsf, d.packetData)
 						if CRC(d.lsf) == 0 && CRC(d.packetData) == 0 {
 							fromClient(d.lsf, d.packetData)
 						}
