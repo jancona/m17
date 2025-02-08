@@ -7,6 +7,8 @@ import (
 )
 
 const (
+	magicLen = 4
+
 	magicACKN = "ACKN"
 	magicCONN = "CONN"
 	magicDISC = "DISC"
@@ -15,6 +17,7 @@ const (
 	magicPING = "PING"
 	magicPONG = "PONG"
 	magicM17  = "M17 "
+	magicM17P = "M17P"
 )
 
 type Relay struct {
@@ -109,7 +112,8 @@ func (c *Relay) Handle() {
 		case magicPING:
 			c.sendPONG()
 		// case magicINFO:
-		case magicM17:
+		case magicM17: // M17 voice stream
+			// case magicM17P: // M17 packet
 			p := NewPacketFromBytes(buffer[4:])
 			// log.Printf("[DEBUG] packet from relay: %#v", p)
 			c.handler(p)
@@ -117,32 +121,30 @@ func (c *Relay) Handle() {
 	}
 }
 
-func (c *Relay) SendMessage(dst []byte, src []byte, message string) error {
-	lsf := LSF{
-		Dst:  dst,
-		Src:  src,
-		Type: []byte{0, 2},
-	}
-	lsf.CalcCRC()
-
-	msg := []byte(message)
-	if len(msg) > 820 {
-		msg = msg[:820]
-	}
-	// add a trailing NUL, if needed
-	if len(msg) == 0 || msg[len(msg)-1] != 0 {
-		msg = append(msg, 0)
-	}
-	p := NewPacket(lsf, PacketTypeSMS, msg)
-
-	cmd := make([]byte, 0, LSFSize+1+len(msg)+2)
+func (c *Relay) SendPacket(p Packet) error {
+	b := p.ToBytes()
+	cmd := make([]byte, 0, magicLen+len(b))
 	cmd = append(cmd, []byte(magicM17)...)
-	cmd = append(cmd, p.ToBytes()...)
+	cmd = append(cmd, b...)
 	// log.Printf("[DEBUG] p: %#v, cmd: %#v", p, cmd)
 
 	_, err := c.conn.Write(cmd)
 	if err != nil {
 		return fmt.Errorf("error sending text message: %w", err)
+	}
+	return nil
+}
+
+func (c *Relay) SendSMS(destCall, sourceCall, message string) error {
+	lsf, err := NewLSF(destCall, sourceCall, LSFTypePacket, LSFDataTypeData, 0)
+	if err != nil {
+		return fmt.Errorf("failed to create LSF: %w", err)
+	}
+	lsf.CalcCRC()
+	p := NewPacket(lsf, PacketTypeSMS, append([]byte(message), 0))
+	err = c.SendPacket(p)
+	if err != nil {
+		return fmt.Errorf("failed to send SMS packet: %w", err)
 	}
 	return nil
 }

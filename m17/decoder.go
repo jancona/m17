@@ -8,7 +8,7 @@ import (
 )
 
 const decoderDistThresh = 2.0 //distance threshold for the L2 metric (for syncword detection)
-// const m17PacketSize = 33 * 25
+// const m17PacketLen = 33 * 25
 type Decoder struct {
 	synced bool
 	//look-back buffer for finding syncwords
@@ -43,7 +43,7 @@ func NewDecoder() *Decoder {
 	}
 	return &d
 }
-func (d *Decoder) DecodeSamples(in io.Reader, fromClient func([]uint8, []uint8) error) error {
+func (d *Decoder) DecodeSamples(in io.Reader, fromModem func([]uint8, []uint8) error) error {
 	for {
 		var sample float32
 		err := binary.Read(in, binary.LittleEndian, &sample)
@@ -186,7 +186,9 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromClient func([]uint8, []uint8) 
 						// fprintf(stderr, " \033[93mContent\033[39m\n");
 						log.Printf("[DEBUG] d.lsf: %#v, d.packetData: %#v", d.lsf, d.packetData)
 						if CRC(d.lsf) == 0 && CRC(d.packetData) == 0 {
-							fromClient(d.lsf, d.packetData)
+							fromModem(d.lsf, d.packetData)
+						} else {
+							log.Printf("[DEBUG] Bad CRC not forwarded. LSF: %x, packet %x", CRC(d.lsf), CRC(d.packetData))
 						}
 						// cleanup
 						d.lsf = make([]uint8, 30+1)         //complete LSF (one byte extra needed for the Viterbi decoder)

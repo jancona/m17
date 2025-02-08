@@ -2,6 +2,8 @@ package m17
 
 import "github.com/sigurn/crc16"
 
+const CRCLen = 2
+
 // M17 CRC polynomial
 var m17CRCParams = crc16.Params{
 	Poly: 0x5935,

@@ -102,11 +102,10 @@ func handleConsoleInput(c *m17.Relay) {
 			}
 
 			if command == "" {
-				dst, err := m17.EncodeCallsign(callsign)
+				err := c.SendSMS(callsign, *callsignArg, message)
 				if err != nil {
-					fmt.Printf("error encoding callsign: %v\n", err)
-				} else {
-					c.SendMessage(dst, encodedCallsign, message)
+					fmt.Printf("Error sending message: %v\n", err)
+					continue
 				}
 			} else {
 				switch command {

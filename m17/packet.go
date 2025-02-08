@@ -17,12 +17,16 @@ type LSFEncryptionSubtype byte
 const (
 	LSFTypePacket LSFType = iota
 	LSFTypeStream
+)
 
+const (
 	LSFDataTypeReserved LSFDataType = iota
 	LSFDataTypeData
 	LSFDataTypeVoice
 	LSFDataTypeVoiceData
+)
 
+const (
 	LSFEncryptionTypeNone LSFEncryptionType = iota
 	LSFEncryptionTypeScrambler
 	LSFEncryptionTypeAES
@@ -42,9 +46,16 @@ const (
 )
 
 const (
-	LSFSize = 30
+	LSFLen = 30
 
-	metaSize = 112 / 8
+	typeLen = 2
+	metaLen = 112 / 8
+
+	dstPos  = 0
+	srcPos  = dstPos + EncodedCallsignLen
+	typPos  = srcPos + EncodedCallsignLen
+	metaPos = typPos + typeLen
+	crcPos  = metaPos + metaLen
 )
 
 // Link Setup Frame
@@ -56,25 +67,51 @@ type LSF struct {
 	CRC  []byte
 }
 
+func NewEmptyLSF() LSF {
+	return LSF{
+		Dst:  make([]byte, 0, EncodedCallsignLen),
+		Src:  make([]byte, 0, EncodedCallsignLen),
+		Type: make([]byte, 0, typeLen),
+		Meta: make([]byte, 0, metaLen),
+		CRC:  make([]byte, 0, CRCLen),
+	}
+}
+func NewLSF(destCall, sourceCall string, t LSFType, dt LSFDataType, can byte) (LSF, error) {
+	var err error
+	lsf := NewEmptyLSF()
+	lsf.Dst, err = EncodeCallsign(destCall)
+	if err != nil {
+		return lsf, fmt.Errorf("bad dst callsign: %w", err)
+	}
+	lsf.Src, err = EncodeCallsign(sourceCall)
+	if err != nil {
+		return lsf, fmt.Errorf("bad src callsign: %w", err)
+	}
+	lsf.Type = append(lsf.Type, (can & 0x7), (byte(t)&0x1)|((byte(dt)&0x3)<<1))
+	// lsf.Type[0] = (can & 0x7)
+	// lsf.Type[1] = (byte(t) & 0x1) | ((byte(dt) & 0x3) << 1)
+	return lsf, nil
+}
+
 func NewLSFFromBytes(buf []byte) LSF {
 	var lsf LSF
-	lsf.Dst = buf[0:6]
-	lsf.Src = buf[6:12]
-	lsf.Type = buf[12:14]
-	lsf.Meta = buf[14 : 14+metaSize]
-	lsf.CRC = buf[14+metaSize : 14+metaSize+2]
+	lsf.Dst = buf[dstPos:srcPos]
+	lsf.Src = buf[srcPos:typPos]
+	lsf.Type = buf[typPos:metaPos]
+	lsf.Meta = buf[metaPos:crcPos]
+	lsf.CRC = buf[crcPos : crcPos+CRCLen]
 	return lsf
 }
 
 // Convert this LSF to a byte slice suitable for transmission
 func (l *LSF) ToBytes() []byte {
-	b := make([]byte, LSFSize)
+	b := make([]byte, LSFLen)
 
-	copy(b[0:6], l.Dst)
-	copy(b[6:12], l.Src)
-	copy(b[12:14], l.Type)
-	copy(b[14:14+metaSize], l.Meta)
-	copy(b[14+metaSize:14+metaSize+2], l.CRC)
+	copy(b[dstPos:srcPos], l.Dst)
+	copy(b[srcPos:typPos], l.Src)
+	copy(b[typPos:metaPos], l.Type)
+	copy(b[metaPos:crcPos], l.Meta)
+	copy(b[crcPos:crcPos+CRCLen], l.CRC)
 	// log.Printf("[DEBUG] LSF.ToBytes(): %#v", b)
 
 	return b
@@ -83,7 +120,7 @@ func (l *LSF) ToBytes() []byte {
 // Calculate CRC for this LSF
 func (l *LSF) CalcCRC() uint16 {
 	a := l.ToBytes()
-	crc := CRC(a[:LSFSize-2])
+	crc := CRC(a[:LSFLen-2])
 	l.CRC, _ = binary.Append(nil, binary.BigEndian, crc)
 	return crc
 }
@@ -98,10 +135,10 @@ type Packet struct {
 
 func NewPacketFromBytes(buf []byte) Packet {
 	var p Packet
-	p.LSF = NewLSFFromBytes(buf[:LSFSize])
-	t, size := utf8.DecodeRune(buf[LSFSize:])
+	p.LSF = NewLSFFromBytes(buf[:LSFLen])
+	t, size := utf8.DecodeRune(buf[LSFLen:])
 	p.Type = PacketType(t)
-	p.Payload = buf[LSFSize+size : len(buf)-2]
+	p.Payload = buf[LSFLen+size : len(buf)-2]
 	_, err := binary.Decode(buf[len(buf)-2:], binary.BigEndian, &p.CRC)
 	if err != nil {
 		// should never happen
@@ -123,9 +160,9 @@ func NewPacket(lsf LSF, t PacketType, data []byte) Packet {
 // Convert this Packet to a byte slice suitable for transmission
 func (p *Packet) ToBytes() []byte {
 	pb := p.PayloadBytes()
-	b := make([]byte, LSFSize+len(pb))
-	copy(b[:LSFSize], p.LSF.ToBytes())
-	copy(b[LSFSize:], pb)
+	b := make([]byte, LSFLen+len(pb))
+	copy(b[:LSFLen], p.LSF.ToBytes())
+	copy(b[LSFLen:], pb)
 	return b
 }
 

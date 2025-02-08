@@ -297,7 +297,7 @@ func TestNewPacket(t *testing.T) {
 				LSF:     NewLSFFromBytes([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}),
 				Type:    PacketType(0),
 				Payload: []byte{0},
-				CRC:     0x4C14,
+				CRC:     26476,
 			},
 		},
 	}

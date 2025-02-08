@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
@@ -16,6 +14,7 @@ import (
 
 var (
 	isDebugArg  *bool   = flag.Bool("debug", false, "Emit debug log messages")
+	isDuplex    *bool   = flag.Bool("duplex", false, "Operate in duplex mode")
 	inArg       *string = flag.String("in", "", "M17 input (default stdin)")
 	outArg      *string = flag.String("out", "", "M17 output (default stdout)")
 	logDestArg  *string = flag.String("log", "", "Device/file for log (default stderr)")
@@ -125,30 +124,15 @@ func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out
 
 func (g Gateway) FromRelay(p m17.Packet) error {
 	// log.Printf("[DEBUG] received packet from relay: %#v", p)
-	// A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
-	// dst,_ := m17.DecodeCallsign(buf[4:10])
-	// src,_ := m17.DecodeCallsign(buf[10:16])
-	// typ := buf[16]
-	// data := buf[17:]
-
-	// // encode packet and send to g.out
 	return p.Send(g.out)
 }
 
-func (g *Gateway) FromClient(lsf []byte, buf []byte) error {
-	log.Printf("[DEBUG] received packet from client: %x", buf)
-	l := len(buf)
-	t := buf[0]                  // type
-	text := string(buf[1 : l-3]) // skip terminating null and CRC
-	var crc uint16
-	b := bytes.NewReader(buf[l-2:])
-	err := binary.Read(b, binary.LittleEndian, &crc)
-	if err != nil {
-		log.Printf("[INFO] binary.Read failed: %v", err)
-	}
-	log.Printf("[DEBUG] length: %d, crc: %x, CRC ok: %v, type %02X: %s", l, crc, m17.CRC(buf) == 0, t, text)
+func (g *Gateway) FromModem(lsfBytes []byte, packetBytes []byte) error {
+	log.Printf("[DEBUG] received packet from modem: %x", packetBytes)
+	p := m17.NewPacketFromBytes(append(lsfBytes, packetBytes...))
+	log.Printf("[DEBUG] p: %#v", p)
 	// TODO: Handle error?
-	err = g.relay.SendMessage(lsf[0:6], lsf[6:12], text)
+	err := g.relay.SendPacket(p)
 	return err
 }
 
@@ -161,7 +145,7 @@ func (g *Gateway) Run() {
 		<-signalChan
 	}()
 	d := m17.NewDecoder()
-	d.DecodeSamples(g.in, g.FromClient)
+	d.DecodeSamples(g.in, g.FromModem)
 	// Run until we're terminated then clean up
 	log.Print("[DEBUG] client: Waiting for close signal")
 	// wait for a close signal then clean up

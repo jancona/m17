@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	EncodedLen            = 6
+	EncodedCallsignLen    = 6
 	MaxCallsignLen        = 9
 	DestinationAll        = "@ALL"
 	EncodedDestinationAll = 0xFFFFFFFFFFFF
@@ -67,8 +67,8 @@ func EncodeCallsign(callsign string) ([]byte, error) {
 }
 
 func DecodeCallsign(encoded []byte) (string, error) {
-	if len(encoded) != EncodedLen {
-		return "", fmt.Errorf("encoded callsign length (%d) != %d", len(encoded), EncodedLen)
+	if len(encoded) != EncodedCallsignLen {
+		return "", fmt.Errorf("encoded callsign length (%d) != %d", len(encoded), EncodedCallsignLen)
 	}
 	var callsign string
 	if encoded == nil { // nothing in , nothing out
