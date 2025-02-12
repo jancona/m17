@@ -16,7 +16,12 @@ There are two tools and a library here:
 * [./gateway/](./gateway/) contains a gateway program. 
 * [./m17/](./m17/) contains the beginnings of an M17 library.
 
-## Messaging Client
+## GUI Messaging Client
+
+The GUI messaging client is based on [Fybro](https://github.com/andydotxyz/fybro), a multiplatform messaging app built using [Fyne](https://fyne.io/), a framwork for building GUI apps in Go. To build the client just run `go build` in the `m17msg` directory. For more packaging options, see the [Fyne docs](https://docs.fyne.io/started/packaging).
+
+
+## Text Messaging Client
 
 To build the client just run `go build` in the `textclient` directory. 
 

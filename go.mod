@@ -12,9 +12,17 @@ require (
 )
 
 require (
+	github.com/gorilla/schema v1.1.0 // indirect
+	github.com/gorilla/websocket v1.4.2 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
+	golang.org/x/time v0.0.0-20200416051211-89c76fbcd5d1 // indirect
+)
+
+require (
 	fyne.io/systray v1.11.0 // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/diamondburned/arikawa v1.3.14
 	github.com/fredbi/uri v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/fyne-io/gl-js v0.0.0-20230506162202-1fdaa286a934 // indirect
