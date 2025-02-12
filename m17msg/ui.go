@@ -62,7 +62,8 @@ func (u *ui) makeUI(w fyne.Window, a fyne.App) fyne.CanvasObject {
 		}
 		u.currentServer = u.data.servers[id]
 		u.channels.Unselect(0)
-		// u.channels.Select(0)
+		u.setChannel(nil)
+		u.channels.Refresh()
 	}
 
 	u.channels = widget.NewList(
@@ -135,7 +136,6 @@ func (u *ui) addChannel(w fyne.Window, a fyne.App, f func(*channel) widget.ListI
 }
 
 func (u *ui) channelContent(a fyne.App) (fyne.CanvasObject, *widget.Entry) {
-	// func (s *m17Server) configure(u *ui) (fyne.CanvasObject, func(prefix string, a fyne.App)) {
 	channel := widget.NewEntry()
 	f := widget.NewForm()
 	f.AppendItem(&widget.FormItem{Text: "Channel", Widget: channel})
@@ -163,9 +163,16 @@ func (u *ui) send(data string) {
 }
 
 func (u *ui) setChannel(ch *channel) {
-	u.win.SetTitle(winTitle + ":" + ch.server.name + ":" + ch.name)
-
-	u.currentChannel = ch
+	var msgs []*message
 	u.messages.Objects = nil
-	u.appendMessages(u.currentChannel.messages)
+
+	if ch == nil {
+		u.win.SetTitle(winTitle + " - " + u.currentServer.name)
+	} else {
+		u.win.SetTitle(winTitle + " - " + ch.server.name + " - " + ch.name)
+		u.currentChannel = ch
+		msgs = u.currentChannel.messages
+	}
+
+	u.appendMessages(msgs)
 }
