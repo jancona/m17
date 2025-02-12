@@ -1,5 +1,7 @@
 textclient/textclient
 gateway/gateway
 m17msg/m17msg
+m17msg/m17msg.app/
+m17msg/wasm/
 Notes.txt
 .DS_Store

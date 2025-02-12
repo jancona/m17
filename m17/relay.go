@@ -9,15 +9,17 @@ import (
 const (
 	magicLen = 4
 
-	magicACKN = "ACKN"
-	magicCONN = "CONN"
-	magicDISC = "DISC"
-	magicLSTN = "LSTN"
-	magicNACK = "NACK"
-	magicPING = "PING"
-	magicPONG = "PONG"
-	magicM17  = "M17 "
-	magicM17P = "M17P"
+	magicACKN           = "ACKN"
+	magicCONN           = "CONN"
+	magicDISC           = "DISC"
+	magicLSTN           = "LSTN"
+	magicNACK           = "NACK"
+	magicPING           = "PING"
+	magicPONG           = "PONG"
+	magicM17Voice       = "M17 "
+	magicM17VoiceHeader = "M17H"
+	magicM17VoiceData   = "M17D"
+	magicM17Packet      = "M17P"
 )
 
 type Relay struct {
@@ -111,12 +113,17 @@ func (c *Relay) Handle() {
 			c.connected = false
 		case magicPING:
 			c.sendPONG()
-		// case magicINFO:
-		case magicM17: // M17 voice stream
-			// case magicM17P: // M17 packet
+			// case magicINFO:
+		case magicM17Voice: // Original M17 voice stream
+			// TODO: This should be replaced by the proper code to handle voice streams
+			// for now, it's here for backwards compatibility
 			p := NewPacketFromBytes(buffer[4:])
-			// log.Printf("[DEBUG] packet from relay: %#v", p)
 			c.handler(p)
+		case magicM17Packet: // M17 packet
+			p := NewPacketFromBytes(buffer[4:])
+			c.handler(p)
+		case magicM17VoiceHeader: // M17 voice two-packet header
+		case magicM17VoiceData: // M17 voice two-packet data
 		}
 	}
 }
@@ -124,7 +131,7 @@ func (c *Relay) Handle() {
 func (c *Relay) SendPacket(p Packet) error {
 	b := p.ToBytes()
 	cmd := make([]byte, 0, magicLen+len(b))
-	cmd = append(cmd, []byte(magicM17)...)
+	cmd = append(cmd, []byte(magicM17Packet)...)
 	cmd = append(cmd, b...)
 	// log.Printf("[DEBUG] p: %#v, cmd: %#v", p, cmd)
 
