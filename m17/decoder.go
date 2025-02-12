@@ -124,17 +124,18 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromModem func([]uint8, []uint8) e
 
 				if d.firstLSFFrame { //if it is LSF
 					//decode
-					e, err := ViterbiDecodePunctured(d.lsf, d.dSoftBit, PuncturePattern1)
+					lsf := make([]byte, LSFLen+1) // extra byte for the Viterbi Decoder
+					e, err := ViterbiDecodePunctured(lsf, d.dSoftBit, PuncturePattern1)
 					if err != nil {
 						log.Printf("[ERROR] Error calling ViterbiDecodePunctured: %v", err)
 					}
 
 					//shift the buffer 1 position left - get rid of the encoded flushing bits
 					// copy(lsf, lsf[1:])
-					d.lsf = d.lsf[1:]
+					d.lsf = lsf[1 : LSFLen+1]
 					log.Printf("[DEBUG] d.lsf: %x", d.lsf)
 					if CRC(d.lsf) != 0 {
-						log.Printf("[DEBUG] Bad LSF CRC.")
+						log.Printf("[DEBUG] Bad LSF CRC: %x", CRC(d.lsf))
 					} else {
 						dst, err := DecodeCallsign(d.lsf[0:6])
 						if err != nil {

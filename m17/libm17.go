@@ -395,6 +395,7 @@ func ViterbiDecodeBit(s0 uint16, s1 uint16, pos int) {
 
 // History chainback to obtain final byte array.
 func ViterbiChainback(out []uint8, pos int, l int) uint32 {
+	// log.Printf("[DEBUG] ViterbiChainback len(out): %d, pos: %d, l: %d", len(out), pos, l)
 	state := uint8(0)
 	bitPos := l + 4
 
@@ -408,7 +409,8 @@ func ViterbiChainback(out []uint8, pos int, l int) uint32 {
 		pos--
 		bit := viterbiHistory[pos] & (1 << (state >> 4))
 		state >>= 1
-		if bit != 0 {
+		if bit != 0 && bitPos/8 < len(out) {
+			// log.Printf("[DEBUG] ViterbiChainback pos: %d, bitPos: %d", pos, bitPos)
 			state |= 0x80
 			out[bitPos/8] |= 1 << (7 - (bitPos % 8))
 		}
