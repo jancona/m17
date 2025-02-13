@@ -16,8 +16,8 @@ type service interface {
 var (
 	connected []service
 	services  = map[string]func(fyne.App) service{
-		"discord": initDiscord,
-		"m17":     initM17Server,
+		// "discord": initDiscord,
+		"m17": initM17Server,
 	}
 )
 

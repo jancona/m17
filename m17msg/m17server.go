@@ -66,6 +66,7 @@ func (s *m17Server) configure(u *ui) (fyne.CanvasObject, func(prefix string, a f
 	}
 	port := widget.NewEntry()
 	port.PlaceHolder = "17000"
+	port.Text = "17000"
 	port.Validator = validation.NewRegexp("^[0-9]{1,6}$", "port must be a number")
 	module := widget.NewEntry()
 	module.Validator = validation.NewRegexp("^[A-Z]{0,1}$", "module must be a capital letter A-Z or empty")
@@ -154,8 +155,6 @@ func (s *m17Server) loadChats(u *ui) {
 // }
 
 func (s *m17Server) send(ch *channel, text string) {
-	// id, _ := strconv.Atoi(ch.id)
-	// d.conn.SendText(discapi.ChannelID(id), text)
 	s.relay.SendSMS(ch.name, s.callsign, text)
 }
 

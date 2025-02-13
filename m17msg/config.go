@@ -55,7 +55,7 @@ func (u *ui) loginContent(a fyne.App) fyne.CanvasObject {
 	}
 
 	details := container.NewMax(widget.NewLabel("and add your login details"))
-	title := widget.NewLabelWithStyle("Choose a server", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	title := widget.NewLabelWithStyle("Choose a server type", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	list := widget.NewList(
 		func() int {
 			return len(opts)
@@ -68,7 +68,7 @@ func (u *ui) loginContent(a fyne.App) fyne.CanvasObject {
 		})
 	list.OnSelected = func(id widget.ListItemID) {
 		opt := opts[id]
-		title.SetText(fmt.Sprintf("Add a %s server", strings.Title(opt.id)))
+		title.SetText(fmt.Sprintf("Add %s reflector/relay", strings.Title(opt.id)))
 		details.Objects = []fyne.CanvasObject{
 			opts[id].content,
 		}
