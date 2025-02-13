@@ -167,13 +167,18 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromModem func([]uint8, []uint8) e
 					// otherwise it's the frame number
 					frameNumOrByteCnt := int((d.frameData[26] >> 2) & 0x1F)
 
-					log.Printf("[DEBUG] d.frameData[26]: %b, frameNumOrByteCnt: %d, last: %v", d.frameData[26], frameNumOrByteCnt, lastFrame)
+					if lastFrame && frameNumOrByteCnt > 25 {
+						log.Printf("[INFO] Fixing overrun in last frame: %d > 25", frameNumOrByteCnt)
+						frameNumOrByteCnt = 25
+					}
+
+					// log.Printf("[DEBUG] d.frameData[26]: %b, frameNumOrByteCnt: %d, last: %v", d.frameData[26], frameNumOrByteCnt, lastFrame)
 					if lastFrame {
 						log.Printf("[DEBUG] Frame %d Viterbi error: %1.1f", d.latestFrameNum+1, float32(e)/float32(0xFFFF))
 					} else {
 						log.Printf("[DEBUG] Frame %d Viterbi error: %1.1f", frameNumOrByteCnt, float32(e)/float32(0xFFFF))
 					}
-					// log.Printf("[DEBUG] frameData: %x %s", frameData[1:26], frameData[1:26])
+					// log.Printf("[DEBUG] frameData: %x %s", d.frameData[1:26], d.frameData[1:26])
 
 					//copy data - might require some fixing
 					if frameNumOrByteCnt <= 31 && frameNumOrByteCnt == d.latestFrameNum+1 && !lastFrame {
@@ -182,6 +187,7 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromModem func([]uint8, []uint8) e
 						d.latestFrameNum++
 					} else if lastFrame {
 						// memcpy(&packetData[(lastFN+1)*25], &frameData[1], rx_fn)
+						// log.Printf("[DEBUG] packetData[%d:%d], frameData[%d:%d] len(frameData): %d", ((d.latestFrameNum + 1) * 25), ((d.latestFrameNum+1)*25 + frameNumOrByteCnt), 1, (frameNumOrByteCnt + 1), len(d.frameData))
 						copy(d.packetData[(d.latestFrameNum+1)*25:(d.latestFrameNum+1)*25+frameNumOrByteCnt], d.frameData[1:frameNumOrByteCnt+1])
 						d.packetData = d.packetData[:(d.latestFrameNum+1)*25+frameNumOrByteCnt]
 						// fprintf(stderr, " \033[93mContent\033[39m\n");
