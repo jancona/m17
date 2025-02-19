@@ -3,5 +3,6 @@ gateway/gateway
 m17msg/m17msg
 m17msg/m17msg.app/
 m17msg/wasm/
+m17msg/m17msg.apk
 Notes.txt
 .DS_Store

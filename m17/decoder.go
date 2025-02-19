@@ -8,19 +8,33 @@ import (
 )
 
 const decoderDistThresh = 2.0 //distance threshold for the L2 metric (for syncword detection)
-// const m17PacketLen = 33 * 25
+const (
+	LSFSync    = uint16(0x55F7)
+	StreamSync = uint16(0xFF5D)
+	PacketSync = uint16(0x75FF)
+	BERTSync   = uint16(0xDF55)
+	EOTMarker  = uint16(0x555D)
+)
+
+var (
+	LSFSyncSymbols    = []float64{+3, +3, +3, +3, -3, -3, +3, -3}
+	StreamSyncSymbols = []float64{-3, -3, -3, -3, +3, +3, -3, +3}
+	PacketSyncSymbols = []float64{+3, -3, +3, +3, -3, -3, -3, -3}
+	BERTSyncSymbols   = []float64{-3, +3, -3, -3, +3, +3, +3, +3}
+)
+
 type Decoder struct {
 	synced bool
 	//look-back buffer for finding syncwords
 	last *ring.Ring
 	//raw frame symbols
-	pld      []float32
-	softBit  []uint16 //raw frame soft bits
-	dSoftBit []uint16 //deinterleaved soft bits
+	pld      []Symbol
+	softBit  []Symbol //raw frame soft bits
+	dSoftBit []Symbol //deinterleaved soft bits
 
-	lsf        []uint8 //complete LSF (one byte extra needed for the Viterbi decoder)
-	frameData  []uint8 //decoded frame data, 206 bits, plus 4 flushing bits
-	packetData []uint8 //whole packet data
+	lsf        []byte //complete LSF (one byte extra needed for the Viterbi decoder)
+	frameData  []byte //decoded frame data, 206 bits, plus 4 flushing bits
+	packetData []byte //whole packet data
 
 	firstLSFFrame  bool //Frame=0 of LSF=1
 	latestFrameNum int  //last received frame number (-1 when idle)
@@ -33,32 +47,32 @@ func NewDecoder() *Decoder {
 	d := Decoder{
 		last: ring.New(8),
 		//raw frame symbols
-		pld:      make([]float32, SymbolsPerPayload),
-		softBit:  make([]uint16, 2*SymbolsPerPayload), //raw frame soft bits
-		dSoftBit: make([]uint16, 2*SymbolsPerPayload), //deinterleaved soft bits
+		pld:      make([]Symbol, SymbolsPerPayload),
+		softBit:  make([]Symbol, 2*SymbolsPerPayload), //raw frame soft bits
+		dSoftBit: make([]Symbol, 2*SymbolsPerPayload), //deinterleaved soft bits
 
-		lsf:        make([]uint8, 30+1),  //complete LSF (one byte extra needed for the Viterbi decoder)
-		frameData:  make([]uint8, 26+1),  //decoded frame data, 206 bits, plus 4 flushing bits
-		packetData: make([]uint8, 33*25), //whole packet data
+		lsf:        make([]byte, 30+1),  //complete LSF (one byte extra needed for the Viterbi decoder)
+		frameData:  make([]byte, 26+1),  //decoded frame data, 206 bits, plus 4 flushing bits
+		packetData: make([]byte, 33*25), //whole packet data
 	}
 	return &d
 }
-func (d *Decoder) DecodeSamples(in io.Reader, fromModem func([]uint8, []uint8) error) error {
+func (d *Decoder) DecodeSamples(in io.Reader, fromModem func([]byte, []byte) error) error {
 	for {
-		var sample float32
+		var sample Symbol
 		err := binary.Read(in, binary.LittleEndian, &sample)
 		if err == io.EOF {
 			return nil
 		} else if err != nil {
 			// TODO: return error here?
-			log.Printf("binary.Read failed: %v", err)
+			log.Printf("DecodeSamples binary.Read failed: %v", err)
 		}
 		if !d.synced {
 			// Looking for a sync burst
 			d.last.Value = sample
 			d.last = d.last.Next()
 			//calculate euclidean norm
-			dist, typ := SyncDistance(d.last)
+			dist, typ := syncDistance(d.last)
 			// log.Printf("[DEBUG] sample: %3.5f, dist: %3.5f, typ: %x", sample, dist, typ)
 			if dist < decoderDistThresh { //frame syncword detected
 				log.Printf("[DEBUG] sync distance: %f, type: %x", dist, typ)
@@ -74,66 +88,60 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromModem func([]uint8, []uint8) e
 					// To be implemented
 				case LSFSync:
 					d.latestFrameNum = -1
-					d.packetData = make([]uint8, 33*25)
+					d.packetData = make([]byte, 33*25)
 					d.firstLSFFrame = true
 				default:
-					log.Printf("[ERROR] Unexpected sync type")
+					log.Printf("[ERROR] Unexpected sync type: 0x%x", typ)
 				}
 			}
 		} else { //synced
 			d.pld[d.pushedCnt] = sample
 			d.pushedCnt++
 			if d.pushedCnt == SymbolsPerPayload { //frame acquired
-
+				// log.Printf("[DEBUG] d.pld: %#v", d.pld)
 				for i := 0; i < SymbolsPerPayload; i++ {
 
 					//bit 0
-					if d.pld[i] >= float32(SymbolList[3]) {
-						d.softBit[i*2+1] = 0xFFFF
-					} else if d.pld[i] >= float32(SymbolList[2]) {
-						d.softBit[i*2+1] = uint16(-float32(0xFFFF)/float32((SymbolList[3]-SymbolList[2])*SymbolList[2]) + d.pld[i]*float32(0xFFFF)/float32((SymbolList[3]-SymbolList[2])))
-					} else if d.pld[i] >= float32(SymbolList[1]) {
-						d.softBit[i*2+1] = 0x0000
-					} else if d.pld[i] >= float32(SymbolList[0]) {
-						d.softBit[i*2+1] = uint16(float32(0xFFFF)/float32((SymbolList[1]-SymbolList[0])*SymbolList[1]) - d.pld[i]*float32(0xFFFF)/float32((SymbolList[1]-SymbolList[0])))
+					if d.pld[i] >= SymbolList[3] {
+						d.softBit[i*2+1] = softTrue
+					} else if d.pld[i] >= SymbolList[2] {
+						d.softBit[i*2+1] = -softTrue/((SymbolList[3]-SymbolList[2])*SymbolList[2]) + d.pld[i]*softTrue/(SymbolList[3]-SymbolList[2])
+					} else if d.pld[i] >= SymbolList[1] {
+						d.softBit[i*2+1] = softFalse
+					} else if d.pld[i] >= SymbolList[0] {
+						d.softBit[i*2+1] = softTrue/((SymbolList[1]-SymbolList[0])*SymbolList[1]) - d.pld[i]*softTrue/(SymbolList[1]-SymbolList[0])
 					} else {
-						d.softBit[i*2+1] = 0xFFFF
+						d.softBit[i*2+1] = softTrue
 					}
 
 					//bit 1
-					if d.pld[i] >= float32(SymbolList[2]) {
-						d.softBit[i*2] = 0x0000
-					} else if d.pld[i] >= float32(SymbolList[1]) {
-						d.softBit[i*2] = 0x7FFF - uint16(d.pld[i]*float32(0xFFFF)/float32(SymbolList[2]-SymbolList[1]))
+					if d.pld[i] >= SymbolList[2] {
+						d.softBit[i*2] = softFalse
+					} else if d.pld[i] >= SymbolList[1] {
+						d.softBit[i*2] = softMaybe - (d.pld[i] * softTrue / (SymbolList[2] - SymbolList[1]))
 					} else {
-						d.softBit[i*2] = 0xFFFF
+						d.softBit[i*2] = softTrue
 					}
 				}
+				// log.Printf("[DEBUG] d.softBit: %#v", d.softBit)
 
 				//derandomize
-				for i := 0; i < SymbolsPerPayload*2; i++ {
-					if (RandSeq[i/8]>>(7-(i%8)))&1 != 0 { //soft XOR. flip soft bit if "1"
-						d.softBit[i] = 0xFFFF - d.softBit[i]
-					}
-				}
+				d.softBit = derandomizeSymbols(d.softBit)
+				// log.Printf("[DEBUG] derandomized d.softBit: %#v", d.softBit)
 
 				//deinterleave
-				for i := 0; i < SymbolsPerPayload*2; i++ {
-					d.dSoftBit[i] = d.softBit[IntrlSeq[i]]
-				}
+				d.softBit = deinterleaveSymbols(d.softBit)
+				// log.Printf("[DEBUG] d.dSoftBit: %#v", d.dSoftBit)
 
 				if d.firstLSFFrame { //if it is LSF
 					//decode
-					lsf := make([]byte, LSFLen+1) // extra byte for the Viterbi Decoder
-					e, err := ViterbiDecodePunctured(lsf, d.dSoftBit, PuncturePattern1)
-					if err != nil {
-						log.Printf("[ERROR] Error calling ViterbiDecodePunctured: %v", err)
-					}
+					vd := ViterbiDecoder{}
+					lsf, e := vd.DecodePunctured(d.dSoftBit, LSFPuncturePattern)
 
 					//shift the buffer 1 position left - get rid of the encoded flushing bits
 					// copy(lsf, lsf[1:])
 					d.lsf = lsf[1 : LSFLen+1]
-					log.Printf("[DEBUG] d.lsf: %x", d.lsf)
+					// log.Printf("[DEBUG] d.lsf: %x", d.lsf)
 					if CRC(d.lsf) != 0 {
 						log.Printf("[DEBUG] Bad LSF CRC: %x", CRC(d.lsf))
 					} else {
@@ -147,7 +155,7 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromModem func([]uint8, []uint8) e
 						}
 						log.Printf("[DEBUG] dest: %s, src: %s", dst, src)
 					}
-					log.Printf("[DEBUG] LSF Viterbi error: %1.1f", float32(e)/float32(0xFFFF))
+					log.Printf("[DEBUG] LSF Viterbi error: %1.1f", e/softTrue)
 
 				} else { // non-LSF frame
 					// m := ""
@@ -156,10 +164,9 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromModem func([]uint8, []uint8) e
 					// }
 					// log.Printf("[DEBUG] len(dSoftBit): %d, dSoftBit: %s", len(dSoftBit), m)
 					//decode
-					e, err := ViterbiDecodePunctured(d.frameData, d.dSoftBit, PuncturePattern3)
-					if err != nil {
-						log.Printf("[ERROR] Error calling ViterbiDecodePunctured: %v", err)
-					}
+					var e float64
+					vd := ViterbiDecoder{}
+					d.frameData, e = vd.DecodePunctured(d.dSoftBit, PacketPuncturePattern)
 
 					lastFrame := (d.frameData[26] >> 7) != 0
 
@@ -191,31 +198,31 @@ func (d *Decoder) DecodeSamples(in io.Reader, fromModem func([]uint8, []uint8) e
 						copy(d.packetData[(d.latestFrameNum+1)*25:(d.latestFrameNum+1)*25+frameNumOrByteCnt], d.frameData[1:frameNumOrByteCnt+1])
 						d.packetData = d.packetData[:(d.latestFrameNum+1)*25+frameNumOrByteCnt]
 						// fprintf(stderr, " \033[93mContent\033[39m\n");
-						log.Printf("[DEBUG] d.lsf: %#v, d.packetData: %#v", d.lsf, d.packetData)
+						// log.Printf("[DEBUG] d.lsf: %#v, d.packetData: %#v", d.lsf, d.packetData)
 						if CRC(d.lsf) == 0 && CRC(d.packetData) == 0 {
 							fromModem(d.lsf, d.packetData)
 						} else {
 							log.Printf("[DEBUG] Bad CRC not forwarded. LSF: %x, packet %x", CRC(d.lsf), CRC(d.packetData))
 						}
 						// cleanup
-						d.lsf = make([]uint8, 30+1)         //complete LSF (one byte extra needed for the Viterbi decoder)
-						d.frameData = make([]uint8, 26+1)   //decoded frame data, 206 bits, plus 4 flushing bits
-						d.packetData = make([]uint8, 33*25) //whole packet data
-
+						d.resetPacket()
 					}
-
 				}
-
 				//job done
-				d.ResetFrame()
+				d.resetFrame()
 			}
 		}
 	}
 }
 
-func (d *Decoder) ResetFrame() {
+func (d *Decoder) resetFrame() {
 	d.synced = false
 	d.pushedCnt = 0
-
 	d.last = ring.New(8)
+}
+
+func (d *Decoder) resetPacket() {
+	d.lsf = make([]byte, 30+1)         //complete LSF (one byte extra needed for the Viterbi decoder)
+	d.frameData = make([]byte, 26+1)   //decoded frame data, 206 bits, plus 4 flushing bits
+	d.packetData = make([]byte, 33*25) //whole packet data
 }
