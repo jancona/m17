@@ -41,7 +41,7 @@ func main() {
 	}
 	setupLogging()
 
-	g, err := NewGateway(*serverArg, *portArg, *moduleArg, *inArg, *outArg)
+	g, err := NewGateway(*serverArg, *portArg, *moduleArg, *inArg, *outArg, *isDuplex)
 	if err != nil {
 		log.Fatalf("Error creating Gateway: %v", err)
 	}
@@ -79,13 +79,14 @@ type Gateway struct {
 	Port   uint
 	Module string
 
-	in    *os.File
-	out   *os.File
-	relay *m17.Relay
-	done  bool
+	in     *os.File
+	out    *os.File
+	relay  *m17.Relay
+	duplex bool
+	done   bool
 }
 
-func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out string) (*Gateway, error) {
+func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out string, duplex bool) (*Gateway, error) {
 	var err error
 
 	g := Gateway{
@@ -94,6 +95,7 @@ func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out
 		Module: moduleArg,
 		in:     os.Stdin,
 		out:    os.Stdout,
+		duplex: duplex,
 	}
 
 	if in != "" {

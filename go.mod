@@ -1,6 +1,8 @@
 module github.com/jancona/m17text
 
-go 1.23
+go 1.23.0
+
+toolchain go1.23.4
 
 require github.com/hashicorp/logutils v1.0.0
 
@@ -9,6 +11,7 @@ require github.com/sigurn/crc16 v0.0.0-20240131213347-83fcde1e29d1
 require (
 	fyne.io/fyne/v2 v2.5.4
 	github.com/icza/gog v0.0.0-20241010132004-5da24f18211d
+	github.com/randomvariable/goterm v0.0.0-20250127144928-40df54235b11
 )
 
 require (

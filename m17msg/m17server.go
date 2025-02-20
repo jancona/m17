@@ -182,7 +182,7 @@ func (s *m17Server) handleM17(p m17.Packet) error {
 		fmt.Fprintf(os.Stderr, "Bad src callsign: %v", err)
 	}
 	msg := string(p.Payload)
-	if p.Type == m17.PacketTypeSMS && (dst == s.callsign || dst == m17.DestinationAll) {
+	if p.Type == m17.PacketTypeSMS /*&& (dst == s.callsign || dst == m17.DestinationAll)*/ {
 		fmt.Printf("%s %s>%s: %s\n", time.Now().Format(time.DateTime), src, dst, msg)
 		chName := src
 		if strings.HasPrefix(dst, "@") || strings.HasPrefix(dst, "#") {

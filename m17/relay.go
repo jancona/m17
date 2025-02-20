@@ -105,12 +105,20 @@ func (c *Relay) Handle() {
 			continue
 		}
 		magic := string(buffer[0:4])
+		if magic != "PING" {
+			log.Printf("[DEBUG] Packet received, len: %d:\n%#v\n%s\n", l, buffer, string(buffer[:4]))
+		}
 		switch magic {
 		case magicACKN:
 			c.connected = true
 		case magicNACK:
+			c.connected = false
+			log.Print("[INFO] Received NACK, disconnecting")
+			c.done = true
 		case magicDISC:
 			c.connected = false
+			log.Print("[INFO] Received DISC, disconnecting")
+			c.done = true
 		case magicPING:
 			c.sendPONG()
 			// case magicINFO:
@@ -133,7 +141,7 @@ func (c *Relay) SendPacket(p Packet) error {
 	cmd := make([]byte, 0, magicLen+len(b))
 	cmd = append(cmd, []byte(magicM17Packet)...)
 	cmd = append(cmd, b...)
-	// log.Printf("[DEBUG] p: %#v, cmd: %#v", p, cmd)
+	log.Printf("[DEBUG] p: %#v, cmd: %#v", p, cmd)
 
 	_, err := c.conn.Write(cmd)
 	if err != nil {
@@ -161,6 +169,7 @@ func (c *Relay) sendCONN() error {
 	copy(cmd, []byte(magicCONN))
 	copy(cmd[4:10], c.EncodedCallsign)
 	cmd[10] = c.Module
+	log.Printf("[DEBUG] Sending CONN callsign: %s, module %s, cmd: %#v", c.Callsign, string(c.Module), cmd)
 	_, err := c.conn.Write(cmd)
 	if err != nil {
 		return fmt.Errorf("error sending CONN: %w", err)
@@ -168,12 +177,13 @@ func (c *Relay) sendCONN() error {
 	return nil
 }
 func (c *Relay) sendPONG() error {
+	// log.Print("[DEBUG] Sending PONG")
 	cmd := make([]byte, 10)
 	copy(cmd, []byte(magicPONG))
 	copy(cmd[4:10], c.EncodedCallsign)
 	_, err := c.conn.Write(cmd)
 	if err != nil {
-		return fmt.Errorf("error sending CONN: %w", err)
+		return fmt.Errorf("error sending PONG: %w", err)
 	}
 	return nil
 }
