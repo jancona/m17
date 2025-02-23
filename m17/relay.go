@@ -81,6 +81,7 @@ func (c *Relay) Connect() error {
 }
 func (c *Relay) Close() error {
 	log.Print("[DEBUG] Relay.Close()")
+	c.sendDISC()
 	return c.conn.Close()
 }
 func (c *Relay) Handle() {
@@ -184,6 +185,17 @@ func (c *Relay) sendPONG() error {
 	_, err := c.conn.Write(cmd)
 	if err != nil {
 		return fmt.Errorf("error sending PONG: %w", err)
+	}
+	return nil
+}
+func (c *Relay) sendDISC() error {
+	cmd := make([]byte, 10)
+	copy(cmd, []byte(magicDISC))
+	copy(cmd[4:10], c.EncodedCallsign)
+	log.Printf("[DEBUG] Sending DISC cmd: %#v", cmd)
+	_, err := c.conn.Write(cmd)
+	if err != nil {
+		return fmt.Errorf("error sending DISC: %w", err)
 	}
 	return nil
 }
