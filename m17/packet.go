@@ -87,7 +87,13 @@ func NewLSF(destCall, sourceCall string, t LSFType, dt LSFDataType, can byte) (L
 	if err != nil {
 		return lsf, fmt.Errorf("bad src callsign: %w", err)
 	}
-	lsf.Type = append(lsf.Type, (can & 0x7), (byte(t)&0x1)|((byte(dt)&0x3)<<1))
+	if t == 0 {
+		// Data Type is only defined for stream mode
+		dt = 0
+	}
+	lsf.Type = append(lsf.Type,
+		(can & 0x7),
+		(byte(t)&0x1)|((byte(dt)&0x3)<<1))
 	// lsf.Type[0] = (can & 0x7)
 	// lsf.Type[1] = (byte(t) & 0x1) | ((byte(dt) & 0x3) << 1)
 	return lsf, nil
