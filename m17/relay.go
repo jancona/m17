@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 )
 
 const (
@@ -30,6 +31,7 @@ type Relay struct {
 	Callsign        string
 	conn            *net.UDPConn
 	connected       bool
+	lastPing        time.Time
 	handler         func(Packet) error
 	done            bool
 }
@@ -122,6 +124,7 @@ func (c *Relay) Handle() {
 			c.done = true
 		case magicPING:
 			c.sendPONG()
+			c.lastPing = time.Now()
 			// case magicINFO:
 		case magicM17Voice: // Original M17 voice stream
 			// TODO: This should be replaced by the proper code to handle voice streams
@@ -138,6 +141,9 @@ func (c *Relay) Handle() {
 }
 
 func (c *Relay) SendPacket(p Packet) error {
+	if time.Since(c.lastPing) > 30*time.Second {
+		log.Printf("[DEBUG] Last ping was at %s", c.lastPing)
+	}
 	b := p.ToBytes()
 	cmd := make([]byte, 0, magicLen+len(b))
 	cmd = append(cmd, []byte(magicM17Packet)...)
