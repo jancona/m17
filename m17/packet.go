@@ -126,9 +126,15 @@ func (l *LSF) ToBytes() []byte {
 // Calculate CRC for this LSF
 func (l *LSF) CalcCRC() uint16 {
 	a := l.ToBytes()
-	crc := CRC(a[:LSFLen-2])
+	crc := CRC(a[:LSFLen-CRCLen])
 	l.CRC, _ = binary.Append(nil, binary.BigEndian, crc)
 	return crc
+}
+
+// Check if the CRC is correct
+func (l *LSF) CheckCRC() bool {
+	a := l.ToBytes()
+	return CRC(a) == 0
 }
 
 // M17 packet
@@ -182,6 +188,12 @@ func (p *Packet) PayloadBytes() []byte {
 		log.Printf("[ERROR] Error encoding CRC: %v", err)
 	}
 	return b
+}
+
+// Check if the CRC is correct
+func (p *Packet) CheckCRC() bool {
+	a := p.PayloadBytes()
+	return CRC(a) == 0
 }
 
 func (p *Packet) Encode() ([]Symbol, error) {

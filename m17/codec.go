@@ -3,7 +3,6 @@ package m17
 import (
 	"container/ring"
 	"errors"
-	"log"
 	"math"
 )
 
@@ -69,9 +68,9 @@ func (b *Bit) Set(by byte) {
 
 type Bits [BitsPerPayload]Bit
 
-func NewBits(bs []Bit) *Bits {
+func NewBits(bs *[]Bit) *Bits {
 	var bits Bits
-	copy(bits[:], bs)
+	copy(bits[:], *bs)
 	return &bits
 }
 
@@ -242,7 +241,7 @@ func appendEOT(out []Symbol) []Symbol {
 // in 				Input bytes
 // puncturePattern 	the puncture pattern to use
 // finalBit 		The last bit of the final byte to encode. A number between 0 and 7. (That is, the number of bits from the last byte to use minus one.)
-func ConvolutionalEncode(in []byte, puncturePattern PuncturePattern, finalBit byte) ([]Bit, error) {
+func ConvolutionalEncode(in []byte, puncturePattern PuncturePattern, finalBit byte) (*[]Bit, error) {
 	if len(in) == 0 {
 		return nil, errors.New("empty input not allowed")
 	}
@@ -261,36 +260,34 @@ func ConvolutionalEncode(in []byte, puncturePattern PuncturePattern, finalBit by
 	for i := 0; i < 4; i++ {
 		unpackedBits = append(unpackedBits, 0)
 	}
-
 	p := 0
-	out := make([]Bit, 4+8*len(in)+(int(finalBit)+1)+4)
+	out := make([]Bit, 0, 2*len(unpackedBits))
+	// log.Printf("[DEBUG] len(in): %d, len(unpackedBits): %d, len(out): %d", len(in), len(unpackedBits), len(out))
 	ppLen := 1
 	if puncturePattern != nil {
 		ppLen = len(puncturePattern)
 	}
-	pb := 0
-	for i := 0; i < len(unpackedBits)-4; i++ {
-		G1 := (unpackedBits[i+4] + unpackedBits[i+1] + unpackedBits[i+0]) % 2
-		G2 := (unpackedBits[i+4] + unpackedBits[i+3] + unpackedBits[i+2] + unpackedBits[i+0]) % 2
-
+	// pb := 0
+	for i := range len(unpackedBits) - 4 {
 		if puncturePattern == nil || puncturePattern[p] {
-			out[pb].Set(G1)
-			pb++
+			g2 := (unpackedBits[i+4] + unpackedBits[i+1] + unpackedBits[i+0]) % 2
+			out = append(out, g2 != 0)
 		}
 
 		p++
 		p %= ppLen
 
 		if puncturePattern == nil || puncturePattern[p] {
-			out[pb].Set(G2)
-			pb++
+			g2 := (unpackedBits[i+4] + unpackedBits[i+3] + unpackedBits[i+2] + unpackedBits[i+0]) % 2
+			out = append(out, g2 != 0)
 		}
 
 		p++
 		p %= ppLen
 	}
+	// log.Printf("[DEBUG] len(out): %d", len(out))
 
-	return out, nil
+	return &out, nil
 }
 
 type ViterbiDecoder struct {
@@ -335,7 +332,7 @@ func (v *ViterbiDecoder) DecodePunctured(puncturedSoftBits []Symbol, puncturePat
 }
 
 func (v *ViterbiDecoder) decode(softBits []Symbol) ([]byte, float64) {
-	log.Printf("[DEBUG] decode() len(softBits): %d, softBits: %#v", len(softBits), softBits)
+	// log.Printf("[DEBUG] decode() len(softBits): %d, softBits: %#v", len(softBits), softBits)
 	v.Init(len(softBits))
 	pos := 0
 	for i := 0; i < len(softBits); i += 2 {
@@ -419,7 +416,7 @@ func (v *ViterbiDecoder) chainback(pos, l int) ([]byte, float64) {
 			cost = m
 		}
 	}
-	log.Printf("[DEBUG] chainback(%d, %d) cost: %f", pos, l, cost)
+	// log.Printf("[DEBUG] chainback(%d, %d) cost: %f", pos, l, cost)
 
 	return out, cost
 }

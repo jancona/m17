@@ -102,6 +102,18 @@ func TestDecodeCallsign(t *testing.T) {
 			},
 			want: "#OTHER",
 		},
+		{name: "M17-TAE B",
+			args: args{
+				encoded: []byte{0xb, 0xf0, 0x90, 0x0, 0xba, 0xed},
+			},
+			want: "M17-TAE B",
+		},
+		{name: "N7TAE",
+			args: args{
+				encoded: []byte{0x47, 0x86, 0x8c, 0xc4, 0xcc, 0x5e},
+			},
+			want: "N7TAE   L",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

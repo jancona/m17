@@ -15,7 +15,7 @@ func Test_ConvolutionalEncode(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    *Bits
+		want    *[]Bit
 		wantErr bool
 	}{
 		{"empty",
@@ -33,7 +33,44 @@ func Test_ConvolutionalEncode(t *testing.T) {
 				PacketPuncturePattern,
 				PacketModeFinalBit,
 			},
-			&Bits{false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false},
+			&[]Bit{
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false, // 100
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false, // 200
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false, // 300
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false, false, false,
+				false, false, false, false, false, false, false, false},
 			false,
 		},
 		{"packet",
@@ -42,7 +79,7 @@ func Test_ConvolutionalEncode(t *testing.T) {
 				PacketPuncturePattern,
 				PacketModeFinalBit,
 			},
-			&Bits{false, false, false, false, false, false, false, false, false, true, true, false, true, true, true, true, false, true, false, false, true, false, false, false, false, true, false, true, true, true, true, true, true, false, false, false, false, false, false, true, false, false, true, false, false, true, true, false, true, false, false, false, false, false, false, false, true, true, false, true, false, true, false, false, true, false, false, true, true, true, false, true, true, true, false, true, true, true, false, false, true, true, true, true, true, true, true, true, false, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, false, true, false, true, false, false, true, false, false, true, true, false, true, true, false, false},
+			&[]Bit{false, false, false, false, false, false, false, false, false, true, true, false, true, true, true, true, false, true, false, false, true, false, false, false, false, true, false, true, true, true, true, true, true, false, false, false, false, false, false, true, false, false, true, false, false, true, true, false, true, false, false, false, false, false, false, false, true, true, false, true, false, true, false, false, true, false, false, true, true, true, false, true, true, true, false, true, true, true, false, false, true, true, true, true, true, true, true, true, false, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, false, true, false, true, false, false, true, false, false, true, true, false, true, true, false, false},
 			false,
 		},
 		{"lsf",
@@ -51,7 +88,7 @@ func Test_ConvolutionalEncode(t *testing.T) {
 				LSFPuncturePattern,
 				LSFFinalBit,
 			},
-			&Bits{false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, true, true, false, true, false, true, false, false, true, true, true, false, true, false, false, true, true, false, true, false, true, true, false, false, true, true, false, false, true, true, false, false, false, true, false, true, false, true, false, false, true, true, false, false, true, true, false, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, false, false, false, true, false, true, false, false, true, false, true, true, true, true, true, false, false, true, false, false, true, true, true, false, false, true, true, true, true, true, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, true, false, true, false, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, false, true, false, true, false, true, true, false, false, true, true, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, false, false},
+			&[]Bit{false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, true, true, false, true, false, true, false, false, true, true, true, false, true, false, false, true, true, false, true, false, true, true, false, false, true, true, false, false, true, true, false, false, false, true, false, true, false, true, false, false, true, true, false, false, true, true, false, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, false, false, false, true, false, true, false, false, true, false, true, true, true, true, true, false, false, true, false, false, true, true, true, false, false, true, true, true, true, true, false, false, false, false, true, false, false, false, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, true, false, true, false, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, false, true, false, true, false, true, true, false, false, true, true, false, true, true, true, false, false, false, true, true, true, false, false, false, true, true, false, false},
 			false,
 		},
 	}
@@ -59,11 +96,11 @@ func Test_ConvolutionalEncode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ConvolutionalEncode(tt.args.in, tt.args.puncturePattern, tt.args.finalBits)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("convolutionalEncode() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ConvolutionalEncode() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("convolutionalEncode() = %v, want %v", got, tt.want)
+				t.Errorf("ConvolutionalEncode() = %v, want %v", got, tt.want)
 			}
 		})
 	}
