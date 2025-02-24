@@ -27,7 +27,7 @@ type Relay struct {
 	Server          string
 	Port            uint
 	Module          byte
-	EncodedCallsign []byte
+	EncodedCallsign [6]byte
 	Callsign        string
 	conn            *net.UDPConn
 	connected       bool
@@ -56,7 +56,7 @@ func NewRelay(server string, port uint, module string, callsign string, handler 
 		Port:            port,
 		Module:          m,
 		Callsign:        callsign,
-		EncodedCallsign: cs,
+		EncodedCallsign: *cs,
 		handler:         handler,
 	}
 	return &c, nil
@@ -174,7 +174,7 @@ func (c *Relay) SendSMS(destCall, sourceCall, message string) error {
 func (c *Relay) sendCONN() error {
 	cmd := make([]byte, 11)
 	copy(cmd, []byte(magicCONN))
-	copy(cmd[4:10], c.EncodedCallsign)
+	copy(cmd[4:10], c.EncodedCallsign[:])
 	cmd[10] = c.Module
 	log.Printf("[DEBUG] Sending CONN callsign: %s, module %s, cmd: %#v", c.Callsign, string(c.Module), cmd)
 	_, err := c.conn.Write(cmd)
@@ -187,7 +187,7 @@ func (c *Relay) sendPONG() error {
 	// log.Print("[DEBUG] Sending PONG")
 	cmd := make([]byte, 10)
 	copy(cmd, []byte(magicPONG))
-	copy(cmd[4:10], c.EncodedCallsign)
+	copy(cmd[4:10], c.EncodedCallsign[:])
 	_, err := c.conn.Write(cmd)
 	if err != nil {
 		return fmt.Errorf("error sending PONG: %w", err)
@@ -197,7 +197,7 @@ func (c *Relay) sendPONG() error {
 func (c *Relay) sendDISC() error {
 	cmd := make([]byte, 10)
 	copy(cmd, []byte(magicDISC))
-	copy(cmd[4:10], c.EncodedCallsign)
+	copy(cmd[4:10], c.EncodedCallsign[:])
 	log.Printf("[DEBUG] Sending DISC cmd: %#v", cmd)
 	_, err := c.conn.Write(cmd)
 	if err != nil {

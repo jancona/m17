@@ -60,64 +60,57 @@ const (
 
 // Link Setup Frame
 type LSF struct {
-	Dst  []byte
-	Src  []byte
-	Type []byte
-	Meta []byte
-	CRC  []byte
+	Dst  [EncodedCallsignLen]byte
+	Src  [EncodedCallsignLen]byte
+	Type [typeLen]byte
+	Meta [metaLen]byte
+	CRC  [CRCLen]byte
 }
 
 func NewEmptyLSF() LSF {
-	return LSF{
-		Dst:  make([]byte, 0, EncodedCallsignLen),
-		Src:  make([]byte, 0, EncodedCallsignLen),
-		Type: make([]byte, 0, typeLen),
-		Meta: make([]byte, 0, metaLen),
-		CRC:  make([]byte, 0, CRCLen),
-	}
+	return LSF{}
 }
 func NewLSF(destCall, sourceCall string, t LSFType, dt LSFDataType, can byte) (LSF, error) {
 	var err error
 	lsf := NewEmptyLSF()
-	lsf.Dst, err = EncodeCallsign(destCall)
+	dst, err := EncodeCallsign(destCall)
 	if err != nil {
 		return lsf, fmt.Errorf("bad dst callsign: %w", err)
 	}
-	lsf.Src, err = EncodeCallsign(sourceCall)
+	lsf.Dst = *dst
+	src, err := EncodeCallsign(sourceCall)
 	if err != nil {
 		return lsf, fmt.Errorf("bad src callsign: %w", err)
 	}
+	lsf.Src = *src
 	if t == 0 {
 		// Data Type is only defined for stream mode
 		dt = 0
 	}
-	lsf.Type = append(lsf.Type,
-		(can & 0x7),
-		(byte(t)&0x1)|((byte(dt)&0x3)<<1))
-	// lsf.Type[0] = (can & 0x7)
-	// lsf.Type[1] = (byte(t) & 0x1) | ((byte(dt) & 0x3) << 1)
+	lsf.Type[0] = (can & 0x7)
+	lsf.Type[1] = (byte(t) & 0x1) | ((byte(dt) & 0x3) << 1)
 	return lsf, nil
 }
 
 func NewLSFFromBytes(buf []byte) LSF {
 	var lsf LSF
-	lsf.Dst = buf[dstPos:srcPos]
-	lsf.Src = buf[srcPos:typPos]
-	lsf.Type = buf[typPos:metaPos]
-	lsf.Meta = buf[metaPos:crcPos]
-	lsf.CRC = buf[crcPos : crcPos+CRCLen]
+	copy(lsf.Dst[:], buf[dstPos:srcPos])
+	copy(lsf.Src[:], buf[srcPos:typPos])
+	copy(lsf.Type[:], buf[typPos:metaPos])
+	copy(lsf.Meta[:], buf[metaPos:crcPos])
+	copy(lsf.CRC[:], buf[crcPos:crcPos+CRCLen])
 	return lsf
 }
 
 // Convert this LSF to a byte slice suitable for transmission
 func (l *LSF) ToBytes() []byte {
-	b := make([]byte, LSFLen)
+	b := make([]byte, 0, LSFLen)
 
-	copy(b[dstPos:srcPos], l.Dst)
-	copy(b[srcPos:typPos], l.Src)
-	copy(b[typPos:metaPos], l.Type)
-	copy(b[metaPos:crcPos], l.Meta)
-	copy(b[crcPos:crcPos+CRCLen], l.CRC)
+	b = append(b, l.Dst[:]...)
+	b = append(b, l.Src[:]...)
+	b = append(b, l.Type[:]...)
+	b = append(b, l.Meta[:]...)
+	b = append(b, l.CRC[:]...)
 	// log.Printf("[DEBUG] LSF.ToBytes(): %#v", b)
 
 	return b
@@ -127,7 +120,8 @@ func (l *LSF) ToBytes() []byte {
 func (l *LSF) CalcCRC() uint16 {
 	a := l.ToBytes()
 	crc := CRC(a[:LSFLen-CRCLen])
-	l.CRC, _ = binary.Append(nil, binary.BigEndian, crc)
+	crcb, _ := binary.Append(nil, binary.BigEndian, crc)
+	copy(l.CRC[:], crcb)
 	return crc
 }
 

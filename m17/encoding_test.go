@@ -12,17 +12,17 @@ func TestEncodeCallsign(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    []byte
+		want    *[6]byte
 		wantErr bool
 	}{
 		{name: "N1ADJ",
 			args:    args{callsign: "N1ADJ"},
-			want:    []byte{0, 0, 1, 138, 146, 174},
+			want:    &[6]byte{0, 0, 1, 138, 146, 174},
 			wantErr: false,
 		},
 		{name: "n1adj",
 			args:    args{callsign: "N1ADJ"},
-			want:    []byte{0, 0, 1, 138, 146, 174},
+			want:    &[6]byte{0, 0, 1, 138, 146, 174},
 			wantErr: false,
 		},
 		{name: "too long",
@@ -31,17 +31,17 @@ func TestEncodeCallsign(t *testing.T) {
 		},
 		{name: "@all",
 			args:    args{callsign: "@all"},
-			want:    []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+			want:    &[6]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 			wantErr: false,
 		},
 		{name: "#all",
 			args:    args{callsign: "#ALL"},
-			want:    []byte{238, 107, 40, 0, 76, 225},
+			want:    &[6]byte{238, 107, 40, 0, 76, 225},
 			wantErr: false,
 		},
 		{name: "#OTHER",
 			args:    args{callsign: "#OTHER"},
-			want:    []byte{238, 107, 42, 196, 55, 47},
+			want:    &[6]byte{238, 107, 42, 196, 55, 47},
 			wantErr: false,
 		},
 	}

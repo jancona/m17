@@ -14,17 +14,17 @@ const (
 	SpecialEncodedRange   = 268697600000000 //40^9+40^8
 )
 
-var EncodedDestinationAllBytes = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+var EncodedDestinationAllBytes = [6]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
 const m17Chars = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/."
 
-func EncodeCallsign(callsign string) ([]byte, error) {
+func EncodeCallsign(callsign string) (*[6]byte, error) {
 	if len(callsign) > MaxCallsignLen {
 		return nil, fmt.Errorf("callsign '%s' too long, max %d", callsign, MaxCallsignLen)
 	}
 	callsign = strings.ToUpper(callsign)
 	if callsign == DestinationAll {
-		return EncodedDestinationAllBytes, nil
+		return &EncodedDestinationAllBytes, nil
 	}
 	start := 0
 	if callsign[0] == '#' {
@@ -32,7 +32,7 @@ func EncodeCallsign(callsign string) ([]byte, error) {
 	}
 
 	var address uint64 = 0 // the calculate address in host byte order
-	var ret = make([]byte, 6)
+	var ret [6]byte
 
 	// process each char from the end to the beginning
 	for i := min(len(callsign), 9) - 1; i >= start; i-- {
@@ -63,7 +63,7 @@ func EncodeCallsign(callsign string) ([]byte, error) {
 		ret[i] = byte(address & 0xff)
 		address /= 0x100
 	}
-	return ret, nil
+	return &ret, nil
 }
 
 func DecodeCallsign(encoded []byte) (string, error) {

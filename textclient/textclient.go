@@ -21,7 +21,7 @@ var (
 	helpArg     *bool   = flag.Bool("h", false, "Print arguments")
 )
 
-var encodedCallsign []byte
+var encodedCallsign *[6]byte
 
 func main() {
 	flag.Parse()
@@ -62,11 +62,11 @@ func main() {
 func handleM17(p m17.Packet) error {
 	// // A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
 	// log.Printf("[DEBUG] p: %#v", p)
-	dst, err := m17.DecodeCallsign(p.LSF.Dst)
+	dst, err := m17.DecodeCallsign(p.LSF.Dst[:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bad dst callsign: %v", err)
 	}
-	src, err := m17.DecodeCallsign(p.LSF.Src)
+	src, err := m17.DecodeCallsign(p.LSF.Src[:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bad src callsign: %v", err)
 	}
