@@ -21,6 +21,7 @@ import (
 const (
 	prefM17CallsignKey = "callsign"
 	prefM17NameKey     = "name"
+	prefM17ServerKey   = "server"
 	prefM17PortKey     = "port"
 	prefM17ModuleKey   = "module"
 )
@@ -35,6 +36,7 @@ func init() {
 }
 
 type m17Server struct {
+	ID       string
 	app      fyne.App
 	callsign string
 	name     string
@@ -52,6 +54,10 @@ func (s *m17Server) configure(u *ui) (fyne.CanvasObject, func(prefix string, a f
 	callsign := widget.NewEntry()
 	if s.callsign != "" {
 		callsign.Text = s.callsign
+	}
+	name := widget.NewEntry()
+	if s.name != "" {
+		name.Text = s.name
 	}
 	server := widget.NewEntry()
 	server.Validator = func(s string) error {
@@ -72,6 +78,7 @@ func (s *m17Server) configure(u *ui) (fyne.CanvasObject, func(prefix string, a f
 	module.Validator = validation.NewRegexp("^[A-Z]{0,1}$", "module must be a capital letter A-Z or empty")
 	f := widget.NewForm()
 	f.AppendItem(&widget.FormItem{Text: "Callsign", Widget: callsign})
+	f.AppendItem(&widget.FormItem{Text: "Name", Widget: name})
 	f.AppendItem(&widget.FormItem{Text: "Server", Widget: server})
 	f.AppendItem(&widget.FormItem{Text: "Port", Widget: port})
 	f.AppendItem(&widget.FormItem{Text: "Module", Widget: module})
@@ -79,7 +86,8 @@ func (s *m17Server) configure(u *ui) (fyne.CanvasObject, func(prefix string, a f
 		func(prefix string, a fyne.App) {
 			s.callsign = strings.ToUpper(callsign.Text)
 			s.app.Preferences().SetString(prefix+prefM17CallsignKey, s.callsign)
-			s.app.Preferences().SetString(prefix+prefM17NameKey, server.Text)
+			s.app.Preferences().SetString(prefix+prefM17NameKey, name.Text)
+			s.app.Preferences().SetString(prefix+prefM17ServerKey, server.Text)
 			p, err := strconv.Atoi(port.Text)
 			if err != nil {
 				log.Printf("bad port: %v", err)
@@ -91,7 +99,7 @@ func (s *m17Server) configure(u *ui) (fyne.CanvasObject, func(prefix string, a f
 			if err != nil {
 				log.Printf("validation failed: %v", err)
 			} else {
-				s.doConnect(server.Text, uint(p), module.Text, u)
+				s.doConnect(name.Text, server.Text, uint(p), module.Text, u)
 			}
 		}
 }
@@ -170,7 +178,7 @@ func (s *m17Server) send(ch *channel, text string) {
 }
 
 type messageEvent struct {
-	serverName     string
+	serverID       string
 	channelName    string
 	content        string
 	sourceCallsign string
@@ -193,14 +201,14 @@ func (s *m17Server) handleM17(p m17.Packet) error {
 		fmt.Fprintf(os.Stderr, "Bad src callsign: %v", err)
 	}
 	msg := string(p.Payload)
-	if p.Type == m17.PacketTypeSMS /*&& (dst == s.callsign || dst == m17.DestinationAll)*/ {
+	if p.Type == m17.PacketTypeSMS && (dst == s.callsign || dst == m17.DestinationAll || dst[0:1] == "#") {
 		fmt.Printf("%s %s>%s: %s\n", time.Now().Format(time.DateTime), src, dst, msg)
 		chName := src
 		if strings.HasPrefix(dst, "@") || strings.HasPrefix(dst, "#") {
 			chName = dst
 		}
 		ev := &messageEvent{
-			serverName:     s.name,
+			serverID:       s.ID,
 			channelName:    chName,
 			content:        msg,
 			sourceCallsign: src,
@@ -215,12 +223,18 @@ func (s *m17Server) handleM17(p m17.Packet) error {
 func (s *m17Server) login(prefix string, u *ui) {
 	s.callsign = s.app.Preferences().String(prefix + prefM17CallsignKey)
 	name := s.app.Preferences().String(prefix + prefM17NameKey)
+	server := s.app.Preferences().String(prefix + prefM17ServerKey)
 	port := s.app.Preferences().Int(prefix + prefM17PortKey)
 	module := s.app.Preferences().String(prefix + prefM17ModuleKey)
-	s.doConnect(name, uint(port), module, u)
+	// migrate to new preferences
+	if server == "" {
+		server = name
+		s.app.Preferences().SetString(prefix+prefM17ServerKey, server)
+	}
+	s.doConnect(name, server, uint(port), module, u)
 }
 
-func (s *m17Server) doConnect(server string, port uint, module string, u *ui) {
+func (s *m17Server) doConnect(name string, server string, port uint, module string, u *ui) {
 	var err error
 	log.Printf("Connecting to %s:%d %s, callsign %s", server, port, module, s.callsign)
 	s.relay, err = m17.NewRelay(server, port, module, s.callsign, s.handleM17)
@@ -236,16 +250,18 @@ func (s *m17Server) doConnect(server string, port uint, module string, u *ui) {
 		// When Handle exits, we're done
 		// os.Exit(0)
 	}()
+	s.name = name
 	s.host = server
 	s.port = port
 	s.module = module
-	s.name = fmt.Sprintf("%s:%d %s", s.host, s.port, s.module)
+	s.ID = s.name + " " + s.module
+	// s.name = fmt.Sprintf("%s:%d %s", s.host, s.port, s.module)
 	s.loadServers(u)
 
 }
 
 func (s *m17Server) loadServers(u *ui) {
-	server := &server{service: s, name: s.name, id: s.name, iconResource: m17IconResource}
+	server := &server{service: s, name: s.name, id: s.ID, iconResource: m17IconResource}
 
 	if u.data == nil {
 		u.data = &appData{}
@@ -258,7 +274,11 @@ func (s *m17Server) loadServers(u *ui) {
 	u.servers.Refresh()
 
 	addHandler(func(ev *messageEvent) {
-		ch := findChan(u.data, ev.serverName, ev.channelName)
+		if ev.serverID != server.id {
+			return
+		}
+		// log.Printf("displaying ev: %#v for server: %#v", *ev, server)
+		ch := findChan(u.data, ev.serverID, ev.channelName)
 		if ch == nil {
 			// log.Println("Could not find channel for incoming message")
 			// return

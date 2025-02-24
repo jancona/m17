@@ -71,7 +71,7 @@ func handleM17(p m17.Packet) error {
 		fmt.Fprintf(os.Stderr, "Bad src callsign: %v", err)
 	}
 	msg := string(p.Payload)
-	if p.Type == m17.PacketTypeSMS /*&& (dst == *callsignArg || dst == m17.DestinationAll)*/ {
+	if p.Type == m17.PacketTypeSMS && (dst == *callsignArg || dst == m17.DestinationAll || dst[0:1] == "#") {
 		fmt.Printf("\n%s %s>%s: %s\n> ", time.Now().Format(time.DateTime), src, dst, msg)
 	}
 	return nil

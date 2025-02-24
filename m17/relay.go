@@ -109,7 +109,7 @@ func (c *Relay) Handle() {
 		}
 		magic := string(buffer[0:4])
 		if magic != "PING" {
-			log.Printf("[DEBUG] Packet received, len: %d:\n%#v\n%s\n", l, buffer, string(buffer[:4]))
+			// log.Printf("[DEBUG] Packet received, len: %d:\n%#v\n%s\n", l, buffer, string(buffer[:4]))
 		}
 		switch magic {
 		case magicACKN:
@@ -148,7 +148,7 @@ func (c *Relay) SendPacket(p Packet) error {
 	cmd := make([]byte, 0, magicLen+len(b))
 	cmd = append(cmd, []byte(magicM17Packet)...)
 	cmd = append(cmd, b...)
-	log.Printf("[DEBUG] p: %#v, cmd: %#v", p, cmd)
+	// log.Printf("[DEBUG] p: %#v, cmd: %#v", p, cmd)
 
 	_, err := c.conn.Write(cmd)
 	if err != nil {
