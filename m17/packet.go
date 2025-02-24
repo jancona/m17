@@ -152,7 +152,13 @@ func NewPacketFromBytes(buf []byte) Packet {
 	}
 	return p
 }
-func NewPacket(lsf LSF, t PacketType, data []byte) Packet {
+
+func NewPacket(dst, src string, t PacketType, data []byte) (*Packet, error) {
+	lsf, err := NewLSF(dst, src, LSFTypePacket, LSFDataTypeData, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create LSF for Packet: %w", err)
+	}
+	lsf.CalcCRC()
 	p := Packet{
 		LSF:  lsf,
 		Type: t,
@@ -160,7 +166,7 @@ func NewPacket(lsf LSF, t PacketType, data []byte) Packet {
 	p.Payload = append(p.Payload, data...)
 	pb := p.PayloadBytes()
 	p.CRC = CRC(pb[:len(pb)-2])
-	return p
+	return &p, nil
 }
 
 // Convert this Packet to a byte slice suitable for transmission

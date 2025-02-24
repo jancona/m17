@@ -155,7 +155,18 @@ func (s *m17Server) loadChats(u *ui) {
 // }
 
 func (s *m17Server) send(ch *channel, text string) {
-	s.relay.SendSMS(ch.name, s.callsign, text)
+	// s.relay.SendSMS(ch.name, s.callsign, text)
+	p, err := m17.NewPacket(ch.name, s.callsign, m17.PacketTypeSMS, []byte(text))
+	if err != nil {
+		fmt.Printf("Error creating Packet: %v\n", err)
+		return
+	}
+	err = s.relay.SendPacket(*p)
+	if err != nil {
+		fmt.Printf("Error sending message: %v\n", err)
+		return
+	}
+
 }
 
 type messageEvent struct {

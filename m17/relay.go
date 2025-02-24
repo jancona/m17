@@ -157,20 +157,6 @@ func (c *Relay) SendPacket(p Packet) error {
 	return nil
 }
 
-func (c *Relay) SendSMS(destCall, sourceCall, message string) error {
-	lsf, err := NewLSF(destCall, sourceCall, LSFTypePacket, LSFDataTypeData, 0)
-	if err != nil {
-		return fmt.Errorf("failed to create LSF: %w", err)
-	}
-	lsf.CalcCRC()
-	p := NewPacket(lsf, PacketTypeSMS, append([]byte(message), 0))
-	err = c.SendPacket(p)
-	if err != nil {
-		return fmt.Errorf("failed to send SMS packet: %w", err)
-	}
-	return nil
-}
-
 func (c *Relay) sendCONN() error {
 	cmd := make([]byte, 11)
 	copy(cmd, []byte(magicCONN))

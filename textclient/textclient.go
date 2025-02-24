@@ -102,7 +102,12 @@ func handleConsoleInput(c *m17.Relay) {
 			}
 
 			if command == "" {
-				err := c.SendSMS(callsign, *callsignArg, message)
+				p, err := m17.NewPacket(callsign, *callsignArg, m17.PacketTypeSMS, []byte(message))
+				if err != nil {
+					fmt.Printf("Error creating Packet: %v\n", err)
+					continue
+				}
+				err = c.SendPacket(*p)
 				if err != nil {
 					fmt.Printf("Error sending message: %v\n", err)
 					continue

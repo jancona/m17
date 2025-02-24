@@ -293,32 +293,41 @@ func TestPacket_ToBytes(t *testing.T) {
 
 func TestNewPacket(t *testing.T) {
 	type args struct {
-		lsf  LSF
+		dst  string
+		src  string
 		t    PacketType
 		data []byte
 	}
 	tests := []struct {
-		name string
-		args args
-		want Packet
+		name    string
+		args    args
+		want    *Packet
+		wantErr bool
 	}{
-		{"empty",
+		{"simple",
 			args{
-				NewLSFFromBytes([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}),
+				"A",
+				"B",
 				PacketType(0),
 				[]byte{0},
 			},
-			Packet{
-				LSF:     NewLSFFromBytes([]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}),
+			&Packet{
+				LSF:     NewLSFFromBytes([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 71, 150}),
 				Type:    PacketType(0),
 				Payload: []byte{0},
 				CRC:     26476,
 			},
+			false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NewPacket(tt.args.lsf, tt.args.t, tt.args.data); !reflect.DeepEqual(got, tt.want) {
+			got, err := NewPacket(tt.args.dst, tt.args.src, tt.args.t, tt.args.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewPacket() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("NewPacket() = %v, want %v", got, tt.want)
 			}
 		})
