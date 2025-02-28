@@ -164,7 +164,9 @@ func (s *m17Server) loadChats(u *ui) {
 
 func (s *m17Server) send(ch *channel, text string) {
 	// s.relay.SendSMS(ch.name, s.callsign, text)
-	p, err := m17.NewPacket(ch.name, s.callsign, m17.PacketTypeSMS, []byte(text))
+	// Add a trailing NUL
+	msg := append([]byte(text), 0)
+	p, err := m17.NewPacket(ch.name, s.callsign, m17.PacketTypeSMS, []byte(msg))
 	if err != nil {
 		fmt.Printf("Error creating Packet: %v\n", err)
 		return
@@ -200,7 +202,10 @@ func (s *m17Server) handleM17(p m17.Packet) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bad src callsign: %v", err)
 	}
-	msg := string(p.Payload)
+	var msg string
+	if len(p.Payload) > 0 {
+		msg = string(p.Payload[0 : len(p.Payload)-1])
+	}
 	if p.Type == m17.PacketTypeSMS && (dst == s.callsign || dst == m17.DestinationAll || dst[0:1] == "#") {
 		fmt.Printf("%s %s>%s: %s\n", time.Now().Format(time.DateTime), src, dst, msg)
 		chName := src

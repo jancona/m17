@@ -17,6 +17,7 @@ var (
 	isDuplex    *bool   = flag.Bool("duplex", false, "Operate in duplex mode")
 	inArg       *string = flag.String("in", "", "M17 input (default stdin)")
 	outArg      *string = flag.String("out", "", "M17 output (default stdout)")
+	modemArg    *string = flag.String("modem", "", "Modem port")
 	logDestArg  *string = flag.String("log", "", "Device/file for log (default stderr)")
 	serverArg   *string = flag.String("server", "", "Relay/reflector server")
 	portArg     *uint   = flag.Uint("port", 17000, "Port the relay/reflector listens on")
@@ -40,7 +41,37 @@ func main() {
 		log.Fatal("-server argument is required")
 	}
 	setupLogging()
+	if *modemArg != "" {
+		f, err := os.OpenFile(*modemArg, os.O_RDWR, 0)
+		if err != nil {
+			log.Fatal(err)
+		}
+		n, err := f.Write([]byte{0, 2}) // PING
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("[DEBUG] %d bytes written", n)
+		resp := make([]byte, 100)
+		n, err = f.Read(resp)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("[DEBUG] read %#v", resp[:n])
+		n, err = f.Write([]byte{8, 3, 1}) // CMD_SET_TX_START
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("[DEBUG] %d bytes written", n)
+		resp = make([]byte, 1000)
+		for {
+			n, err = f.Read(resp)
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Printf("[DEBUG] read %d bytes: %#v", n, resp[:n])
+		}
 
+	}
 	g, err := NewGateway(*serverArg, *portArg, *moduleArg, *inArg, *outArg, *isDuplex)
 	if err != nil {
 		log.Fatalf("Error creating Gateway: %v", err)

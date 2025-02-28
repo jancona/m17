@@ -54,3 +54,7 @@ require (
 	golang.org/x/text v0.22.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/randomvariable/goterm => ../goterm
+
+// replace github.com/containerd/console => github.com/slonopotamus/console a9bfb9ad8409fa4c80853d1881d12362271a19aa

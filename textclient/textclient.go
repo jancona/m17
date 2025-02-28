@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -61,7 +62,7 @@ func main() {
 
 func handleM17(p m17.Packet) error {
 	// // A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
-	// log.Printf("[DEBUG] p: %#v", p)
+	log.Printf("[DEBUG] p: %#v", p)
 	dst, err := m17.DecodeCallsign(p.LSF.Dst[:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bad dst callsign: %v", err)
@@ -70,7 +71,10 @@ func handleM17(p m17.Packet) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bad src callsign: %v", err)
 	}
-	msg := string(p.Payload)
+	var msg string
+	if len(p.Payload) > 0 {
+		msg = string(p.Payload[0 : len(p.Payload)-1])
+	}
 	if p.Type == m17.PacketTypeSMS && (dst == *callsignArg || dst == m17.DestinationAll || dst[0:1] == "#") {
 		fmt.Printf("\n%s %s>%s: %s\n> ", time.Now().Format(time.DateTime), src, dst, msg)
 	}
@@ -102,7 +106,9 @@ func handleConsoleInput(c *m17.Relay) {
 			}
 
 			if command == "" {
-				p, err := m17.NewPacket(callsign, *callsignArg, m17.PacketTypeSMS, []byte(message))
+				// Add a trailing NUL
+				msg := append([]byte(message), 0)
+				p, err := m17.NewPacket(callsign, *callsignArg, m17.PacketTypeSMS, msg)
 				if err != nil {
 					fmt.Printf("Error creating Packet: %v\n", err)
 					continue
