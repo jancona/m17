@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -62,7 +61,7 @@ func main() {
 
 func handleM17(p m17.Packet) error {
 	// // A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
-	log.Printf("[DEBUG] p: %#v", p)
+	// log.Printf("[DEBUG] p: %#v", p)
 	dst, err := m17.DecodeCallsign(p.LSF.Dst[:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bad dst callsign: %v", err)
