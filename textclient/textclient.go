@@ -16,6 +16,7 @@ import (
 var (
 	serverArg   *string = flag.String("server", "", "Reflector server")
 	portArg     *uint   = flag.Uint("port", 17000, "Port the reflector listens on")
+	nameArg     *string = flag.String("name", "", "Reflector name")
 	moduleArg   *string = flag.String("module", "T", "Module to connect to")
 	callsignArg *string = flag.String("callsign", "N0CALL", "User's callsign")
 	helpArg     *bool   = flag.Bool("h", false, "Print arguments")
@@ -37,7 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	r, err := m17.NewRelay(*serverArg, *portArg, *moduleArg, *callsignArg, handleM17)
+	r, err := m17.NewRelay(*nameArg, *serverArg, *portArg, *moduleArg, *callsignArg, handleM17)
 	if err != nil {
 		fmt.Printf("Error creating client: %v", err)
 		os.Exit(1)
@@ -62,11 +63,22 @@ func main() {
 func handleM17(p m17.Packet) error {
 	// // A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
 	// log.Printf("[DEBUG] p: %#v", p)
-	dst, err := m17.DecodeCallsign(p.LSF.Dst[:])
+	var dst, src string
+	var err error
+
+	if p.LSF.Meta.Callsign2 != m17.EncodedEmptyCallsignBytes {
+		dst, err = m17.DecodeCallsign(p.LSF.Meta.Callsign2[:])
+	} else {
+		dst, err = m17.DecodeCallsign(p.LSF.Dst[:])
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bad dst callsign: %v", err)
 	}
-	src, err := m17.DecodeCallsign(p.LSF.Src[:])
+	if p.LSF.Meta.Callsign1 != m17.EncodedEmptyCallsignBytes {
+		src, err = m17.DecodeCallsign(p.LSF.Meta.Callsign1[:])
+	} else {
+		src, err = m17.DecodeCallsign(p.LSF.Src[:])
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bad src callsign: %v", err)
 	}

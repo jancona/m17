@@ -15,6 +15,7 @@ const (
 )
 
 var EncodedDestinationAllBytes = [6]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+var EncodedEmptyCallsignBytes = [6]byte{0, 0, 0, 0, 0, 0}
 
 const m17Chars = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/."
 

@@ -24,6 +24,7 @@ const (
 )
 
 type Relay struct {
+	Dst             *[6]byte // encoded destination: reflector name + ' ' + module
 	Server          string
 	Port            uint
 	Module          byte
@@ -36,7 +37,7 @@ type Relay struct {
 	done            bool
 }
 
-func NewRelay(server string, port uint, module string, callsign string, handler func(p Packet) error) (*Relay, error) {
+func NewRelay(name string, server string, port uint, module string, callsign string, handler func(p Packet) error) (*Relay, error) {
 	cs, err := EncodeCallsign(callsign)
 	if err != nil {
 		return nil, fmt.Errorf("bad callsign %s: %w", callsign, err)
@@ -50,8 +51,15 @@ func NewRelay(server string, port uint, module string, callsign string, handler 
 	case len(module) == 1:
 		m = []byte(module)[0]
 	}
-
+	var dst *[6]byte
+	if name != "" {
+		dst, err = EncodeCallsign(name + " " + string(m))
+		if err != nil {
+			return nil, fmt.Errorf("bad name %s: %w", name, err)
+		}
+	}
 	c := Relay{
+		Dst:             dst,
 		Server:          server,
 		Port:            port,
 		Module:          m,
@@ -144,6 +152,15 @@ func (c *Relay) SendPacket(p Packet) error {
 	if time.Since(c.lastPing) > 30*time.Second {
 		log.Printf("[DEBUG] Last ping was at %s", c.lastPing)
 	}
+	if c.Dst != nil && p.LSF.Dst != *c.Dst {
+		// Reflector requires DST to be the its name and module
+		if p.LSF.Meta.Callsign2 == EncodedEmptyCallsignBytes {
+			p.LSF.Meta.Callsign2 = p.LSF.Dst
+			p.LSF.Dst = *c.Dst
+		}
+		p.LSF.Dst = *c.Dst
+		p.LSF.CalcCRC()
+	}
 	b := p.ToBytes()
 	cmd := make([]byte, 0, magicLen+len(b))
 	cmd = append(cmd, []byte(magicM17Packet)...)
@@ -152,7 +169,7 @@ func (c *Relay) SendPacket(p Packet) error {
 
 	_, err := c.conn.Write(cmd)
 	if err != nil {
-		return fmt.Errorf("error sending text message: %w", err)
+		return fmt.Errorf("error sending Packet: %w", err)
 	}
 	return nil
 }

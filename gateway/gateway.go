@@ -19,6 +19,7 @@ var (
 	outArg      *string = flag.String("out", "", "M17 output (default stdout)")
 	modemArg    *string = flag.String("modem", "", "Modem port")
 	logDestArg  *string = flag.String("log", "", "Device/file for log (default stderr)")
+	nameArg     *string = flag.String("name", "", "Relay/reflector name")
 	serverArg   *string = flag.String("server", "", "Relay/reflector server")
 	portArg     *uint   = flag.Uint("port", 17000, "Port the relay/reflector listens on")
 	moduleArg   *string = flag.String("module", "", "Module to connect to")
@@ -39,6 +40,10 @@ func main() {
 	if *serverArg == "" {
 		flag.Usage()
 		log.Fatal("-server argument is required")
+	}
+	if *nameArg == "" {
+		flag.Usage()
+		log.Fatal("-name argument is required")
 	}
 	setupLogging()
 	if *modemArg != "" {
@@ -70,9 +75,8 @@ func main() {
 			}
 			log.Printf("[DEBUG] read %d bytes: %#v", n, resp[:n])
 		}
-
 	}
-	g, err := NewGateway(*serverArg, *portArg, *moduleArg, *inArg, *outArg, *isDuplex)
+	g, err := NewGateway(*nameArg, *serverArg, *portArg, *moduleArg, *inArg, *outArg, *isDuplex)
 	if err != nil {
 		log.Fatalf("Error creating Gateway: %v", err)
 	}
@@ -117,7 +121,7 @@ type Gateway struct {
 	done   bool
 }
 
-func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out string, duplex bool) (*Gateway, error) {
+func NewGateway(nameArg string, serverArg string, portArg uint, moduleArg string, in string, out string, duplex bool) (*Gateway, error) {
 	var err error
 
 	g := Gateway{
@@ -143,7 +147,7 @@ func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out
 		}
 	}
 
-	g.relay, err = m17.NewRelay(serverArg, portArg, moduleArg, *callsignArg, g.FromRelay)
+	g.relay, err = m17.NewRelay(nameArg, serverArg, portArg, moduleArg, *callsignArg, g.FromRelay)
 	if err != nil {
 		return nil, fmt.Errorf("error creating relay: %v", err)
 	}
