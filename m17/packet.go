@@ -58,12 +58,18 @@ const (
 	crcPos  = metaPos + metaLen
 )
 
+type Meta struct {
+	Callsign1 [EncodedCallsignLen]byte
+	Callsign2 [EncodedCallsignLen]byte
+	Reserved  [2]byte
+}
+
 // Link Setup Frame
 type LSF struct {
 	Dst  [EncodedCallsignLen]byte
 	Src  [EncodedCallsignLen]byte
 	Type [typeLen]byte
-	Meta [metaLen]byte
+	Meta Meta
 	CRC  [CRCLen]byte
 }
 
@@ -97,7 +103,9 @@ func NewLSFFromBytes(buf []byte) LSF {
 	copy(lsf.Dst[:], buf[dstPos:srcPos])
 	copy(lsf.Src[:], buf[srcPos:typPos])
 	copy(lsf.Type[:], buf[typPos:metaPos])
-	copy(lsf.Meta[:], buf[metaPos:crcPos])
+	copy(lsf.Meta.Callsign1[:], buf[metaPos:metaPos+EncodedCallsignLen])
+	copy(lsf.Meta.Callsign2[:], buf[metaPos+EncodedCallsignLen:metaPos+2*EncodedCallsignLen])
+	copy(lsf.Meta.Reserved[:], buf[metaPos+2*EncodedCallsignLen:metaPos+2*EncodedCallsignLen+2])
 	copy(lsf.CRC[:], buf[crcPos:crcPos+CRCLen])
 	return lsf
 }
@@ -109,7 +117,9 @@ func (l *LSF) ToBytes() []byte {
 	b = append(b, l.Dst[:]...)
 	b = append(b, l.Src[:]...)
 	b = append(b, l.Type[:]...)
-	b = append(b, l.Meta[:]...)
+	b = append(b, l.Meta.Callsign1[:]...)
+	b = append(b, l.Meta.Callsign2[:]...)
+	b = append(b, l.Meta.Reserved[:]...)
 	b = append(b, l.CRC[:]...)
 	// log.Printf("[DEBUG] LSF.ToBytes(): %#v", b)
 

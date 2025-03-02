@@ -167,9 +167,9 @@ func (u *ui) setChannel(ch *channel) {
 	u.messages.Objects = nil
 
 	if ch == nil {
-		u.win.SetTitle(winTitle + " - " + u.currentServer.name)
+		u.win.SetTitle(winTitle + " - " + u.currentServer.id)
 	} else {
-		u.win.SetTitle(winTitle + " - " + ch.server.name + " - " + ch.name)
+		u.win.SetTitle(winTitle + " - " + ch.server.id + " - " + ch.name)
 		u.currentChannel = ch
 		msgs = u.currentChannel.messages
 	}

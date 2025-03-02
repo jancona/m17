@@ -176,7 +176,6 @@ func (s *m17Server) send(ch *channel, text string) {
 		fmt.Printf("Error sending message: %v\n", err)
 		return
 	}
-
 }
 
 type messageEvent struct {
@@ -194,11 +193,22 @@ func addHandler(h func(ev *messageEvent)) {
 func (s *m17Server) handleM17(p m17.Packet) error {
 	// // A packet is an LSF + type code 0x05 for SMS + data up to 823 bytes
 	// log.Printf("[DEBUG] p: %#v", p)
-	dst, err := m17.DecodeCallsign(p.LSF.Dst[:])
+	var dst, src string
+	var err error
+
+	if p.LSF.Meta.Callsign2 != m17.EncodedEmptyCallsignBytes {
+		dst, err = m17.DecodeCallsign(p.LSF.Meta.Callsign2[:])
+	} else {
+		dst, err = m17.DecodeCallsign(p.LSF.Dst[:])
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bad dst callsign: %v", err)
 	}
-	src, err := m17.DecodeCallsign(p.LSF.Src[:])
+	if p.LSF.Meta.Callsign1 != m17.EncodedEmptyCallsignBytes {
+		src, err = m17.DecodeCallsign(p.LSF.Meta.Callsign1[:])
+	} else {
+		src, err = m17.DecodeCallsign(p.LSF.Src[:])
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Bad src callsign: %v", err)
 	}
@@ -241,8 +251,8 @@ func (s *m17Server) login(prefix string, u *ui) {
 
 func (s *m17Server) doConnect(name string, server string, port uint, module string, u *ui) {
 	var err error
-	log.Printf("Connecting to %s:%d %s, callsign %s", server, port, module, s.callsign)
-	s.relay, err = m17.NewRelay(server, port, module, s.callsign, s.handleM17)
+	log.Printf("Connecting to %s %s:%d %s, callsign %s", name, server, port, module, s.callsign)
+	s.relay, err = m17.NewRelay(name, server, port, module, s.callsign, s.handleM17)
 	if err != nil {
 		log.Printf("fail to connect create client: %v", err)
 	}
@@ -277,7 +287,7 @@ func (s *m17Server) loadServers(u *ui) {
 		u.servers.Select(0)
 	}
 	u.servers.Refresh()
-
+	// log.Printf("Calling addHandler for server: %#v", server)
 	addHandler(func(ev *messageEvent) {
 		if ev.serverID != server.id {
 			return
