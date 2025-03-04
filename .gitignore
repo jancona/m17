@@ -4,5 +4,6 @@ m17msg/m17msg
 m17msg/m17msg.app/
 m17msg/wasm/
 m17msg/m17msg.apk
+modem-emulator/modem-emulator
 Notes.txt
 .DS_Store
