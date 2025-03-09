@@ -11,7 +11,7 @@ require github.com/sigurn/crc16 v0.0.0-20240131213347-83fcde1e29d1
 require (
 	fyne.io/fyne/v2 v2.5.4
 	github.com/icza/gog v0.0.0-20241010132004-5da24f18211d
-	github.com/randomvariable/goterm v0.0.0-20250127144928-40df54235b11
+	golang.org/x/exp v0.0.0-20250228200357-dead58393ab7
 )
 
 require (
@@ -56,5 +56,3 @@ require (
 )
 
 replace github.com/randomvariable/goterm => ../goterm
-
-// replace github.com/containerd/console => github.com/slonopotamus/console a9bfb9ad8409fa4c80853d1881d12362271a19aa

@@ -41,38 +41,15 @@ func main() {
 		log.Fatal("-server argument is required")
 	}
 	setupLogging()
+	var g *Gateway
+	var modem *m17.CC1200Modem
 	if *modemArg != "" {
-		f, err := os.OpenFile(*modemArg, os.O_RDWR, 0)
+		modem, err = m17.NewCC1200Modem(*modemArg)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("Error connecting to modem: %v", err)
 		}
-		n, err := f.Write([]byte{0, 2}) // PING
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("[DEBUG] %d bytes written", n)
-		resp := make([]byte, 100)
-		n, err = f.Read(resp)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("[DEBUG] read %#v", resp[:n])
-		n, err = f.Write([]byte{8, 3, 1}) // CMD_SET_TX_START
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("[DEBUG] %d bytes written", n)
-		resp = make([]byte, 1000)
-		for {
-			n, err = f.Read(resp)
-			if err != nil {
-				log.Fatal(err)
-			}
-			log.Printf("[DEBUG] read %d bytes: %#v", n, resp[:n])
-		}
-
 	}
-	g, err := NewGateway(*serverArg, *portArg, *moduleArg, *inArg, *outArg, *isDuplex)
+	g, err = NewGateway(*serverArg, *portArg, *moduleArg, *inArg, *outArg, modem, *isDuplex)
 	if err != nil {
 		log.Fatalf("Error creating Gateway: %v", err)
 	}
@@ -110,6 +87,7 @@ type Gateway struct {
 	Port   uint
 	Module string
 
+	modem  *m17.CC1200Modem
 	in     *os.File
 	out    *os.File
 	relay  *m17.Relay
@@ -117,13 +95,14 @@ type Gateway struct {
 	done   bool
 }
 
-func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out string, duplex bool) (*Gateway, error) {
+func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out string, modem *m17.CC1200Modem, duplex bool) (*Gateway, error) {
 	var err error
 
 	g := Gateway{
 		Server: serverArg,
 		Port:   portArg,
 		Module: moduleArg,
+		modem:  modem,
 		in:     os.Stdin,
 		out:    os.Stdout,
 		duplex: duplex,
@@ -157,11 +136,14 @@ func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out
 
 func (g Gateway) FromRelay(p m17.Packet) error {
 	// log.Printf("[DEBUG] received packet from relay: %#v", p)
+	if g.modem != nil {
+		return p.Send(g.modem)
+	}
 	return p.Send(g.out)
 }
 
 func (g *Gateway) FromModem(lsfBytes []byte, packetBytes []byte) error {
-	log.Printf("[DEBUG] received packet from modem: %x", packetBytes)
+	// log.Printf("[DEBUG] received packet from modem: % x", packetBytes)
 	p := m17.NewPacketFromBytes(append(lsfBytes, packetBytes...))
 	// log.Printf("[DEBUG] p: %#v", p)
 	// TODO: Handle error?
@@ -178,7 +160,11 @@ func (g *Gateway) Run() {
 		<-signalChan
 	}()
 	d := m17.NewDecoder()
-	d.DecodeSamples(g.in, g.FromModem)
+	if g.modem != nil {
+		go d.DecodeSymbols(g.modem, g.FromModem)
+	} else {
+		go d.DecodeSymbols(g.in, g.FromModem)
+	}
 	// Run until we're terminated then clean up
 	log.Print("[DEBUG] client: Waiting for close signal")
 	// wait for a close signal then clean up

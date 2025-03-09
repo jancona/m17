@@ -181,10 +181,11 @@ func interleaveBits(in *Bits) *Bits {
 	return &out
 }
 func deinterleaveSymbols(symbols []Symbol) []Symbol {
-	for i := 0; i < SymbolsPerPayload*2; i++ {
-		symbols[i] = symbols[interleaveSequence[i]]
+	var dSymbols []Symbol
+	for i := range SymbolsPerPayload * 2 {
+		dSymbols = append(dSymbols, symbols[interleaveSequence[i]])
 	}
-	return symbols
+	return dSymbols
 }
 
 var randomizeSeq = []byte{

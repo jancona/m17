@@ -6,12 +6,10 @@ import (
 	"log"
 	"math"
 	"math/rand/v2"
+	"net"
 	"os"
 	"os/signal"
-	"syscall"
 	"time"
-
-	"github.com/randomvariable/goterm/term"
 )
 
 const IDENT_STR = "CC1200-HAT 420-450 MHz\nFW v1.1 by Wojciech SP5WWP"
@@ -56,50 +54,92 @@ const (
 // 	_IOC_IN_OUT  uintptr = _IOC_OUT | _IOC_IN
 // 	_IOC_DIRMASK         = _IOC_VOID | _IOC_OUT | _IOC_IN
 
-// 	_IOC_PARAM_SHIFT = 13
-// 	_IOC_PARAM_MASK  = (1 << _IOC_PARAM_SHIFT) - 1
+//	_IOC_PARAM_SHIFT = 13
+//	_IOC_PARAM_MASK  = (1 << _IOC_PARAM_SHIFT) - 1
+//
 // )
+const sockAddr = "/tmp/modem.sock"
 
 func main() {
-	pty, err := term.OpenPTY()
-	if err != nil {
-		log.Fatalf("OpenPTY: %v", err)
+	_, err := os.Stat(sockAddr)
+	if err == nil {
+		err = os.RemoveAll(sockAddr)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
-	name, err := pty.PTSName()
-	if err != nil {
-		log.Fatalf("PTSName: %v", err)
-	}
-	log.Printf("pty name: %s", name)
 
-	attr, err := term.Attr(pty.Slave)
+	listener, err := net.Listen("unix", sockAddr)
 	if err != nil {
-		log.Fatalf("term.Attr: %v", err)
+		log.Fatal(err)
 	}
-	attr.Raw()
-	attr.Set(pty.Slave)
-	attr, err = term.Attr(pty.Master)
-	if err != nil {
-		log.Fatalf("term.Attr: %v", err)
-	}
-	attr.Raw()
-	attr.Set(pty.Master)
 
-	// Cleanup the PTY
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt)
+
 	go func() {
-		<-c
-		pty.Close()
-		os.Exit(1)
+		<-quit
+		log.Print("ctrl-c pressed!")
+		close(quit)
+		os.Exit(0)
 	}()
 
+	log.Print("Emulator running")
+	for {
+		log.Print("Waiting for connection")
+
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		log.Printf("Accepted connection from: %s", conn.RemoteAddr().Network())
+		go handle(conn)
+	}
+
+	// pty, err := term.OpenPTY()
+	// if err != nil {
+	// 	log.Fatalf("OpenPTY: %v", err)
+	// }
+	// name, err := pty.PTSName()
+	// if err != nil {
+	// 	log.Fatalf("PTSName: %v", err)
+	// }
+	// log.Printf("pty name: %s", name)
+
+	// attr, err := term.Attr(pty.Slave)
+	// if err != nil {
+	// 	log.Fatalf("term.Attr: %v", err)
+	// }
+	// attr.Raw()
+	// attr.Set(pty.Slave)
+	// attr, err = term.Attr(pty.Master)
+	// if err != nil {
+	// 	log.Fatalf("term.Attr: %v", err)
+	// }
+	// attr.Raw()
+	// attr.Set(pty.Master)
+
+	// // Cleanup the PTY
+	// c := make(chan os.Signal, 1)
+	// signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	// go func() {
+	// 	<-c
+	// 	pty.Close()
+	// 	os.Exit(1)
+	// }()
+	// handle(pty.Master)
+}
+
+func handle(conn io.ReadWriteCloser) {
+	var err error
 	var devErr uint32 = ERR_OK
 	var freq uint32
 	var rxFreq uint32 = 433475000
 	var txFreq uint32 = 433475000
 	var txDbm float64 = 10 //10dBm default
 	var txPwr float64 = 3  //3 to 63
-	var freqCorrection uint16
+	var freqCorrection int16
 	var afc bool
 	var trxState byte = TRX_IDLE
 	repeater := NewRepeater(10)
@@ -115,7 +155,7 @@ func main() {
 	go func() {
 		for {
 			// Read data from the connection.
-			rxb, err := readBuffer(pty.Master, trxState)
+			rxb, err := readBuffer(conn, trxState)
 			if err != nil {
 				if err == io.EOF {
 					// client disconnected
@@ -143,8 +183,8 @@ func main() {
 						log.Fatalf("failed to append devErr: %v", err)
 					}
 					resp[1] = byte(len(resp))
-					// _, err = pty.Master.Write(append(resp, 10))
-					_, err = pty.Master.Write(resp)
+					// _, err = conn.Write(append(resp, 10))
+					_, err = conn.Write(resp)
 					if err != nil {
 						log.Fatalf("failed to write resp: %v", err)
 					}
@@ -156,13 +196,13 @@ func main() {
 					if freq > 420e6 && freq < 450e6 {
 						rxFreq = freq
 						log.Printf("Set RX freq: %d", rxFreq)
-						_, err = pty.Master.Write([]byte{CMD_SET_RX_FREQ, 3, ERR_OK})
+						_, err = conn.Write([]byte{CMD_SET_RX_FREQ, 3, ERR_OK})
 						if err != nil {
 							log.Fatalf("failed to write resp: %v", err)
 						}
 					} else {
 						log.Printf("Bad RX freq: %d", freq)
-						_, err = pty.Master.Write([]byte{CMD_SET_RX_FREQ, 3, ERR_RANGE})
+						_, err = conn.Write([]byte{CMD_SET_RX_FREQ, 3, ERR_RANGE})
 						if err != nil {
 							log.Fatalf("failed to write resp: %v", err)
 						}
@@ -175,13 +215,13 @@ func main() {
 					if freq > 420e6 && freq < 450e6 {
 						txFreq = freq
 						log.Printf("Set TX freq: %d", txFreq)
-						_, err = pty.Master.Write([]byte{CMD_SET_TX_FREQ, 3, ERR_OK})
+						_, err = conn.Write([]byte{CMD_SET_TX_FREQ, 3, ERR_OK})
 						if err != nil {
 							log.Fatalf("failed to write resp: %v", err)
 						}
 					} else {
 						log.Printf("Bad TX freq: %d", freq)
-						_, err = pty.Master.Write([]byte{CMD_SET_TX_FREQ, 3, ERR_RANGE})
+						_, err = conn.Write([]byte{CMD_SET_TX_FREQ, 3, ERR_RANGE})
 						if err != nil {
 							log.Fatalf("failed to write resp: %v", err)
 						}
@@ -192,13 +232,13 @@ func main() {
 						txDbm = val * 0.25
 						txPwr = math.Floor((val*0.25+18.0)*2.0 - 1.0)
 						log.Printf("Set TX power txDbm: %f, txPwr: %f", txDbm, txPwr)
-						_, err = pty.Master.Write([]byte{CMD_SET_TX_POWER, 3, ERR_OK})
+						_, err = conn.Write([]byte{CMD_SET_TX_POWER, 3, ERR_OK})
 						if err != nil {
 							log.Fatalf("failed to write resp: %v", err)
 						}
 					} else {
 						log.Printf("Bad TX power")
-						_, err = pty.Master.Write([]byte{CMD_SET_TX_POWER, 3, ERR_RANGE})
+						_, err = conn.Write([]byte{CMD_SET_TX_POWER, 3, ERR_RANGE})
 						if err != nil {
 							log.Fatalf("failed to write resp: %v", err)
 						}
@@ -209,14 +249,14 @@ func main() {
 					if err != nil {
 						log.Fatalf("failed to decode freqCorrection: %v", err)
 					}
-					_, err = pty.Master.Write([]byte{CMD_SET_FREQ_CORR, 3, ERR_OK})
+					_, err = conn.Write([]byte{CMD_SET_FREQ_CORR, 3, ERR_OK})
 					if err != nil {
 						log.Fatalf("failed to write resp: %v", err)
 					}
 				case CMD_SET_AFC:
 					afc = rxb[2] != 0
 					log.Printf("Set AFC: %v", afc)
-					_, err = pty.Master.Write([]byte{CMD_SET_AFC, 3, ERR_OK})
+					_, err = conn.Write([]byte{CMD_SET_AFC, 3, ERR_OK})
 					if err != nil {
 						log.Fatalf("failed to write resp: %v", err)
 					}
@@ -235,7 +275,7 @@ func main() {
 							log.Fatalf("failed to append devErr: %v", err)
 						}
 						resp[1] = byte(len(resp))
-						_, err = pty.Master.Write(resp)
+						_, err = conn.Write(resp)
 						if err != nil {
 							log.Fatalf("failed to write resp: %v", err)
 						}
@@ -248,13 +288,13 @@ func main() {
 							rxTicker.Reset(rxTickTime)
 						} else {
 							log.Printf("RX start error")
-							resp := append([]byte{}, CMD_SET_TX_START, 6)
+							resp := append([]byte{}, CMD_SET_RX, 6)
 							resp, err = binary.Append(resp, binary.LittleEndian, devErr)
 							if err != nil {
 								log.Fatalf("failed to append devErr: %v", err)
 							}
 							resp[1] = byte(len(resp))
-							_, err = pty.Master.Write(resp)
+							_, err = conn.Write(resp)
 							if err != nil {
 								log.Fatalf("failed to write resp: %v", err)
 							}
@@ -262,11 +302,15 @@ func main() {
 					} else { //stop
 						trxState = TRX_IDLE
 						rxTicker.Stop()
-						log.Printf("RX stop")
-						_, err = pty.Master.Write([]byte{CMD_SET_FREQ_CORR, 3, ERR_OK})
+						log.Printf("Got RX stop")
+						// allow time for the last RX samples to be sent before responding
+						time.Sleep(2 * rxTickTime)
+						resp := []byte{CMD_SET_RX, 3, ERR_OK}
+						_, err = conn.Write(resp)
 						if err != nil {
 							log.Fatalf("failed to write resp: %v", err)
 						}
+						log.Printf("Wrote RX stop resp: % x", resp)
 					}
 
 				case CMD_GET_IDENT:
@@ -275,15 +319,15 @@ func main() {
 					resp := []byte{CMD_GET_IDENT, byte(len(IDENT_STR) + 2)}
 					resp = append(resp, []byte(IDENT_STR)...)
 					resp[1] = byte(len(resp))
-					_, err = pty.Master.Write(resp)
+					_, err = conn.Write(resp)
 					if err != nil {
 						log.Fatalf("failed to write resp: %v", err)
 					}
 
 				case CMD_GET_CAPS:
-					log.Print("got CMD_GET_IDENT")
+					log.Print("got CMD_GET_CAPS")
 					//so far the CC1200-HAT can do FM only, half-duplex
-					_, err = pty.Master.Write([]byte{CMD_GET_CAPS, 3, 0x2})
+					_, err = conn.Write([]byte{CMD_GET_CAPS, 3, 0x2})
 					if err != nil {
 						log.Fatalf("failed to write resp: %v", err)
 					}
@@ -295,7 +339,7 @@ func main() {
 						log.Fatalf("failed to append rxFreq: %v", err)
 					}
 					resp[1] = byte(len(resp))
-					_, err = pty.Master.Write(resp)
+					_, err = conn.Write(resp)
 					if err != nil {
 						log.Fatalf("failed to write resp: %v", err)
 					}
@@ -307,21 +351,21 @@ func main() {
 						log.Fatalf("failed to append txFreq: %v", err)
 					}
 					resp[1] = byte(len(resp))
-					_, err = pty.Master.Write(resp)
+					_, err = conn.Write(resp)
 					if err != nil {
 						log.Fatalf("failed to write resp: %v", err)
 					}
 				}
 			} else { // trxState == TRX_TX
 				//pass baseband samples to the buffer
-				// log.Printf("Received %d TX bytes: % x", len(rxb), rxb)
+				log.Printf("Received %d TX bytes: % x", len(rxb), rxb)
 				repeater.TXSamples() <- rxb
 				txTimer.Reset(txTimeout)
 				log.Printf("trxState: %d, txTimer.Reset(txTimeout)", trxState)
 			}
 		case <-rxTicker.C:
 			samples := repeater.Next()
-			_, err = pty.Master.Write(samples[:])
+			_, err = conn.Write(samples[:])
 			if err != nil {
 				log.Fatalf("failed to write receive samples: %v", err)
 			}
@@ -333,7 +377,7 @@ func main() {
 	}
 }
 
-func readBuffer(c *os.File, trxState byte) ([]byte, error) {
+func readBuffer(c io.ReadWriteCloser, trxState byte) ([]byte, error) {
 	rxb := make([]byte, 1000)
 	var bufLen int
 	var err error
@@ -363,8 +407,8 @@ func readBuffer(c *os.File, trxState byte) ([]byte, error) {
 }
 
 const (
-	SamplesPer40MS   = 960
-	SamplesPerSecond = SamplesPer40MS * 1000 / 40
+	SamplesPer40MS   = SamplesPerSecond / 1000 * 40
+	SamplesPerSecond = 24000
 )
 
 type Repeater struct {
