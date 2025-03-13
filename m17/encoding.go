@@ -38,6 +38,8 @@ func EncodeCallsign(callsign string) (*[6]byte, error) {
 	for i := min(len(callsign), 9) - 1; i >= start; i-- {
 		var val byte = 0
 		switch {
+		case callsign[i] == ' ':
+			val = 0
 		case 'A' <= callsign[i] && callsign[i] <= 'Z':
 			val = callsign[i] - 'A' + 1
 
@@ -51,6 +53,8 @@ func EncodeCallsign(callsign string) (*[6]byte, error) {
 			val = 39
 		case 'a' <= callsign[i] && callsign[i] <= 'z':
 			val = callsign[i] - 'a' + 1
+		default:
+			return nil, fmt.Errorf("callsign '%s' contains invalid character '%s' (%d)", callsign, string(callsign[i]), callsign[i])
 		}
 		address = 40*address + uint64(val)
 	}

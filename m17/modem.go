@@ -99,21 +99,14 @@ func NewCC1200Modem(port string) (*CC1200Modem, error) {
 		return nil, fmt.Errorf("tx pipeline setup: %w", err)
 	}
 	go ret.processTXSamples(txSamples)
-	// dev_set_rx_freq(config.rx_freq);
-	// dev_set_tx_freq(config.tx_freq);
-	// dev_set_freq_corr(config.freq_corr);
-	// dev_set_tx_power(config.tx_pwr);
-	// dbg_print(0, "AFC "); dev_set_afc(config.afc);
-	// if(config.afc)
-	// 	dbg_print(TERM_GREEN, "enabled\n");
-	// else
-	// 	dbg_print(TERM_YELLOW, "disabled\n");
 	_, err = ret.commandWithResponse([]byte{cmdPing, 2})
 	if err != nil {
 		return nil, fmt.Errorf("test PING: %w", err)
 	}
-	ret.StartRX()
 	return &ret, nil
+}
+func (m *CC1200Modem) Run() {
+
 }
 
 func (m *CC1200Modem) processTXSamples(txSamples chan int8) {
@@ -294,7 +287,7 @@ func (m *CC1200Modem) StartTX() error {
 	return nil
 }
 
-func (m *CC1200Modem) SetTXFreq(freq float32) error {
+func (m *CC1200Modem) SetTXFreq(freq uint32) error {
 	var err error
 	cmd := []byte{cmdSetTXFreq, 0}
 	cmd, err = binary.Append(cmd, binary.LittleEndian, freq)
@@ -310,7 +303,7 @@ func (m *CC1200Modem) SetTXFreq(freq float32) error {
 func (m *CC1200Modem) SetTXPower(dbm float32) error {
 	var err error
 	cmd := []byte{cmdSetTXPower, 0}
-	cmd, err = binary.Append(cmd, binary.LittleEndian, dbm)
+	cmd, err = binary.Append(cmd, binary.LittleEndian, int8(dbm*4))
 	if err != nil {
 		return fmt.Errorf("encode set TX power: %w", err)
 	}
@@ -344,7 +337,7 @@ func (m *CC1200Modem) EndRX() error {
 	m.trxState.Store(trxIdle)
 	return nil
 }
-func (m *CC1200Modem) SetRXFreq(freq float32) error {
+func (m *CC1200Modem) SetRXFreq(freq uint32) error {
 	var err error
 	cmd := []byte{cmdSetRXFreq, 0}
 	cmd, err = binary.Append(cmd, binary.LittleEndian, freq)

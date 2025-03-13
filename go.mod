@@ -12,6 +12,7 @@ require (
 	fyne.io/fyne/v2 v2.5.4
 	github.com/icza/gog v0.0.0-20241010132004-5da24f18211d
 	golang.org/x/exp v0.0.0-20250228200357-dead58393ab7
+	gopkg.in/ini.v1 v1.67.0
 )
 
 require (

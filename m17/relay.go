@@ -87,19 +87,13 @@ func (c *Relay) Close() error {
 	return c.conn.Close()
 }
 func (c *Relay) Handle() {
-	// c.conn.SetReadDeadline(time.Now().Add(2000 * time.Millisecond))
 	for !c.done {
 		// Receiving a message
 		buffer := make([]byte, 1024)
 		l, _, err := c.conn.ReadFromUDP(buffer)
 		if err != nil {
-			if err, ok := err.(net.Error); ok && err.Timeout() {
-				log.Printf("[DEBUG] Relay.Handle(): timeout: %v", err)
-				break
-			} else {
-				log.Printf("[DEBUG] Relay.Handle(): error reading from UDP: %v", err)
-				break
-			}
+			log.Printf("[DEBUG] Relay.Handle(): error reading from UDP: %v", err)
+			break
 		}
 		buffer = buffer[:l]
 		// log.Printf("[DEBUG] Packet received, len: %d:\n%#v\n%s\n", l, buffer, string(buffer[:4]))

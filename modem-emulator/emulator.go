@@ -170,6 +170,7 @@ func handle(conn io.ReadWriteCloser) {
 			}
 		}
 	}()
+CommandLoop:
 	for {
 		select {
 		case rxb := <-rxbChan:
@@ -367,7 +368,8 @@ func handle(conn io.ReadWriteCloser) {
 			samples := repeater.Next()
 			_, err = conn.Write(samples[:])
 			if err != nil {
-				log.Fatalf("failed to write receive samples: %v", err)
+				log.Printf("failed to write receive samples: %v", err)
+				break CommandLoop
 			}
 		case <-txTimer.C:
 			log.Printf("trxState: %d. TX timed out", trxState)

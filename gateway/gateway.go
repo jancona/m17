@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -10,20 +11,136 @@ import (
 
 	"github.com/hashicorp/logutils"
 	"github.com/jancona/m17text/m17"
+	"gopkg.in/ini.v1"
 )
 
+type config struct {
+	callsign        string
+	duplex          bool
+	rxFrequency     uint32
+	txFrequency     uint32
+	power           float32
+	afc             bool
+	frequencyCorr   int16
+	reflectorName   string
+	reflectorAddr   string
+	reflectorPort   uint
+	reflectorModule string
+	logLevel        string
+	logPath         string
+	logRoot         string
+	modemPort       string
+	modemSpeed      uint
+	symbolsIn       *os.File
+	symbolsOut      *os.File
+}
+
+func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
+	cfg, err := ini.Load(iniFile)
+	if err != nil {
+		log.Fatalf("Fail to read config from %s: %v", iniFile, err)
+	}
+	callsign := cfg.Section("General").Key("Callsign").String()
+	rxFrequency, rxFrequencyErr := cfg.Section("Radio").Key("RXFrequency").Uint()
+	txFrequency, txFrequencyErr := cfg.Section("Radio").Key("TXFrequency").Uint()
+	power, powerErr := cfg.Section("Radio").Key("Power").Float64()
+	afc, afcErr := cfg.Section("Radio").Key("AFC").Bool()
+	frequencyCorr, frequencyCorrErr := cfg.Section("Radio").Key("FrequencyCorr").Int()
+	duplex, duplexErr := cfg.Section("Radio").Key("Duplex").Bool()
+	reflectorName := cfg.Section("Reflector").Key("Name").String()
+	reflectorAddr := cfg.Section("Reflector").Key("Address").String()
+	reflectorPort := cfg.Section("Reflector").Key("Port").MustUint(17000)
+	reflectorModule := cfg.Section("Reflector").Key("Module").String()
+	logLevel := cfg.Section("Log").Key("Level").String()
+	logPath := cfg.Section("Log").Key("Path").String()
+	logRoot := cfg.Section("Log").Key("Root").String()
+	modemPort := cfg.Section("Modem").Key("Port").String()
+	modemSpeed, modemSpeedErr := cfg.Section("Modem").Key("Speed").Uint()
+
+	_, callsignErr := m17.EncodeCallsign(callsign)
+	// TODO: Lots of these validations are CC1200 specific
+	if rxFrequencyErr == nil {
+		if rxFrequency < 420e6 || rxFrequency > 450e6 {
+			rxFrequencyErr = fmt.Errorf("configured RXFrequency %d out of range (420 to 450 MHz)", rxFrequency)
+		}
+	}
+	if txFrequencyErr == nil {
+		if txFrequency < 420e6 || txFrequency > 450e6 {
+			txFrequencyErr = fmt.Errorf("configured TXFrequency %d out of range (420 to 450 MHz)", txFrequency)
+		}
+	}
+	if powerErr == nil {
+		if power < -16 || power > 14 {
+			powerErr = fmt.Errorf("configured Power %f out of range (-16 to 14 dBm)", power)
+		}
+	}
+	var reflectorAddrErr error
+	if reflectorAddr == "" {
+		reflectorAddrErr = fmt.Errorf("configured Reflector Address is empty")
+	}
+	var reflectorModuleErr error
+	if len(reflectorModule) > 1 {
+		reflectorModuleErr = fmt.Errorf("configured Reflector Module must be zero or one character")
+	}
+	var logLevelErr error
+	if logLevel != "ERROR" && logLevel != "INFO" && logLevel != "DEBUG" {
+		logLevelErr = fmt.Errorf("configured Log Level must be one of ERROR, INFO or DEBUG")
+	}
+
+	var symbolsInErr, symbolsOutErr error
+	symbolsIn := os.Stdin
+	if inFile != "" {
+		symbolsIn, symbolsInErr = os.Open(inFile)
+	}
+	symbolsOut := os.Stdout
+	if outFile != "" {
+		symbolsOut, symbolsOutErr = os.Create(outFile)
+	}
+
+	err = errors.Join(
+		rxFrequencyErr,
+		txFrequencyErr,
+		powerErr,
+		afcErr,
+		frequencyCorrErr,
+		duplexErr,
+		modemSpeedErr,
+		callsignErr,
+		reflectorAddrErr,
+		reflectorModuleErr,
+		// reflectorPortErr,
+		logLevelErr,
+		symbolsInErr,
+		symbolsOutErr,
+	)
+
+	return config{
+		callsign:        callsign,
+		duplex:          duplex,
+		rxFrequency:     uint32(rxFrequency),
+		txFrequency:     uint32(txFrequency),
+		power:           float32(power),
+		afc:             afc,
+		frequencyCorr:   int16(frequencyCorr),
+		reflectorName:   reflectorName,
+		reflectorAddr:   reflectorAddr,
+		reflectorModule: reflectorModule,
+		reflectorPort:   reflectorPort,
+		logLevel:        logLevel,
+		logPath:         logPath,
+		logRoot:         logRoot,
+		modemPort:       modemPort,
+		modemSpeed:      modemSpeed,
+		symbolsIn:       symbolsIn,
+		symbolsOut:      symbolsOut,
+	}, err
+}
+
 var (
-	isDebugArg  *bool   = flag.Bool("debug", false, "Emit debug log messages")
-	isDuplex    *bool   = flag.Bool("duplex", false, "Operate in duplex mode")
-	inArg       *string = flag.String("in", "", "M17 input (default stdin)")
-	outArg      *string = flag.String("out", "", "M17 output (default stdout)")
-	modemArg    *string = flag.String("modem", "", "Modem port")
-	logDestArg  *string = flag.String("log", "", "Device/file for log (default stderr)")
-	serverArg   *string = flag.String("server", "", "Relay/reflector server")
-	portArg     *uint   = flag.Uint("port", 17000, "Port the relay/reflector listens on")
-	moduleArg   *string = flag.String("module", "", "Module to connect to")
-	helpArg     *bool   = flag.Bool("h", false, "Print arguments")
-	callsignArg *string = flag.String("callsign", "GATEWAY", "Callsign used for messages from the gateway to the reflector")
+	inArg      *string = flag.String("in", "", "M17 symbol input (default stdin)")
+	outArg     *string = flag.String("out", "", "M17 symbol output (default stdout)")
+	configFile *string = flag.String("config", "./gateway.ini", "Configuration file")
+	helpArg    *bool   = flag.Bool("h", false, "Print arguments")
 )
 
 func main() {
@@ -35,21 +152,30 @@ func main() {
 		flag.Usage()
 		return
 	}
-
-	if *serverArg == "" {
-		flag.Usage()
-		log.Fatal("-server argument is required")
+	cfg, err := loadConfig(*configFile, *inArg, *outArg)
+	if err != nil {
+		log.Fatalf("Bad configuration: %v", err)
 	}
-	setupLogging()
+
+	setupLogging(cfg)
+
 	var g *Gateway
 	var modem *m17.CC1200Modem
-	if *modemArg != "" {
-		modem, err = m17.NewCC1200Modem(*modemArg)
+	if cfg.modemPort != "" {
+		modem, err = m17.NewCC1200Modem(cfg.modemPort)
 		if err != nil {
 			log.Fatalf("Error connecting to modem: %v", err)
 		}
+		modem.SetRXFreq(cfg.rxFrequency)
+		modem.SetTXFreq(cfg.txFrequency)
+		modem.SetTXPower(cfg.power)
+		modem.SetFreqCorrection(cfg.frequencyCorr)
+		modem.SetAFC(cfg.afc)
+		log.Printf("[INFO] Connected to modem on %s", cfg.modemPort)
 	}
-	g, err = NewGateway(*serverArg, *portArg, *moduleArg, *inArg, *outArg, modem, *isDuplex)
+
+	log.Printf("[DEBUG] Creating gateway cfg: %#v, modem %#v", cfg, modem)
+	g, err = NewGateway(cfg, modem)
 	if err != nil {
 		log.Fatalf("Error creating Gateway: %v", err)
 	}
@@ -57,15 +183,13 @@ func main() {
 	g.Run()
 }
 
-func setupLogging() {
+func setupLogging(c config) {
 	var err error
-	minLogLevel := "INFO"
-	if *isDebugArg {
-		minLogLevel = "DEBUG"
-	}
+	minLogLevel := c.logLevel
 	logWriter := os.Stderr
-	if *logDestArg != "" {
-		logWriter, err = os.OpenFile(*logDestArg, os.O_WRONLY|os.O_CREATE|os.O_SYNC, 0644)
+
+	if c.logRoot != "" {
+		logWriter, err = os.OpenFile(c.logPath+"/"+c.logRoot+".log", os.O_WRONLY|os.O_CREATE|os.O_SYNC, 0644)
 		if err != nil {
 			log.Fatalf("Error opening server output, exiting: %v", err)
 		}
@@ -95,41 +219,30 @@ type Gateway struct {
 	done   bool
 }
 
-func NewGateway(serverArg string, portArg uint, moduleArg string, in string, out string, modem *m17.CC1200Modem, duplex bool) (*Gateway, error) {
+func NewGateway(cfg config, modem *m17.CC1200Modem) (*Gateway, error) {
 	var err error
 
 	g := Gateway{
-		Server: serverArg,
-		Port:   portArg,
-		Module: moduleArg,
+		Server: cfg.reflectorAddr,
+		Port:   cfg.reflectorPort,
+		Module: cfg.reflectorModule,
 		modem:  modem,
-		in:     os.Stdin,
-		out:    os.Stdout,
-		duplex: duplex,
+		in:     cfg.symbolsIn,
+		out:    cfg.symbolsOut,
+		duplex: cfg.duplex,
 	}
 
-	if in != "" {
-		g.in, err = os.Open(*inArg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open M17 input '%s': %w", in, err)
-		}
-	}
-
-	if out != "" {
-		g.out, err = os.Create(*outArg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open M17 output '%s': %w", out, err)
-		}
-	}
-
-	g.relay, err = m17.NewRelay(serverArg, portArg, moduleArg, *callsignArg, g.FromRelay)
+	log.Printf("[DEBUG] Connecting to %s:%d, module %s", g.Server, g.Port, g.Module)
+	g.relay, err = m17.NewRelay(g.Server, g.Port, g.Module, cfg.callsign, g.FromRelay)
 	if err != nil {
 		return nil, fmt.Errorf("error creating relay: %v", err)
 	}
 	err = g.relay.Connect()
 	if err != nil {
-		return nil, fmt.Errorf("error connecting to %s:%d %s: %v", serverArg, portArg, moduleArg, err)
+		return nil, fmt.Errorf("error connecting to %s:%d %s: %v", g.Server, g.Port, g.Module, err)
 	}
+
+	modem.StartRX()
 
 	return &g, nil
 }
