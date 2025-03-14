@@ -30,7 +30,7 @@ type config struct {
 	logPath         string
 	logRoot         string
 	modemPort       string
-	modemSpeed      uint
+	modemSpeed      int
 	nRSTPin         int
 	paEnablePin     int
 	boot0Pin        int
@@ -58,7 +58,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	logPath := cfg.Section("Log").Key("Path").String()
 	logRoot := cfg.Section("Log").Key("Root").String()
 	modemPort := cfg.Section("Modem").Key("Port").String()
-	modemSpeed, modemSpeedErr := cfg.Section("Modem").Key("Speed").Uint()
+	modemSpeed, modemSpeedErr := cfg.Section("Modem").Key("Speed").Int()
 	nRSTPin, nRSTPinErr := cfg.Section("Modem").Key("NRSTPin").Int()
 	paEnablePin, paEnablePinErr := cfg.Section("Modem").Key("PAEnablePin").Int()
 	boot0Pin, boot0PinErr := cfg.Section("Modem").Key("Boot0Pin").Int()
@@ -174,7 +174,7 @@ func main() {
 	var g *Gateway
 	var modem *m17.CC1200Modem
 	if cfg.modemPort != "" {
-		modem, err = m17.NewCC1200Modem(cfg.modemPort, cfg.nRSTPin, cfg.paEnablePin, cfg.boot0Pin)
+		modem, err = m17.NewCC1200Modem(cfg.modemPort, cfg.nRSTPin, cfg.paEnablePin, cfg.boot0Pin, cfg.modemSpeed)
 		if err != nil {
 			log.Fatalf("Error connecting to modem: %v", err)
 		}

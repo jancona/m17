@@ -4,6 +4,7 @@ package m17
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/warthog618/go-gpiocdev"
@@ -11,7 +12,7 @@ import (
 
 func (m *CC1200Modem) gpioSetup(nRSTPin, paEnablePin, boot0Pin int) error {
 	var err error
-	// Do GPIO setup
+	log.Print("[DEBUG] Setting up GPIO")
 	m.nRST, err = gpiocdev.RequestLine("gpiochip0", nRSTPin, gpiocdev.AsOutput(0))
 	if err != nil {
 		return fmt.Errorf("request nRST line: %w", err)

@@ -11,6 +11,8 @@ import (
 	"os"
 	"sync/atomic"
 	"time"
+
+	"go.bug.st/serial"
 )
 
 const (
@@ -74,7 +76,8 @@ func NewCC1200Modem(
 	port string,
 	nRSTPin int,
 	paEnablePin int,
-	boot0Pin int) (*CC1200Modem, error) {
+	boot0Pin int,
+	baudRate int) (*CC1200Modem, error) {
 	ret := CC1200Modem{
 		rxSymbols: make(chan float32),
 		txSymbols: make(chan float32, symbolsPerSecond),
@@ -104,7 +107,10 @@ func NewCC1200Modem(
 		if err != nil {
 			return nil, err
 		}
-		ret.modem, err = os.OpenFile(port, os.O_RDWR, 0)
+		mode := &serial.Mode{
+			BaudRate: baudRate,
+		}
+		ret.modem, err = serial.Open(port, mode)
 		if err != nil {
 			return nil, fmt.Errorf("modem open: %w", err)
 		}
