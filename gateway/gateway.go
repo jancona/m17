@@ -31,6 +31,9 @@ type config struct {
 	logRoot         string
 	modemPort       string
 	modemSpeed      uint
+	nRSTPin         int
+	paEnablePin     int
+	boot0Pin        int
 	symbolsIn       *os.File
 	symbolsOut      *os.File
 }
@@ -56,6 +59,9 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	logRoot := cfg.Section("Log").Key("Root").String()
 	modemPort := cfg.Section("Modem").Key("Port").String()
 	modemSpeed, modemSpeedErr := cfg.Section("Modem").Key("Speed").Uint()
+	nRSTPin, nRSTPinErr := cfg.Section("Modem").Key("NRSTPin").Int()
+	paEnablePin, paEnablePinErr := cfg.Section("Modem").Key("PAEnablePin").Int()
+	boot0Pin, boot0PinErr := cfg.Section("Modem").Key("Boot0Pin").Int()
 
 	_, callsignErr := m17.EncodeCallsign(callsign)
 	// TODO: Lots of these validations are CC1200 specific
@@ -105,6 +111,9 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		frequencyCorrErr,
 		duplexErr,
 		modemSpeedErr,
+		nRSTPinErr,
+		paEnablePinErr,
+		boot0PinErr,
 		callsignErr,
 		reflectorAddrErr,
 		reflectorModuleErr,
@@ -131,6 +140,9 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		logRoot:         logRoot,
 		modemPort:       modemPort,
 		modemSpeed:      modemSpeed,
+		nRSTPin:         nRSTPin,
+		paEnablePin:     paEnablePin,
+		boot0Pin:        boot0Pin,
 		symbolsIn:       symbolsIn,
 		symbolsOut:      symbolsOut,
 	}, err
@@ -162,7 +174,7 @@ func main() {
 	var g *Gateway
 	var modem *m17.CC1200Modem
 	if cfg.modemPort != "" {
-		modem, err = m17.NewCC1200Modem(cfg.modemPort)
+		modem, err = m17.NewCC1200Modem(cfg.modemPort, cfg.nRSTPin, cfg.paEnablePin, cfg.boot0Pin)
 		if err != nil {
 			log.Fatalf("Error connecting to modem: %v", err)
 		}

@@ -11,6 +11,7 @@ require github.com/sigurn/crc16 v0.0.0-20240131213347-83fcde1e29d1
 require (
 	fyne.io/fyne/v2 v2.5.4
 	github.com/icza/gog v0.0.0-20241010132004-5da24f18211d
+	github.com/warthog618/go-gpiocdev v0.9.1
 	golang.org/x/exp v0.0.0-20250228200357-dead58393ab7
 	gopkg.in/ini.v1 v1.67.0
 )
@@ -51,7 +52,7 @@ require (
 	golang.org/x/image v0.24.0 // indirect
 	golang.org/x/mobile v0.0.0-20250106192035-c31d5b91ecc3 // indirect
 	golang.org/x/net v0.34.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

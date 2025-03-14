@@ -3,6 +3,7 @@ package m17
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -50,6 +51,11 @@ const (
 
 const txEndDuration = 240 * time.Millisecond
 
+type Line interface {
+	SetValue(value int) error
+	Close() error
+}
+
 type CC1200Modem struct {
 	modem     io.ReadWriteCloser
 	rxSymbols chan float32
@@ -59,9 +65,16 @@ type CC1200Modem struct {
 	txTicker  *time.Ticker
 	trxState  atomic.Int32
 	cmdSource chan byte
+	nRST      Line
+	paEnable  Line
+	boot0     Line
 }
 
-func NewCC1200Modem(port string) (*CC1200Modem, error) {
+func NewCC1200Modem(
+	port string,
+	nRSTPin int,
+	paEnablePin int,
+	boot0Pin int) (*CC1200Modem, error) {
 	ret := CC1200Modem{
 		rxSymbols: make(chan float32),
 		txSymbols: make(chan float32, symbolsPerSecond),
@@ -76,12 +89,21 @@ func NewCC1200Modem(port string) (*CC1200Modem, error) {
 	if err != nil {
 		return nil, fmt.Errorf("modem stat: %w", err)
 	}
+	// err = ret.gpioSetup(nRSTPin, paEnablePin, boot0Pin)
+	// if err != nil {
+	// 	return nil, err
+	// }
 	if fi.Mode()&os.ModeSocket == os.ModeSocket {
 		ret.modem, err = net.Dial("unix", port)
 		if err != nil {
 			return nil, fmt.Errorf("modem socket open: %w", err)
 		}
+		// This is the emulator so don't initialize GPIO
 	} else {
+		err = ret.gpioSetup(nRSTPin, paEnablePin, boot0Pin)
+		if err != nil {
+			return nil, err
+		}
 		ret.modem, err = os.OpenFile(port, os.O_RDWR, 0)
 		if err != nil {
 			return nil, fmt.Errorf("modem open: %w", err)
@@ -105,10 +127,6 @@ func NewCC1200Modem(port string) (*CC1200Modem, error) {
 	}
 	return &ret, nil
 }
-func (m *CC1200Modem) Run() {
-
-}
-
 func (m *CC1200Modem) processTXSamples(txSamples chan int8) {
 	ticker := time.NewTicker(40 * time.Millisecond)
 	w := bufio.NewWriterSize(m.modem, samplesPer40MS)
@@ -187,6 +205,10 @@ func (m *CC1200Modem) txWatchdog() {
 		}
 		if timedOut && m.isTransmitting() {
 			m.StopTX()
+			err := m.setPAEnableGPIO(false)
+			if err != nil {
+				log.Printf("[DEBUG] Stop TX PA disable: %v", err)
+			}
 			m.StartRX()
 			return
 		}
@@ -194,11 +216,62 @@ func (m *CC1200Modem) txWatchdog() {
 	}
 }
 
+func (m *CC1200Modem) setNRSTGPIO(set bool) error {
+	if m.nRST == nil {
+		// Emulation mode
+		return nil
+	}
+	if set {
+		return m.nRST.SetValue(1)
+	}
+	return m.nRST.SetValue(0)
+}
+
+func (m *CC1200Modem) setPAEnableGPIO(set bool) error {
+	if m.paEnable == nil {
+		// Emulation mode
+		return nil
+	}
+	if set {
+		return m.paEnable.SetValue(1)
+	}
+	return m.paEnable.SetValue(0)
+}
+
+func (m *CC1200Modem) setBoot0GPIO(set bool) error {
+	if m.boot0 == nil {
+		// Emulation mode
+		return nil
+	}
+
+	if set {
+		return m.boot0.SetValue(1)
+	}
+	return m.boot0.SetValue(0)
+}
+
+// Reset the modem
+func (m *CC1200Modem) Reset() error {
+	err1 := m.setBoot0GPIO(false)
+	err2 := m.setPAEnableGPIO(false)
+	err3 := m.setNRSTGPIO(false)
+	time.Sleep(50 * time.Millisecond)
+	err4 := m.setNRSTGPIO(true)
+	return fmt.Errorf("modem reset: %w", errors.Join(err1, err2, err3, err4))
+}
+
 // Close the modem
 func (m *CC1200Modem) Close() error {
 	if m.isTransmitting() {
 		m.StopTX()
+		err := m.setPAEnableGPIO(false)
+		if err != nil {
+			log.Printf("[DEBUG] Close PA disable: %v", err)
+		}
 	}
+	m.nRST.Close()
+	m.paEnable.Close()
+	m.boot0.Close()
 	return m.modem.Close()
 }
 
@@ -241,12 +314,17 @@ func (m *CC1200Modem) Read(buf []byte) (n int, err error) {
 func (m *CC1200Modem) Write(b []byte) (n int, err error) {
 	if !m.isTransmitting() {
 		log.Printf("[DEBUG] Switch to transmit")
-		// err = fmt.Errorf("symbols received when not transmitting")
 		err = m.EndRX()
 		if err != nil {
 			err = fmt.Errorf("end RX: %w", err)
 			return
 		}
+		time.Sleep(2 * time.Millisecond)
+		err = m.setPAEnableGPIO(true)
+		if err != nil {
+			log.Printf("[DEBUG] Start TX PAEnable: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
 		err = m.StartTX()
 		if err != nil {
 			err = fmt.Errorf("start TX: %w", err)

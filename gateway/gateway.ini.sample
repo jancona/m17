@@ -30,3 +30,6 @@ Level=DEBUG
 [Modem]
 Port=/tmp/modem.sock
 Speed=460800
+NRSTPin=17
+PAEnablePin=18
+Boot0Pin=27
