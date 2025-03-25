@@ -14,10 +14,10 @@ import (
 )
 
 var (
-	serverArg   *string = flag.String("server", "", "Reflector server")
+	serverArg   *string = flag.String("server", "", "Reflector server address (e.g. relay.n1adj.net)")
 	portArg     *uint   = flag.Uint("port", 17000, "Port the reflector listens on")
 	moduleArg   *string = flag.String("module", "T", "Module to connect to")
-	callsignArg *string = flag.String("callsign", "N0CALL", "User's callsign")
+	callsignArg *string = flag.String("callsign", "N0CALL", "Client user's callsign (e.g. N1ADJ)")
 	helpArg     *bool   = flag.Bool("h", false, "Print arguments")
 )
 

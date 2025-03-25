@@ -23,8 +23,6 @@ Address=relay.n1adj.net
 [Log]
 # Logging levels: ERROR, INFO, DEBUG
 Level=DEBUG
-# FilePath=.
-# FileRoot=gateway
 # Rotation?
 
 [Modem]

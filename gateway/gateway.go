@@ -39,6 +39,7 @@ type config struct {
 }
 
 func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
+	log.Printf("[INFO] Loading settings from '%s'", iniFile)
 	cfg, err := ini.Load(iniFile)
 	if err != nil {
 		log.Fatalf("Fail to read config from %s: %v", iniFile, err)
