@@ -53,7 +53,11 @@ func NewRelay(name string, server string, port uint, module string, callsign str
 	}
 	var dst *[6]byte
 	if name != "" {
-		dst, err = EncodeCallsign(name + " " + string(m))
+		if m == 0 {
+			dst, err = EncodeCallsign(name)
+		} else {
+			dst, err = EncodeCallsign(name + " " + string(m))
+		}
 		if err != nil {
 			return nil, fmt.Errorf("bad name %s: %w", name, err)
 		}

@@ -89,6 +89,9 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	if len(reflectorModule) > 1 {
 		reflectorModuleErr = fmt.Errorf("configured Reflector Module must be zero or one character")
 	}
+	if reflectorModule == " " {
+		reflectorModule = ""
+	}
 	var logLevelErr error
 	if logLevel != "ERROR" && logLevel != "INFO" && logLevel != "DEBUG" {
 		logLevelErr = fmt.Errorf("configured Log Level must be one of ERROR, INFO or DEBUG")
@@ -220,6 +223,7 @@ func setupLogging(c config) {
 // Gateway connects to a reflector, converts traffic to/from audio format on stdout,
 // so it can be used in a pipeline with other tools
 type Gateway struct {
+	Name   string
 	Server string
 	Port   uint
 	Module string
@@ -236,6 +240,7 @@ func NewGateway(cfg config, modem *m17.CC1200Modem) (*Gateway, error) {
 	var err error
 
 	g := Gateway{
+		Name:   cfg.reflectorName,
 		Server: cfg.reflectorAddr,
 		Port:   cfg.reflectorPort,
 		Module: cfg.reflectorModule,
@@ -246,7 +251,7 @@ func NewGateway(cfg config, modem *m17.CC1200Modem) (*Gateway, error) {
 	}
 
 	log.Printf("[DEBUG] Connecting to %s:%d, module %s", g.Server, g.Port, g.Module)
-	g.relay, err = m17.NewRelay(g.Server, g.Port, g.Module, cfg.callsign, g.FromRelay)
+	g.relay, err = m17.NewRelay(g.Name, g.Server, g.Port, g.Module, cfg.callsign, g.FromRelay)
 	if err != nil {
 		return nil, fmt.Errorf("error creating relay: %v", err)
 	}
@@ -255,7 +260,9 @@ func NewGateway(cfg config, modem *m17.CC1200Modem) (*Gateway, error) {
 		return nil, fmt.Errorf("error connecting to %s:%d %s: %v", g.Server, g.Port, g.Module, err)
 	}
 
-	modem.StartRX()
+	if modem != nil {
+		modem.StartRX()
+	}
 
 	return &g, nil
 }
