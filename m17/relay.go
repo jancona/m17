@@ -50,7 +50,6 @@ func NewRelay(server string, port uint, module string, callsign string, handler 
 	case len(module) == 1:
 		m = []byte(module)[0]
 	}
-
 	c := Relay{
 		Server:          server,
 		Port:            port,
