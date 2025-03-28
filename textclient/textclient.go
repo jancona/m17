@@ -16,12 +16,10 @@ import (
 var (
 	serverArg   *string = flag.String("server", "", "Reflector server address (e.g. relay.n1adj.net)")
 	portArg     *uint   = flag.Uint("port", 17000, "Port the reflector listens on")
-	moduleArg   *string = flag.String("module", "T", "Module to connect to")
+	moduleArg   *string = flag.String("module", "P", "Module to connect to")
 	callsignArg *string = flag.String("callsign", "N0CALL", "Client user's callsign (e.g. N1ADJ)")
 	helpArg     *bool   = flag.Bool("h", false, "Print arguments")
 )
-
-var encodedCallsign *[6]byte
 
 func main() {
 	flag.Parse()
@@ -31,7 +29,7 @@ func main() {
 	}
 
 	var err error
-	encodedCallsign, err = m17.EncodeCallsign(*callsignArg)
+	_, err = m17.EncodeCallsign(*callsignArg)
 	if err != nil {
 		fmt.Printf("Bad callsign %s: %v", *callsignArg, err)
 		os.Exit(1)
