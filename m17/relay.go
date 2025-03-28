@@ -119,11 +119,9 @@ func (c *Relay) Handle() {
 			c.sendPONG()
 			c.lastPing = time.Now()
 			// case magicINFO:
-		case magicM17Voice: // Original M17 voice stream
-			// TODO: This should be replaced by the proper code to handle voice streams
-			// for now, it's here for backwards compatibility
-			p := NewPacketFromBytes(buffer[4:])
-			c.handler(p)
+		case magicM17Voice: // M17 voice stream
+			log.Print("[DEBUG] Ignoring M17 voice data")
+			// TODO: Implement M17 voice streams
 		case magicM17Packet: // M17 packet
 			p := NewPacketFromBytes(buffer[4:])
 			c.handler(p)

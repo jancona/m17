@@ -45,7 +45,7 @@ Usage of ./textclient:
     	User's callsign (default "N0CALL")
   -h	Print arguments
   -module string
-    	Module to connect to (default "T")
+      Module to connect to (default "P")
   -port uint
     	Port the reflector listens on (default 17000)
   -server string

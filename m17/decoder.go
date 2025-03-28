@@ -79,17 +79,20 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func([]byte, []byte) err
 				// log.Printf("[DEBUG] symbol: %3.5f, dist: %3.5f, typ: %x", symbol, dist, typ)
 				if dist < decoderDistThresh { //frame syncword detected
 					log.Printf("[DEBUG] sync distance: %f, type: %x", dist, typ)
-
 					d.synced = true
 					d.pushedCnt = 0
 					switch typ {
 					case BERTSync:
+						log.Print("[DEBUG] Received BERTSync")
 						// To be implemented
 					case PacketSync:
+						log.Print("[DEBUG] Received PacketSync")
 						d.firstLSFFrame = false
 					case StreamSync:
+						log.Print("[DEBUG] Received StreamSync")
 						// To be implemented
 					case LSFSync:
+						log.Print("[DEBUG] Received LSFSync")
 						d.latestFrameNum = -1
 						d.packetData = make([]byte, 33*25)
 						d.firstLSFFrame = true
