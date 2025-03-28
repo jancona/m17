@@ -1,5 +1,6 @@
 [General]
-Callsign=N0CALL G
+# Example: N1ADJ or N1ADJ G
+Callsign=
 
 [Radio]
 # Hertz
@@ -12,22 +13,18 @@ FrequencyCorr=0
 Duplex=false
 
 [Reflector]
-Name=RN1ADJ
-Address=relay.n1adj.net
-# Name=M17-TAE
-# Address=24.92.53.66
-# Port=17000
-# Module=B
-# Hostfile lookup?
+Name=M17-M17
+Address=ref.m17.link
+Port=17000
+Module=P
 
 [Log]
 # Logging levels: ERROR, INFO, DEBUG
 Level=DEBUG
-# Rotation?
 
 [Modem]
-Port=/tmp/modem.sock
+Port=/dev/ttyAMA0
 Speed=460800
-NRSTPin=17
+NRSTPin=21
 PAEnablePin=18
-Boot0Pin=27
+Boot0Pin=20
