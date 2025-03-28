@@ -156,6 +156,7 @@ var (
 	inArg      *string = flag.String("in", "", "M17 symbol input (default stdin)")
 	outArg     *string = flag.String("out", "", "M17 symbol output (default stdout)")
 	configFile *string = flag.String("config", "./gateway.ini", "Configuration file")
+	reset      *bool   = flag.Bool("reset", false, "Reset modem and exit")
 	helpArg    *bool   = flag.Bool("h", false, "Print arguments")
 )
 
@@ -188,6 +189,18 @@ func main() {
 		modem.SetFreqCorrection(cfg.frequencyCorr)
 		modem.SetAFC(cfg.afc)
 		log.Printf("[INFO] Connected to modem on %s", cfg.modemPort)
+	}
+
+	if *reset {
+		if modem != nil {
+			log.Print("[INFO] Resetting modem")
+			err = modem.Reset()
+			if err != nil {
+				log.Printf("[ERROR] Error resetting modem: %v", err)
+				os.Exit(1)
+			}
+		}
+		os.Exit(0)
 	}
 
 	log.Printf("[DEBUG] Creating gateway cfg: %#v, modem %#v", cfg, modem)

@@ -263,7 +263,11 @@ func (m *CC1200Modem) Reset() error {
 	err3 := m.setNRSTGPIO(false)
 	time.Sleep(50 * time.Millisecond)
 	err4 := m.setNRSTGPIO(true)
-	return fmt.Errorf("modem reset: %w", errors.Join(err1, err2, err3, err4))
+	errs := errors.Join(err1, err2, err3, err4)
+	if errs != nil {
+		return fmt.Errorf("modem reset: %w", errs)
+	}
+	return nil
 }
 
 // Close the modem
