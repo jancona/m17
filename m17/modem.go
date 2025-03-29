@@ -97,12 +97,14 @@ func NewCC1200Modem(
 	// 	return nil, err
 	// }
 	if fi.Mode()&os.ModeSocket == os.ModeSocket {
+		log.Printf("[DEBUG] Opening emulator")
 		ret.modem, err = net.Dial("unix", port)
 		if err != nil {
 			return nil, fmt.Errorf("modem socket open: %w", err)
 		}
 		// This is the emulator so don't initialize GPIO
 	} else {
+		log.Printf("[DEBUG] Opening modem")
 		err = ret.gpioSetup(nRSTPin, paEnablePin, boot0Pin)
 		if err != nil {
 			return nil, err
@@ -139,14 +141,14 @@ func (m *CC1200Modem) processTXSamples(txSamples chan int8) {
 	for {
 		select {
 		case sample := <-txSamples:
-			// TODO; Mutex?
+			// TODO: Mutex?
 			_, err := w.Write([]byte{byte(sample)})
 			if err != nil {
 				log.Printf("[ERROR] Error writing to modem: %v", err)
 				return
 			}
 		case <-ticker.C:
-			// TODO; Mutex?
+			// TODO: Mutex?
 			w.Flush()
 		}
 	}
@@ -168,10 +170,10 @@ func (m *CC1200Modem) processReceivedData(rxSource chan int8) {
 					// log.Printf("[DEBUG] sent rx: %x", buf[0])
 				default:
 					// pipeline is full, so drop it
-					log.Printf("[DEBUG] dropped rx: %x", buf[0])
+					log.Printf("[DEBUG] processReceivedData dropped rx: %x", buf[0])
 				}
 			} else {
-				log.Printf("[DEBUG] cmd: %x", buf[0])
+				log.Printf("[DEBUG] processReceivedData cmd: %x", buf[0])
 				m.cmdSource <- buf[0]
 			}
 		}
@@ -227,6 +229,7 @@ func (m *CC1200Modem) setNRSTGPIO(set bool) error {
 		// Emulation mode
 		return nil
 	}
+	log.Printf("[DEBUG] setNRSTGPIO(%v)", set)
 	if set {
 		return m.nRST.SetValue(1)
 	}
@@ -238,6 +241,7 @@ func (m *CC1200Modem) setPAEnableGPIO(set bool) error {
 		// Emulation mode
 		return nil
 	}
+	log.Printf("[DEBUG] setPAEnableGPIO(%v)", set)
 	if set {
 		return m.paEnable.SetValue(1)
 	}
@@ -249,7 +253,7 @@ func (m *CC1200Modem) setBoot0GPIO(set bool) error {
 		// Emulation mode
 		return nil
 	}
-
+	log.Printf("[DEBUG] setBoot0GPIO(%v)", set)
 	if set {
 		return m.boot0.SetValue(1)
 	}
@@ -258,6 +262,7 @@ func (m *CC1200Modem) setBoot0GPIO(set bool) error {
 
 // Reset the modem
 func (m *CC1200Modem) Reset() error {
+	log.Print("[DEBUG] modem Reset()")
 	err1 := m.setBoot0GPIO(false)
 	err2 := m.setPAEnableGPIO(false)
 	err3 := m.setNRSTGPIO(false)
@@ -272,6 +277,7 @@ func (m *CC1200Modem) Reset() error {
 
 // Close the modem
 func (m *CC1200Modem) Close() error {
+	log.Print("[DEBUG] modem Close()")
 	if m.isTransmitting() {
 		m.StopTX()
 		err := m.setPAEnableGPIO(false)
@@ -286,6 +292,7 @@ func (m *CC1200Modem) Close() error {
 }
 
 func (m *CC1200Modem) StopTX() {
+	log.Print("[DEBUG] modem StopTX()")
 	m.txStart.Store(time.Time{})
 	m.trxState.Store(trxIdle)
 	time.Sleep(txEndDuration)
@@ -347,7 +354,7 @@ func (m *CC1200Modem) Write(b []byte) (n int, err error) {
 		err = fmt.Errorf("decode symbols: %w", err)
 		return
 	}
-	// log.Printf("[DEBUG] Write symbols: % f", symbols)
+	log.Printf("[DEBUG] Write symbols: % f", symbols)
 	for _, s := range symbols {
 		m.txSymbols <- s
 	}
@@ -376,6 +383,7 @@ func (m *CC1200Modem) StartTX() error {
 }
 
 func (m *CC1200Modem) SetTXFreq(freq uint32) error {
+	log.Printf("[DEBUG] SetTXFreq(%v)", freq)
 	var err error
 	cmd := []byte{cmdSetTXFreq, 0}
 	cmd, err = binary.Append(cmd, binary.LittleEndian, freq)
@@ -389,6 +397,7 @@ func (m *CC1200Modem) SetTXFreq(freq uint32) error {
 	return nil
 }
 func (m *CC1200Modem) SetTXPower(dbm float32) error {
+	log.Printf("[DEBUG] SetTXPower(%v)", dbm)
 	var err error
 	cmd := []byte{cmdSetTXPower, 0}
 	cmd, err = binary.Append(cmd, binary.LittleEndian, int8(dbm*4))
@@ -426,6 +435,7 @@ func (m *CC1200Modem) EndRX() error {
 	return nil
 }
 func (m *CC1200Modem) SetRXFreq(freq uint32) error {
+	log.Printf("[DEBUG] SetRXFreq(%v)", freq)
 	var err error
 	cmd := []byte{cmdSetRXFreq, 0}
 	cmd, err = binary.Append(cmd, binary.LittleEndian, freq)
@@ -439,6 +449,7 @@ func (m *CC1200Modem) SetRXFreq(freq uint32) error {
 	return nil
 }
 func (m *CC1200Modem) SetAFC(afc bool) error {
+	log.Printf("[DEBUG] SetAFC(%v)", afc)
 	var err error
 	var a byte
 	if afc {
@@ -452,6 +463,7 @@ func (m *CC1200Modem) SetAFC(afc bool) error {
 	return nil
 }
 func (m *CC1200Modem) SetFreqCorrection(corr int16) error {
+	log.Printf("[DEBUG] SetFreqCorrection(%v)", corr)
 	var err error
 	cmd := []byte{cmdSetFreqCorr, 0}
 	cmd, err = binary.Append(cmd, binary.LittleEndian, corr)
