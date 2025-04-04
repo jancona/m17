@@ -36,15 +36,18 @@ const (
 	cmdSetTXStart
 	cmdSetRX
 )
-const (
-	//GET
-	cmdGetIdent = iota + 0x80
-	cmdGetCaps
-	cmdGetRXFreq
-	cmdGetTXFreq
-	cmdGetTXPower
-	cmdGetFreqCorr
-)
+
+// const (
+//
+//	//GET
+//	cmdGetIdent = iota + 0x80
+//	cmdGetCaps
+//	cmdGetRXFreq
+//	cmdGetTXFreq
+//	cmdGetTXPower
+//	cmdGetFreqCorr
+//
+// )
 const (
 	trxIdle = iota
 	trxRX

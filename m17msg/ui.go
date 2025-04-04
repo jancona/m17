@@ -1,14 +1,13 @@
 package main
 
 import (
-	"strings"
-
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"github.com/jancona/m17text/m17"
 )
 
 type ui struct {
@@ -122,7 +121,7 @@ func (u *ui) addChannel(w fyne.Window, a fyne.App, f func(*channel) widget.ListI
 				return
 			}
 			var ch channel
-			ch.name = strings.ToUpper(ce.Text)
+			ch.name = m17.NormalizeCallsignModule(ce.Text)
 			ch.id = ch.name
 			id := f(&ch)
 			u.setChannel(u.currentServer.channels[id])

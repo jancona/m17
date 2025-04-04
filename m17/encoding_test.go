@@ -137,3 +137,34 @@ func TestDecodeCallsign(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeCallsignModule(t *testing.T) {
+	type args struct {
+		callsign string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{"N1ADJ",
+			args{"N1ADJ"},
+			"N1ADJ"},
+		{"N1ADJ A",
+			args{"N1ADJ A"},
+			"N1ADJ   A"},
+		{"#ALL A",
+			args{"#ALL A"},
+			"#ALL A"},
+		{"N1ADJABCD A",
+			args{"N1ADJABCD A"},
+			"N1ADJABCD A"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeCallsignModule(tt.args.callsign); got != tt.want {
+				t.Errorf("NormalizeCallsignModule() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

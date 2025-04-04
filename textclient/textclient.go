@@ -29,6 +29,7 @@ func main() {
 	}
 
 	var err error
+	*callsignArg = m17.NormalizeCallsignModule(*callsignArg)
 	_, err = m17.EncodeCallsign(*callsignArg)
 	if err != nil {
 		fmt.Printf("Bad callsign %s: %v", *callsignArg, err)
@@ -105,6 +106,7 @@ func handleConsoleInput(c *m17.Relay) {
 			if command == "" {
 				// Add a trailing NUL
 				msg := append([]byte(message), 0)
+				// log.Printf("[DEBUG] sending dst: %s, src: %s, msg: %s", callsign, *callsignArg, msg)
 				p, err := m17.NewPacket(callsign, *callsignArg, m17.PacketTypeSMS, msg)
 				if err != nil {
 					fmt.Printf("Error creating Packet: %v\n", err)
@@ -140,5 +142,7 @@ func parseInput(input string) (command, callsign, message string, ok bool) {
 		return
 	}
 	callsign, message, ok = strings.Cut(input, ": ")
+	callsign = m17.NormalizeCallsignModule(callsign)
+	// log.Printf("[DEBUG] callsign: %s, message: %s", callsign, message)
 	return
 }

@@ -306,13 +306,13 @@ func TestNewPacket(t *testing.T) {
 	}{
 		{"simple",
 			args{
-				"A",
-				"B",
+				"A1A",
+				"B2B",
 				PacketType(0),
 				[]byte{0},
 			},
 			&Packet{
-				LSF:     NewLSFFromBytes([]byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 71, 150}),
+				LSF:     NewLSFFromBytes([]byte{0, 0, 0, 0, 10, 161, 0, 0, 0, 0, 17, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 92, 86}),
 				Type:    PacketType(0),
 				Payload: []byte{0},
 				CRC:     26476,

@@ -84,7 +84,7 @@ func (s *m17Server) configure(u *ui) (fyne.CanvasObject, func(prefix string, a f
 	f.AppendItem(&widget.FormItem{Text: "Module", Widget: module})
 	return f,
 		func(prefix string, a fyne.App) {
-			s.callsign = strings.ToUpper(callsign.Text)
+			s.callsign = m17.NormalizeCallsignModule(strings.ToUpper(callsign.Text))
 			s.app.Preferences().SetString(prefix+prefM17CallsignKey, s.callsign)
 			s.app.Preferences().SetString(prefix+prefM17NameKey, name.Text)
 			s.app.Preferences().SetString(prefix+prefM17ServerKey, server.Text)

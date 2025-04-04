@@ -77,7 +77,7 @@ func (c *Relay) Connect() error {
 	if err != nil {
 		return fmt.Errorf("error sending CONN: %w", err)
 	}
-
+	log.Printf("[DEBUG] Connected to %s:%d", c.Server, c.Port)
 	return nil
 }
 func (c *Relay) Close() error {

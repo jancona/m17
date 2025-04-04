@@ -2,6 +2,8 @@ package m17
 
 import (
 	"fmt"
+	"log"
+	"regexp"
 	"strings"
 )
 
@@ -18,6 +20,9 @@ var EncodedDestinationAllBytes = [6]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
 const m17Chars = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/."
 
+var callsignRegex = regexp.MustCompile(`^[0-9]?[A-Z]{1,2}[0-9]{1,2}[A-Z]{1,4}([ -/\.][A-Z0-9 -/\.]*)?$`)
+var roomRegex = regexp.MustCompile(`^#[A-Z0-9 -/\.]+$`)
+
 func EncodeCallsign(callsign string) (*[6]byte, error) {
 	if len(callsign) > MaxCallsignLen {
 		return nil, fmt.Errorf("callsign '%s' too long, max %d", callsign, MaxCallsignLen)
@@ -29,6 +34,13 @@ func EncodeCallsign(callsign string) (*[6]byte, error) {
 	start := 0
 	if callsign[0] == '#' {
 		start = 1
+		if !roomRegex.MatchString(callsign) {
+			return nil, fmt.Errorf("room name '%s' is not valid", callsign)
+		}
+	} else {
+		if !callsignRegex.MatchString(callsign) {
+			return nil, fmt.Errorf("callsign '%s' is not valid", callsign)
+		}
 	}
 
 	var address uint64 = 0 // the calculate address in host byte order
@@ -101,4 +113,19 @@ func DecodeCallsign(encoded []byte) (string, error) {
 		address /= 40 // keep dividing the address until there ’s nothing left
 	}
 	return callsign, nil
+}
+
+// For regular callsigns, if the callsign ends with a space followed by a module letter,
+// put the module letter in position 9 (the convention) with spaces preceding it
+func NormalizeCallsignModule(callsign string) string {
+	old := callsign
+	callsign = strings.ToUpper(callsign)
+	l := len(callsign)
+	if callsign[0] != '#' || l > 9 {
+		if l >= 3 && l < 9 && callsign[l-2] == ' ' && callsign[l-1] >= 'A' && callsign[l-1] <= 'Z' {
+			callsign = callsign[:l-1] + "         "[:9-l] + callsign[l-1:]
+		}
+	}
+	log.Printf("[DEBUG] normalized callsign %s to %s", old, callsign)
+	return callsign
 }
