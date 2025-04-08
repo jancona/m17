@@ -49,14 +49,14 @@ func (m *messageCell) avatarResource() fyne.Resource {
 	return ret
 }
 
-func (m *messageCell) setMessage(new *message) {
-	m.msg = new
-	m.Refresh()
-}
+// func (m *messageCell) setMessage(new *message) {
+// 	m.msg = new
+// 	m.Refresh()
+// }
 
 func (m *messageCell) CreateRenderer() fyne.WidgetRenderer {
 	name := widget.NewLabelWithStyle("", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	name.Wrapping = fyne.TextTruncate
+	name.Truncation = fyne.TextTruncateEllipsis
 	body := widget.NewRichText()
 	body.Wrapping = fyne.TextWrapWord
 	return &messageRenderer{m: m,

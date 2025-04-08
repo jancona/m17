@@ -2,7 +2,6 @@ package main
 
 import (
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
@@ -11,11 +10,12 @@ import (
 )
 
 type ui struct {
-	servers, channels *widget.List
-	messages          *fyne.Container
-	messageScroll     *container.Scroll
-	create            *widget.Entry
-	win               fyne.Window
+	servers       *widget.List
+	channels      *widget.List
+	messages      *fyne.Container
+	messageScroll *container.Scroll
+	create        *widget.Entry
+	win           fyne.Window
 
 	data           *appData
 	currentServer  *server
@@ -41,15 +41,14 @@ func (u *ui) makeUI(w fyne.Window, a fyne.App) fyne.CanvasObject {
 			return len(u.data.servers) + 1
 		},
 		func() fyne.CanvasObject {
-			img := &canvas.Image{}
-			img.SetMinSize(fyne.NewSize(theme.IconInlineSize()*2, theme.IconInlineSize()*2))
-			return img
+			label := widget.NewLabel("")
+			return label
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			if u.data == nil || id == len(u.data.servers) {
-				o.(*canvas.Image).Resource = theme.ContentAddIcon()
+				o.(*widget.Label).SetText("Add Server")
 			} else {
-				o.(*canvas.Image).Resource = u.data.servers[id].icon()
+				o.(*widget.Label).SetText(u.data.servers[id].name)
 			}
 			o.Refresh()
 		})
@@ -77,7 +76,7 @@ func (u *ui) makeUI(w fyne.Window, a fyne.App) fyne.CanvasObject {
 		},
 		func(id widget.ListItemID, o fyne.CanvasObject) {
 			if id == len(u.currentServer.channels) {
-				o.(*widget.Label).SetText("Add New")
+				o.(*widget.Label).SetText("Add Channel")
 				return
 			}
 			o.(*widget.Label).SetText(u.currentServer.channels[id].name)
@@ -109,7 +108,10 @@ func (u *ui) makeUI(w fyne.Window, a fyne.App) fyne.CanvasObject {
 			}), u.create), nil, nil, u.messageScroll)
 	content := container.NewHSplit(u.channels, messagePane)
 	content.Offset = 0.3
-	return container.NewBorder(nil, nil, u.servers, nil, content)
+	// return container.NewBorder(nil, nil, u.servers, nil, content)
+	full := container.NewHSplit(u.servers, content)
+	full.Offset = 0.2
+	return full
 }
 
 func (u *ui) addChannel(w fyne.Window, a fyne.App, f func(*channel) widget.ListItemID) *channel {

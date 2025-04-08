@@ -9,11 +9,12 @@ type appData struct {
 }
 
 type server struct {
-	id            string
-	name, iconURL string
-	iconResource  fyne.Resource
-	channels      []*channel
-	service       service
+	id           string
+	name         string
+	iconURL      string
+	iconResource fyne.Resource
+	channels     []*channel
+	service      service
 	// users         map[string]*user
 }
 
@@ -33,7 +34,6 @@ func (s *server) icon() fyne.Resource {
 }
 
 type channel struct {
-	direct   bool
 	id       string
 	name     string
 	messages []*message

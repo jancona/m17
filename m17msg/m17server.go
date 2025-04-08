@@ -110,38 +110,38 @@ func (s *m17Server) disconnect() {
 	}
 }
 
-func (s *m17Server) loadChats(u *ui) {
-	// for _, s := range u.data.servers {
-	// 	id, _ := strconv.Atoi(s.id)
-	// 	cs, _ := d.conn.Client.Channels(discapi.GuildID(id))
-	// 	for _, c := range cs {
-	// 		if c.Type == discapi.GuildCategory || c.Type == discapi.GuildVoice {
-	// 			continue // ignore voice and groupings for now
-	// 		}
+// func (s *m17Server) loadChats(u *ui) {
+// for _, s := range u.data.servers {
+// 	id, _ := strconv.Atoi(s.id)
+// 	cs, _ := d.conn.Client.Channels(discapi.GuildID(id))
+// 	for _, c := range cs {
+// 		if c.Type == discapi.GuildCategory || c.Type == discapi.GuildVoice {
+// 			continue // ignore voice and groupings for now
+// 		}
 
-	// 		chn := &channel{id: strconv.Itoa(int(c.ID)), name: "#" + c.Name, server: s}
-	// 		if len(s.channels) == 0 {
-	// 			chn.messages = d.loadRecentMessages(c.ID)
-	// 			if s == u.currentServer {
-	// 				u.setChannel(chn)
-	// 			}
-	// 		}
-	// 		s.channels = append(s.channels, chn)
-	// 	}
-	// }
-	u.channels.Refresh()
+// 		chn := &channel{id: strconv.Itoa(int(c.ID)), name: "#" + c.Name, server: s}
+// 		if len(s.channels) == 0 {
+// 			chn.messages = d.loadRecentMessages(c.ID)
+// 			if s == u.currentServer {
+// 				u.setChannel(chn)
+// 			}
+// 		}
+// 		s.channels = append(s.channels, chn)
+// 	}
+// }
+// u.channels.Refresh()
 
-	// for _, s := range u.data.servers {
-	// 	for i, c := range s.channels {
-	// 		if i == 0 {
-	// 			continue // we did this one above
-	// 		}
+// for _, s := range u.data.servers {
+// 	for i, c := range s.channels {
+// 		if i == 0 {
+// 			continue // we did this one above
+// 		}
 
-	// 		id, _ := strconv.Atoi(c.id)
-	// 		c.messages = d.loadRecentMessages(discapi.ChannelID(id))
-	// 	}
-	// }
-}
+// 		id, _ := strconv.Atoi(c.id)
+// 		c.messages = d.loadRecentMessages(discapi.ChannelID(id))
+// 	}
+// }
+// }
 
 // func (d *m17) loadRecentMessages(id discapi.ChannelID) []*message {
 // 	ms, err := d.conn.Client.Messages(id, 15)

@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	selectedID     string
-	selectedOption service
-	selectedLogin  func(string, fyne.App)
+	selectedID string
+	// selectedOption service
+	selectedLogin func(string, fyne.App)
 )
 
 func (u *ui) addLogin(w fyne.Window, a fyne.App) {
@@ -54,7 +54,7 @@ func (u *ui) loginContent(a fyne.App) fyne.CanvasObject {
 		}{id, srv, content, save})
 	}
 
-	details := container.NewMax(widget.NewLabel("and add your login details"))
+	details := container.NewStack(widget.NewLabel("and add your login details"))
 	title := widget.NewLabelWithStyle("Choose a server type", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	list := widget.NewList(
 		func() int {
@@ -75,7 +75,7 @@ func (u *ui) loginContent(a fyne.App) fyne.CanvasObject {
 		details.Refresh()
 
 		selectedID = opt.id
-		selectedOption = opt.srv
+		// selectedOption = opt.srv
 		selectedLogin = opt.login
 	}
 
