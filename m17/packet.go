@@ -70,6 +70,7 @@ type LSF struct {
 func NewEmptyLSF() LSF {
 	return LSF{}
 }
+
 func NewLSF(destCall, sourceCall string, t LSFType, dt LSFDataType, can byte) (LSF, error) {
 	var err error
 	lsf := NewEmptyLSF()
@@ -129,6 +130,17 @@ func (l *LSF) CalcCRC() uint16 {
 func (l *LSF) CheckCRC() bool {
 	a := l.ToBytes()
 	return CRC(a) == 0
+}
+
+func (l *LSF) String() string {
+	dst, _ := DecodeCallsign(l.Dst[:])
+	src, _ := DecodeCallsign(l.Src[:])
+	return fmt.Sprintf(`{
+	Dst: %s,
+	Src: %s,
+	Type: %#v,
+	Meta: %#v,
+	CRC: %#v`, dst, src, l.Type, l.Meta, l.CRC)
 }
 
 // M17 packet
@@ -268,4 +280,20 @@ func (p *Packet) Send(out io.Writer) error {
 	}
 
 	return nil
+}
+
+func (p *Packet) String() string {
+	var pl string
+	if p.Type == 5 {
+		pl = string(p.Payload[:len(p.Payload)-1])
+	} else {
+		pl = fmt.Sprintf("%#v", p.Payload)
+	}
+
+	return fmt.Sprintf(`{
+	LSF: %s,
+	Type: %#v,
+	Payload: %s,
+	CRC: %#v
+}`, p.LSF.String(), p.Type, pl, p.CRC)
 }

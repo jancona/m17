@@ -289,9 +289,9 @@ func (g Gateway) FromRelay(p m17.Packet) error {
 }
 
 func (g *Gateway) FromModem(lsfBytes []byte, packetBytes []byte) error {
-	// log.Printf("[DEBUG] received packet from modem: % x", packetBytes)
+	log.Printf("[DEBUG] received packet from modem: % x", packetBytes)
 	p := m17.NewPacketFromBytes(append(lsfBytes, packetBytes...))
-	// log.Printf("[DEBUG] p: %#v", p)
+	log.Printf("[DEBUG] p: %s", p.String())
 	// TODO: Handle error?
 	err := g.relay.SendPacket(p)
 	return err

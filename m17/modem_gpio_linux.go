@@ -13,7 +13,7 @@ import (
 func (m *CC1200Modem) gpioSetup(nRSTPin, paEnablePin, boot0Pin int) error {
 	var err error
 	log.Print("[DEBUG] Setting up GPIO")
-	m.nRST, err = gpiocdev.RequestLine("gpiochip0", nRSTPin, gpiocdev.AsOutput(0))
+	m.nRST, err = gpiocdev.RequestLine("gpiochip0", nRSTPin, gpiocdev.AsOutput(1))
 	if err != nil {
 		return fmt.Errorf("request nRST line: %w", err)
 	}
