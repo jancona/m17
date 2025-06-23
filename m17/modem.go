@@ -187,18 +187,18 @@ func (m *CC1200Modem) processReceivedData(rxSource chan int8) {
 	}
 }
 func (m *CC1200Modem) rxPipeline(sampleSource chan int8) (chan float32, error) {
-	// modem samples -> DC filter --> RRC filter & scale -> downsample -> decode
+	// modem samples -> DC filter --> RRC filter & scale
 	var err error
 	dcf, err := NewDCFilter(sampleSource, len(rrcTaps5))
 	if err != nil {
 		return nil, fmt.Errorf("dc filter: %w", err)
 	}
 	s2s := NewSampleToSymbol(dcf.Source(), rrcTaps5, RXSymbolScalingCoeff)
-	ds, err := NewDownsampler(s2s.Source(), samplesPerSymbol, 0)
-	if err != nil {
-		return nil, fmt.Errorf("downsampler: %w", err)
-	}
-	return ds.Source(), nil
+	// ds, err := NewDownsampler(s2s.Source(), samplesPerSymbol, 0)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("downsampler: %w", err)
+	// }
+	return s2s.Source(), nil
 }
 func (m *CC1200Modem) isTransmitting() bool {
 	tx := !m.txStart.Load().(time.Time).IsZero()
@@ -303,30 +303,17 @@ func (m *CC1200Modem) StopTX() {
 
 // Read received symbols
 func (m *CC1200Modem) Read(buf []byte) (n int, err error) {
-	i := 0
-	// Loop:
-	// 	for i = 0; i < len(buf); i += 4 {
-	// 		select {
-	// 		case symbol := <-m.rxSymbols:
-	// 			sb, err := binary.Append(nil, binary.LittleEndian, symbol)
-	// 			if err != nil {
-	// 				return i, fmt.Errorf("append symbol: %w", err)
-	// 			}
-	// 			copy(buf[i:], sb)
-	// 		default:
-	// 			break Loop
-	// 		}
-	// 	}
-	for i = 0; i < len(buf); i += 4 {
-		symbol := <-m.rxSymbols
-		sb, err := binary.Append(nil, binary.LittleEndian, symbol)
-		if err != nil {
-			return i, fmt.Errorf("append symbol: %w", err)
-		}
-		copy(buf[i:], sb)
+	sBuf := make([]float32, len(buf)/4)
+	for i := range sBuf {
+		sBuf[i] = <-m.rxSymbols
 	}
-	// log.Printf("[DEBUG] Modem.read returned %d bytes: % x", i, buf[:i])
-	return i, nil
+	sb, err := binary.Append(nil, binary.LittleEndian, sBuf)
+	if err != nil {
+		return 0, fmt.Errorf("append symbol: %w", err)
+	}
+	cnt := copy(buf, sb)
+	// log.Printf("[DEBUG] Modem.read requested %d, returned %d bytes", req, cnt)
+	return cnt, nil
 }
 
 // Send symbols to transmit. If no symbols are received for more than `txEndDuration` milliseconds,

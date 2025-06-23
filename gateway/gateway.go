@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -289,14 +290,56 @@ func (g Gateway) FromRelay(p m17.Packet) error {
 }
 
 func (g *Gateway) FromModem(lsfBytes []byte, packetBytes []byte) error {
-	log.Printf("[DEBUG] received packet from modem: % x", packetBytes)
 	p := m17.NewPacketFromBytes(append(lsfBytes, packetBytes...))
-	log.Printf("[DEBUG] p: %s", p.String())
+	log.Printf("[DEBUG] received packet from modem: %v", p)
 	// TODO: Handle error?
 	err := g.relay.SendPacket(p)
 	return err
 }
 
+type Repeater struct {
+	Repeat int
+	extra  []byte
+	Src    io.Reader
+}
+
+func (r *Repeater) Read(p []byte) (n int, err error) {
+	l := len(p)
+	el := len(r.extra)
+	// log.Printf("[DEBUG] Attempting to read %d bytes, el: %d", l, el)
+	if el < l {
+		rl := (l - el) / 5
+		if rl%5 > 0 {
+			// make sure we have enough symbols
+			rl++
+		}
+		// Get whole symbols
+		rl += rl % 4
+		sBuff := make([]byte, rl)
+		// log.Printf("[DEBUG] Attempting to read %d bytes", len(sBuff))
+		nn, err := r.Src.Read(sBuff)
+		if err != nil {
+			log.Printf("[ERROR] Repeater Read failed: %v", err)
+			if nn == 0 {
+				return 0, err
+			}
+		}
+		// log.Printf("[DEBUG] Read %d bytes: % x", nn, sBuff)
+		if nn%4 != 0 {
+			panic("handle this!")
+		}
+		for i := 0; i < nn; i += 4 {
+			for range r.Repeat {
+				r.extra = append(r.extra, sBuff[i:i+4]...)
+			}
+		}
+		l = min(l, len(r.extra))
+	}
+	n = copy(p, r.extra[:l])
+	r.extra = r.extra[l:]
+	// log.Printf("[DEBUG] Returning %d bytes: % x", n, p)
+	return
+}
 func (g *Gateway) Run() {
 	signalChan := make(chan os.Signal, 1)
 	// handle responses from reflector
@@ -309,7 +352,11 @@ func (g *Gateway) Run() {
 	if g.modem != nil {
 		go d.DecodeSymbols(g.modem, g.FromModem)
 	} else {
-		go d.DecodeSymbols(g.in, g.FromModem)
+		rpt := &Repeater{
+			Repeat: 5,
+			Src:    g.in,
+		}
+		go d.DecodeSymbols(rpt, g.FromModem)
 	}
 	// Run until we're terminated then clean up
 	log.Print("[DEBUG] client: Waiting for close signal")

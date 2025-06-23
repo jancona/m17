@@ -132,7 +132,7 @@ func (l *LSF) CheckCRC() bool {
 	return CRC(a) == 0
 }
 
-func (l *LSF) String() string {
+func (l LSF) String() string {
 	dst, _ := DecodeCallsign(l.Dst[:])
 	src, _ := DecodeCallsign(l.Src[:])
 	return fmt.Sprintf(`{
@@ -282,7 +282,7 @@ func (p *Packet) Send(out io.Writer) error {
 	return nil
 }
 
-func (p *Packet) String() string {
+func (p Packet) String() string {
 	var pl string
 	if p.Type == 5 {
 		pl = string(p.Payload[:len(p.Payload)-1])
@@ -295,5 +295,5 @@ func (p *Packet) String() string {
 	Type: %#v,
 	Payload: %s,
 	CRC: %#v
-}`, p.LSF.String(), p.Type, pl, p.CRC)
+}`, p.LSF, p.Type, pl, p.CRC)
 }

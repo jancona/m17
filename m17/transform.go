@@ -355,6 +355,7 @@ func (t *Downsampler[T]) downsample(sample T) []T {
 	ret := []T{}
 	if t.count%t.factor == t.offset {
 		ret = []T{sample}
+		t.count = t.offset
 	}
 	t.count++
 	return ret
