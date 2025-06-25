@@ -231,6 +231,7 @@ func setupLogging(c config) {
 		Writer:   logWriter,
 	}
 	log.SetOutput(filter)
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.Print("[DEBUG] Debug is on")
 }
 

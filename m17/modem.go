@@ -54,13 +54,29 @@ const (
 	trxTX
 )
 
-const txEndDuration = 240 * time.Millisecond
+const txEndDuration = 400 * time.Millisecond
 
 type Line interface {
 	SetValue(value int) error
 	Close() error
 }
 
+type Modem interface {
+	io.ReadWriteCloser
+	// Read(buf []byte) (n int, err error)
+	// Write(b []byte) (n int, err error)
+	// Close() error
+	StartRX() error
+	EndRX() error
+	StartTX() error
+	StopTX()
+	// Reset() error
+	// SetAFC(afc bool) error
+	// SetFreqCorrection(corr int16) error
+	// SetRXFreq(freq uint32) error
+	// SetTXFreq(freq uint32) error
+	// SetTXPower(dbm float32) error
+}
 type CC1200Modem struct {
 	modem     io.ReadWriteCloser
 	rxSymbols chan float32
@@ -164,19 +180,21 @@ func (m *CC1200Modem) txPipeline(symbolSource chan float32) (chan int8, error) {
 func (m *CC1200Modem) processReceivedData(rxSource chan int8) {
 	buf := make([]byte, 1)
 	for {
+		// log.Printf("[DEBUG] processReceivedData Read()")
 		n, err := m.modem.Read(buf)
 		if n > 0 {
+			// log.Printf("[DEBUG] processReceivedData read %x, trxState: %d", buf[0], m.trxState.Load())
 			if m.trxState.Load() == trxRX {
 				select {
 				case rxSource <- int8(buf[0]):
 					// sent
-					// log.Printf("[DEBUG] sent rx: %x", buf[0])
+					// log.Printf("[DEBUG] processReceivedData rxSource <- : %x", buf[0])
 				default:
 					// pipeline is full, so drop it
 					log.Printf("[DEBUG] processReceivedData dropped rx: %x", buf[0])
 				}
 			} else {
-				log.Printf("[DEBUG] processReceivedData cmd: %x", buf[0])
+				log.Printf("[DEBUG] processReceivedData cmdSource <- : %x", buf[0])
 				m.cmdSource <- buf[0]
 			}
 		}
@@ -208,19 +226,22 @@ func (m *CC1200Modem) updateTXTimeout() {
 	m.txStart.Store(time.Now())
 }
 func (m *CC1200Modem) txWatchdog() {
+	log.Printf("[DEBUG] txWatchdog starting")
 	for {
 		<-m.txTicker.C
 		timedOut := time.Since(m.txStart.Load().(time.Time)) > txEndDuration
 		if timedOut {
+			log.Printf("[DEBUG] txWatchdog timed out")
 			m.txTicker.Stop()
-		}
-		if timedOut && m.isTransmitting() {
-			m.StopTX()
-			err := m.setPAEnableGPIO(false)
-			if err != nil {
-				log.Printf("[DEBUG] Stop TX PA disable: %v", err)
+			if m.isTransmitting() {
+				m.StopTX()
+				err := m.setPAEnableGPIO(false)
+				if err != nil {
+					log.Printf("[DEBUG] Stop TX PA disable: %v", err)
+				}
 			}
 			m.StartRX()
+			log.Printf("[DEBUG] txWatchdog exiting")
 			return
 		}
 
@@ -303,6 +324,7 @@ func (m *CC1200Modem) StopTX() {
 
 // Read received symbols
 func (m *CC1200Modem) Read(buf []byte) (n int, err error) {
+	log.Printf("[DEBUG] Modem.read requested %d bytes", len(buf))
 	sBuf := make([]float32, len(buf)/4)
 	for i := range sBuf {
 		sBuf[i] = <-m.rxSymbols
@@ -312,7 +334,7 @@ func (m *CC1200Modem) Read(buf []byte) (n int, err error) {
 		return 0, fmt.Errorf("append symbol: %w", err)
 	}
 	cnt := copy(buf, sb)
-	// log.Printf("[DEBUG] Modem.read requested %d, returned %d bytes", req, cnt)
+	log.Printf("[DEBUG] Modem.read returned  %d bytes", cnt)
 	return cnt, nil
 }
 
@@ -344,7 +366,7 @@ func (m *CC1200Modem) Write(b []byte) (n int, err error) {
 		err = fmt.Errorf("decode symbols: %w", err)
 		return
 	}
-	log.Printf("[DEBUG] Write symbols: % f", symbols)
+	// log.Printf("[DEBUG] Write symbols: % f", symbols)
 	for _, s := range symbols {
 		m.txSymbols <- s
 	}
@@ -361,7 +383,7 @@ func (m *CC1200Modem) StartTX() error {
 	if m.isTransmitting() {
 		return fmt.Errorf("already transmitting")
 	}
-	_, err := m.commandWithErrResponse([]byte{cmdSetTXStart, 2})
+	err := m.command([]byte{cmdSetTXStart, 2})
 	if err != nil {
 		return fmt.Errorf("start TX: %w", err)
 	}
@@ -380,7 +402,7 @@ func (m *CC1200Modem) SetTXFreq(freq uint32) error {
 	if err != nil {
 		return fmt.Errorf("encode set TX freq: %w", err)
 	}
-	_, err = m.commandWithErrResponse(cmd)
+	err = m.commandWithErrResponse(cmd)
 	if err != nil {
 		return fmt.Errorf("send set TX freq: %w", err)
 	}
@@ -394,7 +416,7 @@ func (m *CC1200Modem) SetTXPower(dbm float32) error {
 	if err != nil {
 		return fmt.Errorf("encode set TX power: %w", err)
 	}
-	_, err = m.commandWithErrResponse(cmd)
+	err = m.commandWithErrResponse(cmd)
 	if err != nil {
 		return fmt.Errorf("send set TX power: %w", err)
 	}
@@ -417,6 +439,7 @@ func (m *CC1200Modem) EndRX() error {
 	log.Printf("[DEBUG] EndRX()")
 	var err error
 	cmd := []byte{cmdSetRX, 0, 0}
+	// Theoretically this returns a response, but how to find it in the received data
 	err = m.command(cmd)
 	if err != nil {
 		return fmt.Errorf("send set RX stop: %w", err)
@@ -432,7 +455,7 @@ func (m *CC1200Modem) SetRXFreq(freq uint32) error {
 	if err != nil {
 		return fmt.Errorf("encode set RX freq: %w", err)
 	}
-	_, err = m.commandWithErrResponse(cmd)
+	err = m.commandWithErrResponse(cmd)
 	if err != nil {
 		return fmt.Errorf("send set RX freq: %w", err)
 	}
@@ -446,7 +469,7 @@ func (m *CC1200Modem) SetAFC(afc bool) error {
 		a = 1
 	}
 	cmd := []byte{cmdSetAFC, 0, a}
-	_, err = m.commandWithErrResponse(cmd)
+	err = m.commandWithErrResponse(cmd)
 	if err != nil {
 		return fmt.Errorf("send set AFC: %w", err)
 	}
@@ -460,37 +483,37 @@ func (m *CC1200Modem) SetFreqCorrection(corr int16) error {
 	if err != nil {
 		return fmt.Errorf("encode set freq corr: %w", err)
 	}
-	_, err = m.commandWithErrResponse(cmd)
+	err = m.commandWithErrResponse(cmd)
 	if err != nil {
 		return fmt.Errorf("send set freq corr: %w", err)
 	}
 	return nil
 }
 
-func (m *CC1200Modem) commandWithErrResponse(cmd []byte) (int, error) {
+func (m *CC1200Modem) commandWithErrResponse(cmd []byte) error {
 	var err error
 	var respErr int
 	respBuf, err := m.commandWithResponse(cmd)
 	if err != nil {
-		return respErr, fmt.Errorf("send cmd: %w", err)
+		return fmt.Errorf("commandWithResponse error: %w", err)
 	}
-	// log.Printf("[DEBUG] respBuf: % x", respBuf)
+	log.Printf("[DEBUG] respBuf: % x", respBuf)
 	switch len(respBuf) {
 	case 1:
 		respErr = int(respBuf[0])
 	case 4:
 		_, err = binary.Decode(respBuf, binary.LittleEndian, respErr)
 		if err != nil {
-			return respErr, fmt.Errorf("parse modem response: %d", respErr)
+			return fmt.Errorf("parse modem response: %d", respErr)
 		}
 	default:
-		return 0, fmt.Errorf("unexpected response: %#v", respBuf)
+		return fmt.Errorf("unexpected response: %#v", respBuf)
 	}
-	// log.Printf("[DEBUG] respErr: %#v", respErr)
+	log.Printf("[DEBUG] respErr: %#v", respErr)
 	if respErr != 0 {
-		return respErr, fmt.Errorf("modem response: %d", respErr)
+		return fmt.Errorf("modem response: %d", respErr)
 	}
-	return 0, nil
+	return nil
 }
 
 func (m *CC1200Modem) command(cmd []byte) error {
@@ -503,10 +526,11 @@ func (m *CC1200Modem) command(cmd []byte) error {
 	if err != nil {
 		return fmt.Errorf("command: %w", err)
 	}
-	log.Printf("[DEBUG] sent cmd: %#v", cmd)
+	log.Printf("[DEBUG] modem command(): % 2x", cmd)
 	return nil
 }
 func (m *CC1200Modem) commandWithResponse(cmd []byte) ([]byte, error) {
+	log.Printf("[DEBUG] commandWithResponse() sending: % 2x", cmd)
 	m.clearResponseBuf()
 	err := m.command(cmd)
 	if err != nil {
@@ -514,9 +538,9 @@ func (m *CC1200Modem) commandWithResponse(cmd []byte) ([]byte, error) {
 	}
 	resp, err := m.commandResponse()
 	if err != nil {
-		return nil, fmt.Errorf("sendCommand response: %w", err)
+		return nil, fmt.Errorf("commandWithResponse(): %w", err)
 	}
-	// log.Printf("[DEBUG] got resp: %#v", resp)
+	log.Printf("[DEBUG] commandWithResponse() received: % 2x", resp)
 	return resp, nil
 }
 
@@ -540,6 +564,6 @@ func (m *CC1200Modem) commandResponse() ([]byte, error) {
 	for i := range buf {
 		buf[i] = <-m.cmdSource
 	}
-	log.Printf("[DEBUG] resp: % x", buf)
+	log.Printf("[DEBUG] commandResponse(): % x", buf)
 	return buf, nil
 }

@@ -81,14 +81,14 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func([]byte, []byte) err
 		case typ == LSFSync && dist < 4.5 && !d.synced:
 			log.Printf("[DEBUG] Received LSFSync, distance: %f, type: %x", dist, typ)
 			var pld []Symbol
-			pld, dist, err = d.extractPayload(dist, typ, bufIn)
+			pld, _, err = d.extractPayload(dist, typ, bufIn)
 			if err == io.EOF {
 				return err
 				// } else if err != nil {
 				// 	// Was logged in extractPayload
 			}
 			d.lsf = decodeLSF(pld)
-			log.Printf("[DEBUG] Received RF LSF: %s, distance: %f", d.lsf, dist)
+			log.Printf("[DEBUG] Received RF LSF: %s", d.lsf)
 			if d.lsf.CheckCRC() {
 				d.gotLSF = true
 				d.synced = true
@@ -98,6 +98,7 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func([]byte, []byte) err
 
 				if d.lsf.Type[1]&byte(LSFTypeStream) == byte(LSFTypeStream) {
 					// TODO: Initialize stream mode and send LSF to reflector
+					d.synced = false // for now
 				} else { // packet mode
 					d.packetData = make([]byte, 33*25)
 				}
@@ -153,9 +154,22 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func([]byte, []byte) err
 				d.resetPacket()
 			}
 
-		// case typ == StreamSync && dist < 5.0:
-
-		// case typ == BERTSync && dist < 5.0:
+		case typ == StreamSync && dist < 5.0:
+			log.Printf("[DEBUG] Received StreamSync, distance: %f, type: %x", dist, typ)
+			_, _, err := d.extractPayload(dist, typ, bufIn)
+			if err == io.EOF {
+				return err
+				// } else if err != nil {
+				// 	// Was logged in extractPayload
+			}
+		case typ == BERTSync && dist < 5.0:
+			log.Printf("[DEBUG] Received BERTSync, distance: %f, type: %x", dist, typ)
+			_, _, err := d.extractPayload(dist, typ, bufIn)
+			if err == io.EOF {
+				return err
+				// } else if err != nil {
+				// 	// Was logged in extractPayload
+			}
 		default:
 			// No one read anything, so advance one symbol
 			_, err := bufIn.Discard(4)
