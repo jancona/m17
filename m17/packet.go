@@ -3,7 +3,6 @@ package m17
 import (
 	"encoding/binary"
 	"fmt"
-	"io"
 	"log"
 	"unicode/utf8"
 )
@@ -261,7 +260,7 @@ func (p *Packet) Encode() ([]Symbol, error) {
 	return outPacket, nil
 }
 
-func (p *Packet) Send(modem io.Writer) error {
+func (p *Packet) Send(modem Modem /*io.Writer*/) error {
 	packet, err := p.Encode()
 	if err != nil {
 		return fmt.Errorf("failure emcoding packet: %w", err)

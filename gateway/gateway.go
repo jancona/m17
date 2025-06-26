@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/hashicorp/logutils"
 	"github.com/jancona/m17text/m17"
@@ -284,10 +286,37 @@ func NewGateway(cfg config, modem *m17.CC1200Modem) (*Gateway, error) {
 
 func (g Gateway) FromRelay(p m17.Packet) error {
 	// log.Printf("[DEBUG] received packet from relay: %#v", p)
-	if g.modem != nil {
-		return p.Send(g.modem)
+	packetSymbols, err := p.Encode()
+	if err != nil {
+		return fmt.Errorf("failure emcoding packet: %w", err)
 	}
-	return p.Send(g.out)
+
+	log.Printf("[DEBUG] Sending: %#v", packetSymbols)
+	if g.modem != nil {
+		log.Printf("StopRX()")
+		g.modem.StopRX()
+		time.Sleep(2 * time.Millisecond)
+		log.Printf("StartTX()")
+		g.modem.StartTX()
+		time.Sleep(10 * time.Millisecond)
+		log.Printf("Write()")
+		err = binary.Write(g.modem, binary.LittleEndian, packetSymbols)
+		if err != nil {
+			return fmt.Errorf("failed to send: %w", err)
+		}
+	} else {
+		err = binary.Write(g.out, binary.LittleEndian, packetSymbols)
+		if err != nil {
+			return fmt.Errorf("failed to send: %w", err)
+		}
+	}
+	if g.modem != nil {
+		time.Sleep(1000 * time.Millisecond)
+		log.Printf("[DEBUG] StopTX()")
+		g.modem.StopTX()
+		g.modem.StartRX()
+	}
+	return nil
 }
 
 func (g *Gateway) FromModem(lsfBytes []byte, packetBytes []byte) error {

@@ -9,7 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"go.bug.st/serial"
@@ -81,10 +81,9 @@ type CC1200Modem struct {
 	modem     io.ReadWriteCloser
 	rxSymbols chan float32
 	txSymbols chan float32
-	// trxMutex  sync.Mutex
-	txStart   atomic.Value // time.Time
-	txTicker  *time.Ticker
-	trxState  atomic.Int32
+
+	trxMutex  sync.Mutex
+	trxState  int
 	cmdSource chan byte
 	nRST      Line
 	paEnable  Line
@@ -100,12 +99,9 @@ func NewCC1200Modem(
 	ret := CC1200Modem{
 		rxSymbols: make(chan float32),
 		txSymbols: make(chan float32, symbolsPerSecond),
-		txTicker:  time.NewTicker(txEndDuration / 2),
 		cmdSource: make(chan byte),
 	}
-	ret.trxState.Store(trxIdle)
-	ret.txStart.Store(time.Time{})
-	ret.txTicker.Stop()
+	ret.trxState = trxIdle
 	var err error
 	fi, err := os.Stat(port)
 	if err != nil {
@@ -184,7 +180,9 @@ func (m *CC1200Modem) processReceivedData(rxSource chan int8) {
 		n, err := m.modem.Read(buf)
 		if n > 0 {
 			// log.Printf("[DEBUG] processReceivedData read %x, trxState: %d", buf[0], m.trxState.Load())
-			if m.trxState.Load() == trxRX {
+			m.trxMutex.Lock()
+			if m.trxState == trxRX {
+				m.trxMutex.Unlock()
 				select {
 				case rxSource <- int8(buf[0]):
 					// sent
@@ -194,6 +192,7 @@ func (m *CC1200Modem) processReceivedData(rxSource chan int8) {
 					log.Printf("[DEBUG] processReceivedData dropped rx: %x", buf[0])
 				}
 			} else {
+				m.trxMutex.Unlock()
 				log.Printf("[DEBUG] processReceivedData cmdSource <- : %x", buf[0])
 				m.cmdSource <- buf[0]
 			}
@@ -217,35 +216,6 @@ func (m *CC1200Modem) rxPipeline(sampleSource chan int8) (chan float32, error) {
 	// 	return nil, fmt.Errorf("downsampler: %w", err)
 	// }
 	return s2s.Source(), nil
-}
-func (m *CC1200Modem) isTransmitting() bool {
-	tx := !m.txStart.Load().(time.Time).IsZero()
-	return tx
-}
-func (m *CC1200Modem) updateTXTimeout() {
-	m.txStart.Store(time.Now())
-}
-func (m *CC1200Modem) txWatchdog() {
-	log.Printf("[DEBUG] txWatchdog starting")
-	for {
-		<-m.txTicker.C
-		timedOut := time.Since(m.txStart.Load().(time.Time)) > txEndDuration
-		if timedOut {
-			log.Printf("[DEBUG] txWatchdog timed out")
-			m.txTicker.Stop()
-			if m.isTransmitting() {
-				m.StopTX()
-				err := m.setPAEnableGPIO(false)
-				if err != nil {
-					log.Printf("[DEBUG] Stop TX PA disable: %v", err)
-				}
-			}
-			m.StartRX()
-			log.Printf("[DEBUG] txWatchdog exiting")
-			return
-		}
-
-	}
 }
 
 func (m *CC1200Modem) setNRSTGPIO(set bool) error {
@@ -302,24 +272,12 @@ func (m *CC1200Modem) Reset() error {
 // Close the modem
 func (m *CC1200Modem) Close() error {
 	log.Print("[DEBUG] modem Close()")
-	if m.isTransmitting() {
-		m.StopTX()
-		err := m.setPAEnableGPIO(false)
-		if err != nil {
-			log.Printf("[DEBUG] Close PA disable: %v", err)
-		}
-	}
+	m.StopRX()
+	m.StopTX()
 	m.nRST.Close()
 	m.paEnable.Close()
 	m.boot0.Close()
 	return m.modem.Close()
-}
-
-func (m *CC1200Modem) StopTX() {
-	log.Print("[DEBUG] modem StopTX()")
-	m.txStart.Store(time.Time{})
-	m.trxState.Store(trxIdle)
-	time.Sleep(txEndDuration)
 }
 
 // Read received symbols
@@ -341,25 +299,25 @@ func (m *CC1200Modem) Read(buf []byte) (n int, err error) {
 // Send symbols to transmit. If no symbols are received for more than `txEndDuration` milliseconds,
 // the transmission will end.
 func (m *CC1200Modem) Write(b []byte) (n int, err error) {
-	if !m.isTransmitting() {
-		log.Printf("[DEBUG] Switch to transmit")
-		err = m.EndRX()
-		if err != nil {
-			err = fmt.Errorf("end RX: %w", err)
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-		err = m.setPAEnableGPIO(true)
-		if err != nil {
-			log.Printf("[DEBUG] Start TX PAEnable: %v", err)
-		}
-		time.Sleep(10 * time.Millisecond)
-		err = m.StartTX()
-		if err != nil {
-			err = fmt.Errorf("start TX: %w", err)
-			return
-		}
-	}
+	// if !m.isTransmitting() {
+	// 	log.Printf("[DEBUG] Switch to transmit")
+	// 	err = m.StopRX()
+	// 	if err != nil {
+	// 		err = fmt.Errorf("end RX: %w", err)
+	// 		return
+	// 	}
+	// 	time.Sleep(2 * time.Millisecond)
+	// 	err = m.setPAEnableGPIO(true)
+	// 	if err != nil {
+	// 		log.Printf("[DEBUG] Start TX PAEnable: %v", err)
+	// 	}
+	// 	time.Sleep(10 * time.Millisecond)
+	// 	err = m.StartTX()
+	// 	if err != nil {
+	// 		err = fmt.Errorf("start TX: %w", err)
+	// 		return
+	// 	}
+	// }
 	symbols := make([]float32, len(b)/4)
 	n, err = binary.Decode(b, binary.LittleEndian, symbols)
 	if err != nil {
@@ -370,7 +328,7 @@ func (m *CC1200Modem) Write(b []byte) (n int, err error) {
 	for _, s := range symbols {
 		m.txSymbols <- s
 	}
-	m.updateTXTimeout()
+	// m.updateTXTimeout()
 	if n < len(b) {
 		// should only happen if len(b) is not a multiple of 4, i.e. the last symbol is incomplete
 		err = fmt.Errorf("malformed transmit stream")
@@ -379,19 +337,34 @@ func (m *CC1200Modem) Write(b []byte) (n int, err error) {
 }
 
 func (m *CC1200Modem) StartTX() error {
+	m.trxMutex.Lock()
+	defer m.trxMutex.Unlock()
 	log.Printf("[DEBUG] StartTX()")
-	if m.isTransmitting() {
-		return fmt.Errorf("already transmitting")
-	}
 	err := m.command([]byte{cmdSetTXStart, 2})
 	if err != nil {
 		return fmt.Errorf("start TX: %w", err)
 	}
-	m.txStart.Store(time.Now())
-	m.trxState.Store(trxTX)
-	m.txTicker.Reset(txEndDuration / 2)
-	go m.txWatchdog()
+	err = m.setPAEnableGPIO(true)
+	if err != nil {
+		log.Printf("[DEBUG] Start TX PAEnable: %v", err)
+	}
+	m.trxState = trxTX
 	return nil
+}
+
+func (m *CC1200Modem) StopTX() {
+	m.trxMutex.Lock()
+	defer m.trxMutex.Unlock()
+	// Only stop if we've started
+	if m.trxState == trxRX {
+
+		log.Print("[DEBUG] modem StopTX()")
+		err := m.setPAEnableGPIO(false)
+		if err != nil {
+			log.Printf("[DEBUG] End TX PAEnable: %v", err)
+		}
+		m.trxState = trxIdle
+	}
 }
 
 func (m *CC1200Modem) SetTXFreq(freq uint32) error {
@@ -424,8 +397,10 @@ func (m *CC1200Modem) SetTXPower(dbm float32) error {
 }
 
 func (m *CC1200Modem) StartRX() error {
+	m.trxMutex.Lock()
+	defer m.trxMutex.Unlock()
 	log.Printf("[DEBUG] StartRX()")
-	m.trxState.Store(trxRX)
+	m.trxState = trxRX
 	var err error
 	cmd := []byte{cmdSetRX, 0, 1}
 	err = m.command(cmd)
@@ -435,16 +410,21 @@ func (m *CC1200Modem) StartRX() error {
 	return nil
 }
 
-func (m *CC1200Modem) EndRX() error {
-	log.Printf("[DEBUG] EndRX()")
-	var err error
-	cmd := []byte{cmdSetRX, 0, 0}
-	// Theoretically this returns a response, but how to find it in the received data
-	err = m.command(cmd)
-	if err != nil {
-		return fmt.Errorf("send set RX stop: %w", err)
+func (m *CC1200Modem) StopRX() error {
+	m.trxMutex.Lock()
+	defer m.trxMutex.Unlock()
+	// Only stop if we've started
+	if m.trxState == trxRX {
+		log.Printf("[DEBUG] StopRX()")
+		var err error
+		cmd := []byte{cmdSetRX, 0, 0}
+		// Theoretically this returns a response, but how to find it in the received data
+		err = m.command(cmd)
+		if err != nil {
+			return fmt.Errorf("send set RX stop: %w", err)
+		}
+		m.trxState = trxIdle
 	}
-	m.trxState.Store(trxIdle)
 	return nil
 }
 func (m *CC1200Modem) SetRXFreq(freq uint32) error {
