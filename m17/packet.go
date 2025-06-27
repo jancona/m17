@@ -215,20 +215,20 @@ func (p *Packet) Encode() ([]Symbol, error) {
 	encodedBits := NewBits(b)
 	// encodedBits[0:len(b)] = b[:]
 	//fill preamble
-	outPacket = appendPreamble(outPacket, lsfPreamble)
+	outPacket = AppendPreamble(outPacket, lsfPreamble)
 
 	//send LSF syncword
-	outPacket = appendSyncword(outPacket, LSFSync)
+	outPacket = AppendSyncword(outPacket, LSFSync)
 
-	rfBits := interleaveBits(encodedBits)
-	rfBits = randomizeBits(rfBits)
+	rfBits := InterleaveBits(encodedBits)
+	rfBits = RandomizeBits(rfBits)
 	// Append LSF to the oputput
-	outPacket = appendBits(outPacket, rfBits)
+	outPacket = AppendBits(outPacket, rfBits)
 
 	chunkCnt := 0
 	packetData := p.PayloadBytes()
 	for bytesLeft := len(packetData); bytesLeft > 0; bytesLeft -= 25 {
-		outPacket = appendSyncword(outPacket, PacketSync)
+		outPacket = AppendSyncword(outPacket, PacketSync)
 		chunk := make([]byte, 25+1) // 25 bytes from the packet plus 6 bits of metadata
 		if bytesLeft > 25 {
 			// not the last chunk
@@ -250,13 +250,13 @@ func (p *Packet) Encode() ([]Symbol, error) {
 			return nil, fmt.Errorf("unable to encode packet: %w", err)
 		}
 		encodedBits := NewBits(b)
-		rfBits := interleaveBits(encodedBits)
-		rfBits = randomizeBits(rfBits)
+		rfBits := InterleaveBits(encodedBits)
+		rfBits = RandomizeBits(rfBits)
 		// Append chunk to the output
-		outPacket = appendBits(outPacket, rfBits)
+		outPacket = AppendBits(outPacket, rfBits)
 		chunkCnt++
 	}
-	outPacket = appendEOT(outPacket)
+	outPacket = AppendEOT(outPacket)
 	return outPacket, nil
 }
 

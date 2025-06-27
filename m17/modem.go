@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,7 +55,7 @@ const (
 	trxTX
 )
 
-const txEndDuration = 400 * time.Millisecond
+// const txEndDuration = 400 * time.Millisecond
 
 type Line interface {
 	SetValue(value int) error
@@ -63,20 +64,109 @@ type Line interface {
 
 type Modem interface {
 	io.ReadWriteCloser
+	TransmitPacket(p Packet) error
 	// Read(buf []byte) (n int, err error)
 	// Write(b []byte) (n int, err error)
 	// Close() error
 	StartRX() error
-	EndRX() error
-	StartTX() error
-	StopTX()
-	// Reset() error
-	// SetAFC(afc bool) error
-	// SetFreqCorrection(corr int16) error
-	// SetRXFreq(freq uint32) error
-	// SetTXFreq(freq uint32) error
-	// SetTXPower(dbm float32) error
+	// EndRX() error
+	// StartTX() error
+	// StopTX()
+	Reset() error
+	SetAFC(afc bool) error
+	SetFreqCorrection(corr int16) error
+	SetRXFreq(freq uint32) error
+	SetTXFreq(freq uint32) error
+	SetTXPower(dbm float32) error
 }
+type DummyModem struct {
+	In    io.ReadCloser
+	Out   io.WriteCloser
+	extra []byte
+}
+
+func (m *DummyModem) TransmitPacket(p Packet) error {
+	encoded, err := p.Encode()
+	if err != nil {
+		return err
+	}
+	err = binary.Write(m.Out, binary.LittleEndian, encoded)
+	if err != nil {
+		return fmt.Errorf("failed to send: %w", err)
+	}
+	return nil
+}
+
+func (m *DummyModem) Read(p []byte) (n int, err error) {
+	l := len(p)
+	el := len(m.extra)
+	// log.Printf("[DEBUG] Attempting to read %d bytes, el: %d", l, el)
+	if el < l {
+		rl := (l - el) / 5
+		if rl%5 > 0 {
+			// make sure we have enough symbols
+			rl++
+		}
+		// Get whole symbols
+		rl += rl % 4
+		sBuff := make([]byte, rl)
+		// log.Printf("[DEBUG] Attempting to read %d bytes", len(sBuff))
+		nn, err := m.In.Read(sBuff)
+		if err != nil {
+			log.Printf("[ERROR] DummyModem Read failed: %v", err)
+			if nn == 0 {
+				return 0, err
+			}
+		}
+		// log.Printf("[DEBUG] Read %d bytes: % x", nn, sBuff)
+		if nn%4 != 0 {
+			panic("handle this!")
+		}
+		for i := 0; i < nn; i += 4 {
+			// Repeat each read symbol 5 times
+			for range 5 {
+				m.extra = append(m.extra, sBuff[i:i+4]...)
+			}
+		}
+		l = min(l, len(m.extra))
+	}
+	n = copy(p, m.extra[:l])
+	m.extra = m.extra[l:]
+	// log.Printf("[DEBUG] Returning %d bytes: % x", n, p)
+	return
+}
+
+func (m *DummyModem) Write(buf []byte) (n int, err error) {
+	return m.Out.Write(buf)
+}
+func (m *DummyModem) Reset() error {
+	return nil
+}
+func (m *DummyModem) SetAFC(afc bool) error {
+	return nil
+}
+func (m *DummyModem) SetFreqCorrection(corr int16) error {
+	return nil
+}
+func (m *DummyModem) SetRXFreq(freq uint32) error {
+	return nil
+}
+func (m *DummyModem) SetTXFreq(freq uint32) error {
+	return nil
+}
+func (m *DummyModem) SetTXPower(dbm float32) error {
+	return nil
+}
+func (m *DummyModem) StartRX() error {
+	return nil
+}
+
+func (m *DummyModem) Close() error {
+	err := m.In.Close()
+	err2 := m.Out.Close()
+	return errors.Join(err, err2)
+}
+
 type CC1200Modem struct {
 	modem     io.ReadWriteCloser
 	rxSymbols chan float32
@@ -84,6 +174,7 @@ type CC1200Modem struct {
 
 	trxMutex  sync.Mutex
 	trxState  int
+	lastSend  time.Time
 	cmdSource chan byte
 	nRST      Line
 	paEnable  Line
@@ -153,18 +244,30 @@ func NewCC1200Modem(
 func (m *CC1200Modem) processTXSamples(txSamples chan int8) {
 	ticker := time.NewTicker(40 * time.Millisecond)
 	w := bufio.NewWriterSize(m.modem, samplesPer40MS)
+	var sb strings.Builder
 	for {
 		select {
 		case sample := <-txSamples:
+			// log.Printf("[DEBUG] processTXSamples send %x", byte(sample))
 			// TODO: Mutex?
+			m.trxMutex.Lock()
+			fmt.Fprintf(&sb, "%02x ", byte(sample))
 			_, err := w.Write([]byte{byte(sample)})
 			if err != nil {
 				log.Printf("[ERROR] Error writing to modem: %v", err)
+				m.trxMutex.Unlock()
 				return
 			}
+			m.trxMutex.Unlock()
 		case <-ticker.C:
 			// TODO: Mutex?
-			w.Flush()
+			m.trxMutex.Lock()
+			if w.Buffered() > 0 {
+				log.Printf("[DEBUG] processTXSamples Buffered(): %d", w.Buffered())
+				w.Flush()
+				m.lastSend = time.Now()
+			}
+			m.trxMutex.Unlock()
 		}
 	}
 }
@@ -282,7 +385,7 @@ func (m *CC1200Modem) Close() error {
 
 // Read received symbols
 func (m *CC1200Modem) Read(buf []byte) (n int, err error) {
-	log.Printf("[DEBUG] Modem.read requested %d bytes", len(buf))
+	// log.Printf("[DEBUG] Modem.read requested %d bytes", len(buf))
 	sBuf := make([]float32, len(buf)/4)
 	for i := range sBuf {
 		sBuf[i] = <-m.rxSymbols
@@ -292,7 +395,7 @@ func (m *CC1200Modem) Read(buf []byte) (n int, err error) {
 		return 0, fmt.Errorf("append symbol: %w", err)
 	}
 	cnt := copy(buf, sb)
-	log.Printf("[DEBUG] Modem.read returned  %d bytes", cnt)
+	// log.Printf("[DEBUG] Modem.read returned  %d bytes", cnt)
 	return cnt, nil
 }
 
@@ -334,6 +437,92 @@ func (m *CC1200Modem) Write(b []byte) (n int, err error) {
 		err = fmt.Errorf("malformed transmit stream")
 	}
 	return
+}
+
+func (m *CC1200Modem) TransmitPacket(p Packet) error {
+	log.Printf("[DEBUG] TransmitPacket: %v", p)
+	m.StopRX()
+	time.Sleep(2 * time.Millisecond)
+	m.StartTX()
+	time.Sleep(10 * time.Millisecond)
+
+	var syms []Symbol
+	//fill preamble
+	syms = AppendPreamble(syms, lsfPreamble)
+	err := binary.Write(m, binary.LittleEndian, syms)
+	if err != nil {
+		return fmt.Errorf("failed to send preamble: %w", err)
+	}
+
+	//send LSF syncword
+	syms = AppendSyncword(syms, LSFSync)
+
+	b, err := ConvolutionalEncode(p.LSF.ToBytes(), LSFPuncturePattern, LSFFinalBit)
+	if err != nil {
+		return fmt.Errorf("unable to encode LSF: %w", err)
+	}
+	encodedBits := NewBits(b)
+	// encodedBits[0:len(b)] = b[:]
+	rfBits := InterleaveBits(encodedBits)
+	rfBits = RandomizeBits(rfBits)
+	// Append LSF to the oputput
+	syms = AppendBits(syms, rfBits)
+	err = binary.Write(m, binary.LittleEndian, syms)
+	if err != nil {
+		return fmt.Errorf("failed to send LSF: %w", err)
+	}
+
+	chunkCnt := 0
+	packetData := p.PayloadBytes()
+	for bytesLeft := len(packetData); bytesLeft > 0; bytesLeft -= 25 {
+		syms = AppendSyncword(syms, PacketSync)
+		chunk := make([]byte, 25+1) // 25 bytes from the packet plus 6 bits of metadata
+		if bytesLeft > 25 {
+			// not the last chunk
+			copy(chunk, packetData[chunkCnt*25:chunkCnt*25+25])
+			chunk[25] = byte(chunkCnt << 2)
+		} else {
+			// last chunk
+			copy(chunk, packetData[chunkCnt*25:chunkCnt*25+bytesLeft])
+			//EOT bit set to 1, set counter to the amount of bytes in this (the last) chunk
+			if bytesLeft%25 == 0 {
+				chunk[25] = (1 << 7) | ((25) << 2)
+			} else {
+				chunk[25] = uint8((1 << 7) | ((bytesLeft % 25) << 2))
+			}
+		}
+		//encode the packet chunk
+		b, err := ConvolutionalEncode(chunk, PacketPuncturePattern, PacketModeFinalBit)
+		if err != nil {
+			return fmt.Errorf("unable to encode packet: %w", err)
+		}
+		encodedBits := NewBits(b)
+		rfBits := InterleaveBits(encodedBits)
+		rfBits = RandomizeBits(rfBits)
+		// Append chunk to the output
+		syms = AppendBits(syms, rfBits)
+		err = binary.Write(m, binary.LittleEndian, syms)
+		if err != nil {
+			return fmt.Errorf("failed to send: %w", err)
+		}
+		time.Sleep(40 * time.Millisecond)
+		chunkCnt++
+	}
+	syms = AppendEOT(syms)
+	err = binary.Write(m, binary.LittleEndian, syms)
+	if err != nil {
+		return fmt.Errorf("failed to send: %w", err)
+	}
+	log.Printf("[DEBUG] Finished TransmitPacket")
+	time.Sleep(10 * 40 * time.Millisecond)
+	m.trxMutex.Lock()
+	wait := time.Until(m.lastSend.Add(10 * 40 * time.Millisecond))
+	m.trxMutex.Unlock()
+	time.Sleep(wait)
+	log.Printf("[DEBUG] Finished TransmitPacket wait")
+	m.StopTX()
+	m.StartRX()
+	return nil
 }
 
 func (m *CC1200Modem) StartTX() error {
@@ -502,11 +691,11 @@ func (m *CC1200Modem) command(cmd []byte) error {
 	}
 	cmd[1] = byte(len(cmd))
 	var err error
+	log.Printf("[DEBUG] modem command(): % 2x", cmd)
 	_, err = m.modem.Write(cmd)
 	if err != nil {
 		return fmt.Errorf("command: %w", err)
 	}
-	log.Printf("[DEBUG] modem command(): % 2x", cmd)
 	return nil
 }
 func (m *CC1200Modem) commandWithResponse(cmd []byte) ([]byte, error) {

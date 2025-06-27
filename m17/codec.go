@@ -208,8 +208,8 @@ func syncDistance(in *bufio.Reader, offset int) (float32, uint16, error) {
 // 	}
 // }
 
-// appendPreamble generates symbol stream for a preamble.
-func appendPreamble(out []Symbol, typ Preamble) []Symbol {
+// AppendPreamble generates symbol stream for a preamble.
+func AppendPreamble(out []Symbol, typ Preamble) []Symbol {
 	if typ == bertPreamble {
 		for i := 0; i < SymbolsPerFrame/2; i++ {
 			out = append(out, -3.0, +3.0)
@@ -222,8 +222,8 @@ func appendPreamble(out []Symbol, typ Preamble) []Symbol {
 	return out
 }
 
-// appendSyncword generates the symbol stream for a syncword.
-func appendSyncword(out []Symbol, syncword uint16) []Symbol {
+// AppendSyncword generates the symbol stream for a syncword.
+func AppendSyncword(out []Symbol, syncword uint16) []Symbol {
 	for i := 0; i < SymbolsPerSyncword*2; i += 2 {
 		out = append(out, SymbolMap[(syncword>>(14-i))&3])
 	}
@@ -257,14 +257,14 @@ var interleaveSequence = [BitsPerPayload]uint16{
 }
 
 // Interleave payload bits.
-func interleaveBits(in *Bits) *Bits {
+func InterleaveBits(in *Bits) *Bits {
 	var out Bits
 	for i := 0; i < SymbolsPerPayload*2; i++ {
 		out[i] = in[interleaveSequence[i]]
 	}
 	return &out
 }
-func deinterleaveSymbols(symbols []Symbol) []Symbol {
+func DeinterleaveSymbols(symbols []Symbol) []Symbol {
 	var dSymbols []Symbol
 	for i := range SymbolsPerPayload * 2 {
 		dSymbols = append(dSymbols, symbols[interleaveSequence[i]])
@@ -280,7 +280,7 @@ var randomizeSeq = []byte{
 	0x57, 0x18, 0x2D, 0x29, 0x78, 0xC3,
 }
 
-func randomizeBits(bits *Bits) *Bits {
+func RandomizeBits(bits *Bits) *Bits {
 	for i := 0; i < len(bits); i++ {
 		if ((randomizeSeq[i/8] >> (7 - (i % 8))) & 1) != 0 {
 			// flip bit
@@ -289,7 +289,7 @@ func randomizeBits(bits *Bits) *Bits {
 	}
 	return bits
 }
-func derandomizeSymbols(symbols []Symbol) []Symbol {
+func DerandomizeSymbols(symbols []Symbol) []Symbol {
 	for i := 0; i < len(symbols); i++ {
 		if (randomizeSeq[i/8]>>(7-(i%8)))&1 != 0 { //soft XOR. flip soft bit if "1"
 			symbols[i] = softTrue - symbols[i]
@@ -298,7 +298,7 @@ func derandomizeSymbols(symbols []Symbol) []Symbol {
 	return symbols
 }
 
-func appendBits(out []Symbol, data *Bits) []Symbol {
+func AppendBits(out []Symbol, data *Bits) []Symbol {
 	for i := 0; i < SymbolsPerPayload; i++ { //40ms * 4800 - 8 (syncword)
 		d := 0
 		if data[2*i+1] {
@@ -313,7 +313,7 @@ func appendBits(out []Symbol, data *Bits) []Symbol {
 }
 
 // Generate symbol stream for the End of Transmission marker.
-func appendEOT(out []Symbol) []Symbol {
+func AppendEOT(out []Symbol) []Symbol {
 	for i := 0; i < SymbolsPerFrame; i++ { //40ms * 4800 = 192
 		out = append(out, EOTSymbols[i%8])
 	}

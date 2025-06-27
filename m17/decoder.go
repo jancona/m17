@@ -276,11 +276,11 @@ func decodeLSF(pld []Symbol) LSF {
 	// log.Printf("[DEBUG] softBit: %#v", softBit)
 
 	//derandomize
-	softBit = derandomizeSymbols(softBit)
+	softBit = DerandomizeSymbols(softBit)
 	// log.Printf("[DEBUG] derandomized softBit: %#v", softBit)
 
 	//deinterleave
-	dSoftBit := deinterleaveSymbols(softBit)
+	dSoftBit := DeinterleaveSymbols(softBit)
 	// log.Printf("[DEBUG] dSoftBit: %#v", dSoftBit)
 
 	//decode
@@ -315,11 +315,11 @@ func (d *Decoder) decodePacketFrame(pld []Symbol /*, fromModem func([]byte, []by
 	// log.Printf("[DEBUG] softBit: %#v", softBit)
 
 	//derandomize
-	softBit = derandomizeSymbols(softBit)
+	softBit = DerandomizeSymbols(softBit)
 	// log.Printf("[DEBUG] derandomized softBit: %#v", softBit)
 
 	//deinterleave
-	dSoftBit := deinterleaveSymbols(softBit)
+	dSoftBit := DeinterleaveSymbols(softBit)
 	// log.Printf("[DEBUG] dSoftBit: %#v", dSoftBit)
 
 	//decode
