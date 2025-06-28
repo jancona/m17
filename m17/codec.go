@@ -116,9 +116,13 @@ func syncDistance(in *bufio.Reader, offset int) (float32, uint16, error) {
 		if i%5 == 0 {
 			v := float64(s)
 			// msg += fmt.Sprintf("%3.5f, ", v)
-			lsf += math.Pow(v-ExtLSFSyncSymbols[i/5], 2)
+			// lsf += math.Pow(v-ExtLSFSyncSymbols[i/5], 2)
+			// if i/5 < 8 {
+			// 	pkt += math.Pow(v-PacketSyncSymbols[i/5], 2)
+			// }
+			lsf += (v - ExtLSFSyncSymbols[i/5]) * (v - ExtLSFSyncSymbols[i/5])
 			if i/5 < 8 {
-				pkt += math.Pow(v-PacketSyncSymbols[i/5], 2)
+				pkt += (v - PacketSyncSymbols[i/5]) * (v - PacketSyncSymbols[i/5])
 			}
 			// if i/5 > 7 {
 			// 	str += math.Pow(v-StreamSyncSymbols[i/5-8], 2)
@@ -143,6 +147,16 @@ func syncDistance(in *bufio.Reader, offset int) (float32, uint16, error) {
 	default:
 		return float32(bert), BERTSync, nil
 	}
+}
+
+func EuclNorm(s1, s2 []Symbol, n int) float64 {
+	var ret float64
+
+	for i := range n {
+		ret += float64((s1[i] - s2[i]) * (s1[i] - s2[i]))
+	}
+
+	return math.Sqrt(ret)
 }
 
 // func syncDistance(in *bufio.Reader, offset int) (float32, uint16, error) {

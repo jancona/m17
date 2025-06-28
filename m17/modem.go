@@ -1,7 +1,6 @@
 package m17
 
 import (
-	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -63,10 +61,10 @@ type Line interface {
 }
 
 type Modem interface {
-	io.ReadWriteCloser
+	io.ReadCloser
 	TransmitPacket(p Packet) error
 	// Read(buf []byte) (n int, err error)
-	// Write(b []byte) (n int, err error)
+	// WriteSymbols(s []Symbol) (n int, err error)
 	// Close() error
 	StartRX() error
 	// EndRX() error
@@ -170,11 +168,12 @@ func (m *DummyModem) Close() error {
 type CC1200Modem struct {
 	modem     io.ReadWriteCloser
 	rxSymbols chan float32
-	txSymbols chan float32
+	// txSymbols chan float32
+	s2s SymbolToSample
 
-	trxMutex  sync.Mutex
-	trxState  int
-	lastSend  time.Time
+	trxMutex sync.Mutex
+	trxState int
+	// lastSend  time.Time
 	cmdSource chan byte
 	nRST      Line
 	paEnable  Line
@@ -189,7 +188,7 @@ func NewCC1200Modem(
 	baudRate int) (*CC1200Modem, error) {
 	ret := CC1200Modem{
 		rxSymbols: make(chan float32),
-		txSymbols: make(chan float32, symbolsPerSecond),
+		s2s:       NewSymbolToSample(rrcTaps5, TXSymbolScalingCoeff*transmitGain, false, samplesPerSymbol),
 		cmdSource: make(chan byte),
 	}
 	ret.trxState = trxIdle
@@ -230,52 +229,18 @@ func NewCC1200Modem(
 	}
 	go ret.processReceivedData(rxSource)
 
-	txSamples, err := ret.txPipeline(ret.txSymbols)
-	if err != nil {
-		return nil, fmt.Errorf("tx pipeline setup: %w", err)
-	}
-	go ret.processTXSamples(txSamples)
+	// txSamples, err := ret.txPipeline(ret.txSymbols)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("tx pipeline setup: %w", err)
+	// }
+	// go ret.processTXSamples(txSamples)
 	_, err = ret.commandWithResponse([]byte{cmdPing, 2})
 	if err != nil {
 		return nil, fmt.Errorf("test PING: %w", err)
 	}
 	return &ret, nil
 }
-func (m *CC1200Modem) processTXSamples(txSamples chan int8) {
-	ticker := time.NewTicker(40 * time.Millisecond)
-	w := bufio.NewWriterSize(m.modem, samplesPer40MS)
-	var sb strings.Builder
-	for {
-		select {
-		case sample := <-txSamples:
-			// log.Printf("[DEBUG] processTXSamples send %x", byte(sample))
-			// TODO: Mutex?
-			m.trxMutex.Lock()
-			fmt.Fprintf(&sb, "%02x ", byte(sample))
-			_, err := w.Write([]byte{byte(sample)})
-			if err != nil {
-				log.Printf("[ERROR] Error writing to modem: %v", err)
-				m.trxMutex.Unlock()
-				return
-			}
-			m.trxMutex.Unlock()
-		case <-ticker.C:
-			// TODO: Mutex?
-			m.trxMutex.Lock()
-			if w.Buffered() > 0 {
-				log.Printf("[DEBUG] processTXSamples Buffered(): %d", w.Buffered())
-				w.Flush()
-				m.lastSend = time.Now()
-			}
-			m.trxMutex.Unlock()
-		}
-	}
-}
-func (m *CC1200Modem) txPipeline(symbolSource chan float32) (chan int8, error) {
-	// gateway symbols -> upsample and RRC filter -> modem
-	s2s := NewSymbolToSample(symbolSource, rrcTaps5, TXSymbolScalingCoeff*transmitGain, false, samplesPerSymbol)
-	return s2s.Source(), nil
-}
+
 func (m *CC1200Modem) processReceivedData(rxSource chan int8) {
 	buf := make([]byte, 1)
 	for {
@@ -401,43 +366,24 @@ func (m *CC1200Modem) Read(buf []byte) (n int, err error) {
 
 // Send symbols to transmit. If no symbols are received for more than `txEndDuration` milliseconds,
 // the transmission will end.
-func (m *CC1200Modem) Write(b []byte) (n int, err error) {
-	// if !m.isTransmitting() {
-	// 	log.Printf("[DEBUG] Switch to transmit")
-	// 	err = m.StopRX()
-	// 	if err != nil {
-	// 		err = fmt.Errorf("end RX: %w", err)
-	// 		return
-	// 	}
-	// 	time.Sleep(2 * time.Millisecond)
-	// 	err = m.setPAEnableGPIO(true)
-	// 	if err != nil {
-	// 		log.Printf("[DEBUG] Start TX PAEnable: %v", err)
-	// 	}
-	// 	time.Sleep(10 * time.Millisecond)
-	// 	err = m.StartTX()
-	// 	if err != nil {
-	// 		err = fmt.Errorf("start TX: %w", err)
-	// 		return
-	// 	}
-	// }
-	symbols := make([]float32, len(b)/4)
-	n, err = binary.Decode(b, binary.LittleEndian, symbols)
-	if err != nil {
-		err = fmt.Errorf("decode symbols: %w", err)
-		return
-	}
-	// log.Printf("[DEBUG] Write symbols: % f", symbols)
-	for _, s := range symbols {
-		m.txSymbols <- s
-	}
-	// m.updateTXTimeout()
-	if n < len(b) {
-		// should only happen if len(b) is not a multiple of 4, i.e. the last symbol is incomplete
-		err = fmt.Errorf("malformed transmit stream")
-	}
-	return
-}
+// func (m *CC1200Modem) Write(b []byte) (n int, err error) {
+// 	symbols := make([]float32, len(b)/4)
+// 	n, err = binary.Decode(b, binary.LittleEndian, symbols)
+// 	if err != nil {
+// 		err = fmt.Errorf("decode symbols: %w", err)
+// 		return
+// 	}
+// 	// log.Printf("[DEBUG] Write symbols: % f", symbols)
+// 	for _, s := range symbols {
+// 		m.txSymbols <- s
+// 	}
+// 	// m.updateTXTimeout()
+// 	if n < len(b) {
+// 		// should only happen if len(b) is not a multiple of 4, i.e. the last symbol is incomplete
+// 		err = fmt.Errorf("malformed transmit stream")
+// 	}
+// 	return
+// }
 
 func (m *CC1200Modem) TransmitPacket(p Packet) error {
 	log.Printf("[DEBUG] TransmitPacket: %v", p)
@@ -449,7 +395,7 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 	var syms []Symbol
 	//fill preamble
 	syms = AppendPreamble(syms, lsfPreamble)
-	err := binary.Write(m, binary.LittleEndian, syms)
+	err := m.writeSymbols(syms)
 	if err != nil {
 		return fmt.Errorf("failed to send preamble: %w", err)
 	}
@@ -467,7 +413,7 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 	rfBits = RandomizeBits(rfBits)
 	// Append LSF to the oputput
 	syms = AppendBits(syms, rfBits)
-	err = binary.Write(m, binary.LittleEndian, syms)
+	err = m.writeSymbols(syms)
 	if err != nil {
 		return fmt.Errorf("failed to send LSF: %w", err)
 	}
@@ -501,7 +447,7 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 		rfBits = RandomizeBits(rfBits)
 		// Append chunk to the output
 		syms = AppendBits(syms, rfBits)
-		err = binary.Write(m, binary.LittleEndian, syms)
+		err = m.writeSymbols(syms)
 		if err != nil {
 			return fmt.Errorf("failed to send: %w", err)
 		}
@@ -509,16 +455,12 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 		chunkCnt++
 	}
 	syms = AppendEOT(syms)
-	err = binary.Write(m, binary.LittleEndian, syms)
+	err = m.writeSymbols(syms)
 	if err != nil {
 		return fmt.Errorf("failed to send: %w", err)
 	}
 	log.Printf("[DEBUG] Finished TransmitPacket")
 	time.Sleep(10 * 40 * time.Millisecond)
-	m.trxMutex.Lock()
-	wait := time.Until(m.lastSend.Add(10 * 40 * time.Millisecond))
-	m.trxMutex.Unlock()
-	time.Sleep(wait)
 	log.Printf("[DEBUG] Finished TransmitPacket wait")
 	m.StopTX()
 	m.StartRX()
@@ -590,6 +532,7 @@ func (m *CC1200Modem) StartRX() error {
 	defer m.trxMutex.Unlock()
 	log.Printf("[DEBUG] StartRX()")
 	m.trxState = trxRX
+	m.clearResponseBuf()
 	var err error
 	cmd := []byte{cmdSetRX, 0, 1}
 	err = m.command(cmd)
@@ -612,6 +555,7 @@ func (m *CC1200Modem) StopRX() error {
 		if err != nil {
 			return fmt.Errorf("send set RX stop: %w", err)
 		}
+		m.clearResponseBuf()
 		m.trxState = trxIdle
 	}
 	return nil
@@ -658,7 +602,13 @@ func (m *CC1200Modem) SetFreqCorrection(corr int16) error {
 	}
 	return nil
 }
-
+func (m *CC1200Modem) writeSymbols(symbols []Symbol) error {
+	// fmt.Printf("symbols: % v\n", symbols)
+	buf := m.s2s.Transform(symbols)
+	// fmt.Printf("writeSymbols: % 2x\n", buf)
+	_, err := m.modem.Write(buf)
+	return err
+}
 func (m *CC1200Modem) commandWithErrResponse(cmd []byte) error {
 	var err error
 	var respErr int
@@ -717,7 +667,7 @@ func (m *CC1200Modem) clearResponseBuf() {
 	for {
 		select {
 		case b := <-m.cmdSource:
-			log.Printf("[DEBUG] discarding: %x", b)
+			log.Printf("[DEBUG] discarding: %2x", b)
 		default:
 			return
 		}

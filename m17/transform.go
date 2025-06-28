@@ -277,7 +277,7 @@ func (t *SampleToSymbol) transform(sample int8) []float32 {
 
 // Transform float32 symbols to int8 samples
 type SymbolToSample struct {
-	Transform[float32, int8]
+	// Transform[float32, int8]
 	last             *ring.Ring //length of this has to match RRC filter's length
 	rrcTaps          []float32
 	scalingCoeff     float32
@@ -285,7 +285,7 @@ type SymbolToSample struct {
 	samplesPerSymbol int
 }
 
-func NewSymbolToSample(sink chan float32, rrcTaps []float32, scalingCoeff float32, phaseInvert bool, samplesPerSymbol int) SymbolToSample {
+func NewSymbolToSample(rrcTaps []float32, scalingCoeff float32, phaseInvert bool, samplesPerSymbol int) SymbolToSample {
 	ret := SymbolToSample{
 		last:             ring.New(len(rrcTaps)),
 		rrcTaps:          rrcTaps,
@@ -297,37 +297,34 @@ func NewSymbolToSample(sink chan float32, rrcTaps []float32, scalingCoeff float3
 		ret.last.Value = float32(0)
 		ret.last = ret.last.Next()
 	}
-	ret.Transform = NewTransform(sink, ret.transform, 0)
+	// ret.Transform = NewTransform(sink, ret.transform, 0)
 	return ret
 }
 
-func (t *SymbolToSample) Source() chan int8 {
-	return t.source
-}
-
-func (t *SymbolToSample) transform(symbol float32) []int8 {
-	ret := make([]int8, t.samplesPerSymbol)
-	for j := 0; j < t.samplesPerSymbol; j++ {
-		if j == 0 {
-			if t.phaseInvert {
-				t.last.Value = -symbol
+func (t *SymbolToSample) Transform(symbols []Symbol) []byte {
+	ret := make([]byte, len(symbols)*t.samplesPerSymbol)
+	for i, symbol := range symbols {
+		for j := 0; j < t.samplesPerSymbol; j++ {
+			if j == 0 {
+				if t.phaseInvert {
+					t.last.Value = -float32(symbol)
+				} else {
+					t.last.Value = float32(symbol)
+				}
 			} else {
-				t.last.Value = symbol
+				t.last.Value = float32(0)
 			}
-		} else {
-			t.last.Value = float32(0)
+			t.last = t.last.Next()
+			var acc float32
+			k := 0
+			t.last.Do(func(p any) {
+				f := p.(float32)
+				acc += t.rrcTaps[k] * f
+				k++
+			})
+			ret[i*t.samplesPerSymbol+j] = byte(acc * t.scalingCoeff)
 		}
-		t.last = t.last.Next()
-		var acc float32
-		k := 0
-		t.last.Do(func(p any) {
-			f := p.(float32)
-			acc += t.rrcTaps[k] * f
-			k++
-		})
-		ret[j] = int8(acc * t.scalingCoeff)
 	}
-
 	return ret
 }
 

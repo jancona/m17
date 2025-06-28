@@ -260,30 +260,6 @@ func (p *Packet) Encode() ([]Symbol, error) {
 	return outPacket, nil
 }
 
-func (p *Packet) Send(modem Modem /*io.Writer*/) error {
-	packet, err := p.Encode()
-	if err != nil {
-		return fmt.Errorf("failure emcoding packet: %w", err)
-	}
-
-	log.Printf("[DEBUG] Sending: %#v", packet)
-	err = binary.Write(modem, binary.LittleEndian, packet)
-	if err != nil {
-		return fmt.Errorf("failed to send: %w", err)
-	}
-	// for _, val := range packet {
-	// 	f := float32(math.Round(float64(val)))
-	// 	// b, _ := binary.Append(nil, binary.LittleEndian, f)
-	// 	// log.Printf("[DEBUG] val: %f, f: %5.3f, bytes: %v", val, f, b)
-	// 	err := binary.Write(out, binary.LittleEndian, f)
-	// 	if err != nil {
-	// 		return fmt.Errorf("failed to send: %w", err)
-	// 	}
-	// }
-
-	return nil
-}
-
 func (p Packet) String() string {
 	var pl string
 	if p.Type == 5 {
