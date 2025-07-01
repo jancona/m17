@@ -16,10 +16,11 @@ import (
 
 const (
 	samplesPerSecond = 24000
-	samplesPer40MS   = samplesPerSecond / 1000 * 40
-	samplesPerSymbol = 5
-	symbolsPerSecond = samplesPerSecond / samplesPerSymbol
-	symbolsPer40MS   = symbolsPerSecond / 1000 * 40
+
+// samplesPer40MS   = samplesPerSecond / 1000 * 40
+// samplesPerSymbol = 5
+// symbolsPerSecond = samplesPerSecond / 5
+// symbolsPer40MS   = symbolsPerSecond / 1000 * 40
 )
 
 // CC1200 commands
@@ -188,7 +189,7 @@ func NewCC1200Modem(
 	baudRate int) (*CC1200Modem, error) {
 	ret := CC1200Modem{
 		rxSymbols: make(chan float32),
-		s2s:       NewSymbolToSample(rrcTaps5, TXSymbolScalingCoeff*transmitGain, false, samplesPerSymbol),
+		s2s:       NewSymbolToSample(rrcTaps5, TXSymbolScalingCoeff*transmitGain, false, 5),
 		cmdSource: make(chan byte),
 	}
 	ret.trxState = trxIdle
@@ -279,7 +280,7 @@ func (m *CC1200Modem) rxPipeline(sampleSource chan int8) (chan float32, error) {
 		return nil, fmt.Errorf("dc filter: %w", err)
 	}
 	s2s := NewSampleToSymbol(dcf.Source(), rrcTaps5, RXSymbolScalingCoeff)
-	// ds, err := NewDownsampler(s2s.Source(), samplesPerSymbol, 0)
+	// ds, err := NewDownsampler(s2s.Source(), 5, 0)
 	// if err != nil {
 	// 	return nil, fmt.Errorf("downsampler: %w", err)
 	// }

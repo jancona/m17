@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/logutils"
 	"github.com/jancona/m17text/m17"
 	"gopkg.in/ini.v1"
+	// _ "net/http/pprof"
 )
 
 type config struct {
@@ -176,6 +177,11 @@ func main() {
 	}
 
 	setupLogging(cfg)
+
+	// // Server for pprof
+	// go func() {
+	// 	fmt.Println(http.ListenAndServe(":6060", nil))
+	// }()
 
 	var g *Gateway
 	var modem m17.Modem

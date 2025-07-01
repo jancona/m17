@@ -1,8 +1,8 @@
 package m17
 
 import (
-	"bufio"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log"
 )
@@ -49,7 +49,8 @@ type Decoder struct {
 
 // 8 preamble symbols, 8 for the syncword, and 960 for the payload.
 // floor(sps/2)=2 extra samples for timing error correction
-const SymbolBufSize = 8*5 + 2*(8*5+4800/25*5) + 2
+// plus some extra so we can make larger reads
+const symbolBufSize = 8*5 + 2*(8*5+4800/25*5) + 2 + 256
 
 func NewDecoder() *Decoder {
 	d := Decoder{
@@ -68,11 +69,29 @@ func NewDecoder() *Decoder {
 }
 func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func([]byte, []byte) error) error {
 	// var cnt int
-	bufIn := bufio.NewReaderSize(in, SymbolBufSize*4)
+	// bufIn := bufio.NewReaderSize(in, SymbolBufSize*4)
+	var symbols []Symbol
+	var err error
+
 	for {
+		l := len(symbols)
+		if symbolBufSize-l >= 256 {
+			// refill the buffer
+			symbols = append(symbols, make([]Symbol, symbolBufSize-l)...)
+			// log.Printf("[DEBUG] refilling, reading %d symbols", SymbolBufSize-l)
+			err = binary.Read(in, binary.LittleEndian, symbols[l:])
+			if err == io.EOF {
+				log.Printf("refill binary.Read EOF")
+				return fmt.Errorf("failed to refill symbol buffer: %v", err)
+			} else if err != nil {
+				log.Printf("refill binary.Read failed: %v", err)
+				return fmt.Errorf("failed to refill symbol buffer: %v", err)
+			}
+		}
+
 		// Looking for a sync burst
 		//calculate euclidean norm
-		dist, typ, err := syncDistance(bufIn, 0)
+		dist, typ, err := syncDistance(symbols, 0)
 		if err == io.EOF {
 			return err
 		}
@@ -81,7 +100,7 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func([]byte, []byte) err
 		case typ == LSFSync && dist < 4.5 && !d.synced:
 			log.Printf("[DEBUG] Received LSFSync, distance: %f, type: %x", dist, typ)
 			var pld []Symbol
-			pld, _, err = d.extractPayload(dist, typ, bufIn)
+			symbols, pld, _, err = d.extractPayload(dist, typ, symbols)
 			if err == io.EOF {
 				return err
 				// } else if err != nil {
@@ -107,12 +126,11 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func([]byte, []byte) err
 			}
 
 		case typ == PacketSync && dist < 5.0 && d.synced:
+			var pld []Symbol
 			log.Printf("[DEBUG] Received PacketSync, distance: %f, type: %x", dist, typ)
-			pld, _, err := d.extractPayload(dist, typ, bufIn)
-			if err == io.EOF {
+			symbols, pld, _, err = d.extractPayload(dist, typ, symbols)
+			if err != nil {
 				return err
-				// } else if err != nil {
-				// 	// Was logged in extractPayload
 			}
 			pktFrame, e := d.decodePacketFrame(pld /*, fromModem*/)
 			// log.Printf("[DEBUG] pktFrame: % x", pktFrame)
@@ -156,36 +174,13 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func([]byte, []byte) err
 
 		case typ == StreamSync && dist < 5.0:
 			log.Printf("[DEBUG] Received StreamSync, distance: %f, type: %x", dist, typ)
-			_, _, err := d.extractPayload(dist, typ, bufIn)
-			if err == io.EOF {
+			symbols, _, _, err = d.extractPayload(dist, typ, symbols)
+			if err != nil {
 				return err
-				// } else if err != nil {
-				// 	// Was logged in extractPayload
-			}
-		case typ == BERTSync && dist < 5.0:
-			log.Printf("[DEBUG] Received BERTSync, distance: %f, type: %x", dist, typ)
-			_, _, err := d.extractPayload(dist, typ, bufIn)
-			if err == io.EOF {
-				return err
-				// } else if err != nil {
-				// 	// Was logged in extractPayload
 			}
 		default:
 			// No one read anything, so advance one symbol
-			_, err := bufIn.Discard(4)
-			// err = binary.Read(bufIn, binary.LittleEndian, &symbol)
-			if err == io.EOF {
-				log.Printf("DecodeSamples binary.Discard EOF")
-				return nil
-			} else if err != nil {
-				// TODO: return error here?
-				log.Printf("DecodeSamples binary.Discard failed: %v", err)
-			}
-			// cnt++
-			// log.Printf("[DEBUG] symbol(%d): %f", cnt, symbol)
-			// fmt.Printf("%.1f ", symbol)
-			// fmt.Printf("%s\n", toString(d.symbolBuf))
-
+			symbols = symbols[1:]
 		}
 
 		//RX sync timeout
@@ -205,7 +200,7 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func([]byte, []byte) err
 	}
 }
 
-func (d *Decoder) extractPayload(dist float32, typ uint16, in *bufio.Reader) ([]Symbol, float32, error) {
+func (d *Decoder) extractPayload(dist float32, typ uint16, symbols []Symbol) ([]Symbol, []Symbol, float32, error) {
 	// m := "["
 	// d.symbolBuf.Do(func(sym any) {
 	// 	m += fmt.Sprintf("%v ", sym)
@@ -215,10 +210,10 @@ func (d *Decoder) extractPayload(dist float32, typ uint16, in *bufio.Reader) ([]
 	// Check for better match
 	offset := 0
 	for i := range 2 {
-		d, t, err := syncDistance(in, i+1)
+		d, t, err := syncDistance(symbols, i+1)
 		if err == io.EOF {
 			log.Printf("extractPayload syncDistance EOF")
-			return nil, 0, err
+			return nil, nil, 0, err
 		} else if err != nil {
 			// TODO: return error here?
 			log.Printf("extractPayload syncDistance failed: %v", err)
@@ -229,46 +224,20 @@ func (d *Decoder) extractPayload(dist float32, typ uint16, in *bufio.Reader) ([]
 		}
 	}
 	// skip offset
-	for range offset * 4 {
-		_, err := in.ReadByte()
-		if err == io.EOF {
-			log.Printf("extractPayload ReadByte EOF")
-			return nil, 0, err
-		} else if err != nil {
-			// TODO: return error here?
-			log.Printf("extractPayload ReadByte failed: %v", err)
-		}
-	}
+	symbols = symbols[offset:]
 	// skip past sync
 	syncSize := 8
 	if typ == LSFSync {
 		syncSize = 16
 	}
-	dummy := make([]Symbol, syncSize*5)
-	err := binary.Read(in, binary.LittleEndian, dummy)
-	if err == io.EOF {
-		log.Printf("extractPayload binary.Read EOF")
-		return nil, 0, err
-	} else if err != nil {
-		// TODO: return error here?
-		log.Printf("extractPayload binary.Read failed: %v", err)
-	}
-	// log.Printf("[DEBUG] dummy: %#v", dummy)
-	all := make([]Symbol, SymbolsPerPayload*5)
-	err = binary.Read(in, binary.LittleEndian, all)
-	if err == io.EOF {
-		log.Printf("extractPayload binary.Read EOF")
-		return nil, 0, err
-	} else if err != nil {
-		// TODO: return error here?
-		log.Printf("extractPayload binary.Read failed: %v", err)
-	}
+	symbols = symbols[syncSize*5:]
 	pld := make([]Symbol, SymbolsPerPayload)
 	for i := range pld {
-		pld[i] = all[i*5]
+		pld[i] = symbols[i*5]
 	}
 	// log.Printf("[DEBUG] pld: % .2f", pld)
-	return pld, dist, nil
+	symbols = symbols[SymbolsPerPayload*5:]
+	return symbols, pld, dist, nil
 }
 
 func decodeLSF(pld []Symbol) LSF {

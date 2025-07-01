@@ -1,10 +1,7 @@
 package m17
 
 import (
-	"bufio"
-	"encoding/binary"
 	"errors"
-	"log"
 	"math"
 )
 
@@ -94,58 +91,48 @@ var StreamPuncturePattern = PuncturePattern{true, true, true, true, true, true, 
 var PacketPuncturePattern = PuncturePattern{true, true, true, true, true, true, true, false}
 
 // Calculate distance between recent samples and sync patterns
-func syncDistance(in *bufio.Reader, offset int) (float32, uint16, error) {
-	var lsf, pkt, str, bert float64
-
-	symBuf, err := in.Peek(16*5*4 + offset*4) // Taking every fifth symbol 16 times, plus offset
-	if err != nil {
-		log.Printf("[ERROR] Error peeking sync symbols: %v", err)
-		return 0, 0, err
-	}
-	symbols := make([]Symbol, 16*5)
-	_, err = binary.Decode(symBuf[offset*4:], binary.LittleEndian, symbols)
-	if err != nil {
-		// should never happen
-		log.Printf("[ERROR] Error decoding sync symbols: %v", err)
-		return 0, 0, err
-	}
+func syncDistance(symbols []Symbol, offset int) (float32, uint16, error) {
+	var lsf, pkt, stra, strb, str float64
 
 	// log.Printf("[DEBUG] offset: %d, symbols: %#v", offset, symbols)
 	// msg := "[DEBUG] sync: ["
-	for i, s := range symbols {
+	for i, s := range symbols[offset : 16*5+offset] {
 		if i%5 == 0 {
 			v := float64(s)
-			// msg += fmt.Sprintf("%3.5f, ", v)
-			// lsf += math.Pow(v-ExtLSFSyncSymbols[i/5], 2)
-			// if i/5 < 8 {
-			// 	pkt += math.Pow(v-PacketSyncSymbols[i/5], 2)
-			// }
 			lsf += (v - ExtLSFSyncSymbols[i/5]) * (v - ExtLSFSyncSymbols[i/5])
 			if i/5 < 8 {
 				pkt += (v - PacketSyncSymbols[i/5]) * (v - PacketSyncSymbols[i/5])
 			}
-			// if i/5 > 7 {
-			// 	str += math.Pow(v-StreamSyncSymbols[i/5-8], 2)
-			// 	bert += math.Pow(v-BERTSyncSymbols[i/5-8], 2)
-			// }
+			if i/5 > 7 {
+				stra += (v - StreamSyncSymbols[i/5-8]) * (v - StreamSyncSymbols[i/5-8])
+			}
+		}
+	}
+
+	// log.Printf("[DEBUG] offset: %d, symbols: %#v", offset, symbols)
+	// msg := "[DEBUG] sync: ["
+	for i, s := range symbols[960+offset : 960+16*5+offset] {
+		if i%5 == 0 {
+			v := float64(s)
+			if i/5 > 7 {
+				stra += (v - StreamSyncSymbols[i/5-8]) * (v - StreamSyncSymbols[i/5-8])
+			}
 		}
 	}
 	lsf = math.Sqrt(lsf)
 	pkt = math.Sqrt(pkt)
-	// str = math.Sqrt(str)
+	str = math.Sqrt(stra + strb)
 	// bert = math.Sqrt(bert)
 	// fmt.Printf(msg+"] lsf: %3.5f, pkt: %3.5f\n", lsf, pkt)
 
-	switch min(lsf, pkt /*, str, bert*/) {
+	switch min(lsf, pkt, str) {
 	case lsf:
 		return float32(lsf), LSFSync, nil
 	case pkt:
 		return float32(pkt), PacketSync, nil
-	case str:
-		return float32(str), StreamSync, nil
-	// case bert:
+	// case str:
 	default:
-		return float32(bert), BERTSync, nil
+		return float32(str), StreamSync, nil
 	}
 }
 
@@ -158,69 +145,6 @@ func EuclNorm(s1, s2 []Symbol, n int) float64 {
 
 	return math.Sqrt(ret)
 }
-
-// func syncDistance(in *bufio.Reader, offset int) (float32, uint16, error) {
-// 	var lsf, pkt, str, stra, strb float64
-
-// 	symBuf, err := in.Peek(960 + 16*5*4 + offset*4) // Taking every fifth symbol 16 times, plus offset
-// 	if err != nil {
-// 		log.Printf("[ERROR] Error peeking sync symbols: %v", err)
-// 		return 0, 0, err
-// 	}
-// 	symbols := make([]Symbol, 16*5)
-// 	_, err = binary.Decode(symBuf[offset*4:], binary.LittleEndian, symbols)
-// 	if err != nil {
-// 		// should never happen
-// 		log.Printf("[ERROR] Error decoding sync symbols: %v", err)
-// 		return 0, 0, err
-// 	}
-
-// 	// log.Printf("[DEBUG] offset: %d, symbols: %#v", offset, symbols)
-// 	// msg := "[DEBUG] sync: ["
-// 	for i, s := range symbols {
-// 		if i%5 == 0 {
-// 			v := float64(s)
-// 			// msg += fmt.Sprintf("%3.5f, ", v)
-// 			lsf += math.Pow(v-ExtLSFSyncSymbols[i/5], 2)
-// 			if i/5 < 8 {
-// 				pkt += math.Pow(v-PacketSyncSymbols[i/5], 2)
-// 			}
-// 			if i/5 > 7 {
-// 				stra += math.Pow(v-StreamSyncSymbols[i/5-8], 2)
-// 				// bert += math.Pow(v-BERTSyncSymbols[i/5-8], 2)
-// 			}
-// 		}
-// 	}
-// 	_, err = binary.Decode(symBuf[960+offset*4:], binary.LittleEndian, symbols)
-// 	if err != nil {
-// 		// should never happen
-// 		log.Printf("[ERROR] Error decoding sync symbols: %v", err)
-// 		return 0, 0, err
-// 	}
-// 	for i, s := range symbols {
-// 		if i%5 == 0 {
-// 			v := float64(s)
-// 			if i/5 > 7 {
-// 				strb += math.Pow(v-StreamSyncSymbols[i/5-8], 2)
-// 			}
-// 		}
-// 	}
-
-// 	lsf = math.Sqrt(lsf)
-// 	pkt = math.Sqrt(pkt)
-// 	str = math.Sqrt(stra + strb)
-// 	// fmt.Printf(msg+"] lsf: %3.5f, pkt: %3.5f\n", lsf, pkt)
-
-// 	switch min(lsf, pkt, str /*, bert*/) {
-// 	case lsf:
-// 		return float32(lsf), LSFSync, nil
-// 	case pkt:
-// 		return float32(pkt), PacketSync, nil
-// 	// case str:
-// 	default:
-// 		return float32(str), StreamSync, nil
-// 	}
-// }
 
 // AppendPreamble generates symbol stream for a preamble.
 func AppendPreamble(out []Symbol, typ Preamble) []Symbol {

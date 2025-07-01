@@ -23,7 +23,7 @@ const (
 	TXSymbolScalingCoeff = (0.8 / ((40.0e3 / 2097152) * 0xAD) * 64.0)
 )
 
-var transmitGain = float32(math.Sqrt(samplesPerSymbol))
+var transmitGain = float32(math.Sqrt(5))
 
 // alpha=0.5, span=8, sps=10, gain=sqrt(sps)
 // var rrcTaps10 = []float32{
