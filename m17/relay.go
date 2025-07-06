@@ -1,6 +1,7 @@
 package m17
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -143,7 +144,27 @@ func (c *Relay) SendPacket(p Packet) error {
 
 	_, err := c.conn.Write(cmd)
 	if err != nil {
-		return fmt.Errorf("error sending text message: %w", err)
+		return fmt.Errorf("error sending packet message: %w", err)
+	}
+	return nil
+}
+
+func (c *Relay) SendStream(lsf LSF, sid uint16, fn uint16, payload []byte) error {
+	if time.Since(c.lastPing) > 30*time.Second {
+		log.Printf("[DEBUG] Last ping was at %s", c.lastPing)
+	}
+	cmd := make([]byte, 0, 54)
+	cmd = append(cmd, []byte(magicM17Voice)...)
+	cmd, _ = binary.Append(cmd, binary.BigEndian, sid)
+	cmd = append(cmd, lsf.ToLSDBytes()...)
+	cmd, _ = binary.Append(cmd, binary.BigEndian, fn)
+	cmd = append(cmd, payload...)
+	crc := CRC(cmd[:52])
+	cmd, _ = binary.Append(cmd, binary.BigEndian, crc)
+
+	_, err := c.conn.Write(cmd)
+	if err != nil {
+		return fmt.Errorf("error sending stream message: %w", err)
 	}
 	return nil
 }

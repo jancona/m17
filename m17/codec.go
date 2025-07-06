@@ -348,7 +348,7 @@ func (v *ViterbiDecoder) DecodePunctured(puncturedSoftBits []Symbol, puncturePat
 		p++
 		p %= len(puncturePattern)
 	}
-	softBits = softBits[:u]
+	softBits = softBits[:u+u%2]
 
 	out, e := v.decode(softBits)
 	return out, e - float64(u-len(puncturedSoftBits))*softMaybe

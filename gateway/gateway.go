@@ -294,11 +294,18 @@ func (g Gateway) FromRelay(p m17.Packet) error {
 	return g.modem.TransmitPacket(p)
 }
 
-func (g *Gateway) FromModem(lsfBytes []byte, packetBytes []byte) error {
-	p := m17.NewPacketFromBytes(append(lsfBytes, packetBytes...))
-	log.Printf("[DEBUG] received packet from modem: %v", p)
-	// TODO: Handle error?
-	err := g.relay.SendPacket(p)
+func (g *Gateway) FromModem(lsf m17.LSF, payload []byte, sid, fn uint16) error {
+	var err error
+	log.Printf("[DEBUG] FromModem lsf: %v, payload: % x, sid: %x, fn: %d", lsf, payload, sid, fn)
+	if lsf.LSFType() == m17.LSFTypePacket {
+		p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
+		log.Printf("[DEBUG] received packet from modem: %v", p)
+		// TODO: Handle error?
+		err = g.relay.SendPacket(p)
+	} else { // m17.LSFTypeStream
+		err = g.relay.SendStream(lsf, sid, fn, payload)
+	}
+
 	return err
 }
 
