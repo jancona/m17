@@ -2,7 +2,9 @@ package m17
 
 import (
 	"errors"
+	"log"
 	"math"
+	"slices"
 )
 
 const (
@@ -24,12 +26,13 @@ const (
 )
 
 const (
-	softTrue  = 1.0
-	softMaybe = 0.5
-	softFalse = 0.0
+	softTrue  = 0xFFFF
+	softMaybe = softTrue / 2
+	softFalse = 0
 )
 
 type Symbol float32
+type SoftBit uint16
 
 var (
 	// TX symbols
@@ -41,8 +44,10 @@ var (
 	// End of Transmission symbol pattern
 	EOTSymbols = []Symbol{+3, +3, +3, +3, +3, +3, -3, +3}
 
-	costTable0 = []Symbol{softFalse, softFalse, softFalse, softFalse, softTrue, softTrue, softTrue, softTrue}
-	costTable1 = []Symbol{softFalse, softTrue, softTrue, softFalse, softFalse, softTrue, softTrue, softFalse}
+	// costTable0 = []Symbol{0, 0, 0, 0, 1, 1, 1, 1}
+	// costTable1 = []Symbol{0, 1, 1, 0, 0, 1, 1, 0}
+	costTable0 = []SoftBit{softFalse, softFalse, softFalse, softFalse, softTrue, softTrue, softTrue, softTrue}
+	costTable1 = []SoftBit{softFalse, softTrue, softTrue, softFalse, softFalse, softTrue, softTrue, softFalse}
 )
 
 // Preamble type (0 for LSF, 1 for BERT).
@@ -202,12 +207,12 @@ func InterleaveBits(in *Bits) *Bits {
 	}
 	return &out
 }
-func DeinterleaveSymbols(symbols []Symbol) []Symbol {
-	var dSymbols []Symbol
+func DeinterleaveSoftBits(softBits []SoftBit) []SoftBit {
+	var dSoftBits []SoftBit
 	for i := range SymbolsPerPayload * 2 {
-		dSymbols = append(dSymbols, symbols[interleaveSequence[i]])
+		dSoftBits = append(dSoftBits, softBits[interleaveSequence[i]])
 	}
-	return dSymbols
+	return dSoftBits
 }
 
 var randomizeSeq = []byte{
@@ -227,13 +232,13 @@ func RandomizeBits(bits *Bits) *Bits {
 	}
 	return bits
 }
-func DerandomizeSymbols(symbols []Symbol) []Symbol {
-	for i := 0; i < len(symbols); i++ {
+func DerandomizeSoftBits(softBits []SoftBit) []SoftBit {
+	for i := 0; i < len(softBits); i++ {
 		if (randomizeSeq[i/8]>>(7-(i%8)))&1 != 0 { //soft XOR. flip soft bit if "1"
-			symbols[i] = softTrue - symbols[i]
+			softBits[i] = softTrue - softBits[i]
 		}
 	}
-	return symbols
+	return softBits
 }
 
 func AppendBits(out []Symbol, data *Bits) []Symbol {
@@ -316,24 +321,25 @@ func ConvolutionalEncode(in []byte, puncturePattern PuncturePattern, finalBit by
 type ViterbiDecoder struct {
 	history []uint16
 
-	prevMetrics     []float64
-	currMetrics     []float64
-	prevMetricsData []float32
-	currMetricsData []float32
+	prevMetrics     []uint32
+	currMetrics     []uint32
+	prevMetricsData []uint32
+	currMetricsData []uint32
 }
 
 func (v *ViterbiDecoder) Init(l int) {
 	v.history = make([]uint16, l/2+l%2)
-	v.prevMetrics = make([]float64, ConvolutionStates)
-	v.currMetrics = make([]float64, ConvolutionStates)
-	v.prevMetricsData = make([]float32, ConvolutionStates)
-	v.currMetricsData = make([]float32, ConvolutionStates)
+	v.prevMetrics = make([]uint32, ConvolutionStates)
+	v.currMetrics = make([]uint32, ConvolutionStates)
+	v.prevMetricsData = make([]uint32, ConvolutionStates)
+	v.currMetricsData = make([]uint32, ConvolutionStates)
 }
 
-func (v *ViterbiDecoder) DecodePunctured(puncturedSoftBits []Symbol, puncturePattern PuncturePattern) ([]byte, float64) {
+func (v *ViterbiDecoder) DecodePunctured(puncturedSoftBits []SoftBit, puncturePattern PuncturePattern) ([]byte, float64) {
 	// log.Printf("[DEBUG] DecodePunctured len(puncturedSoftBits): %d, len(puncturePattern): %d", len(puncturedSoftBits), len(puncturePattern))
+	log.Printf("[DEBUG] puncturedSoftBits: %#v, puncturePattern: %#v", puncturedSoftBits, puncturePattern)
 	// unpuncture input
-	var softBits = make([]Symbol, 2*len(puncturedSoftBits))
+	var softBits = make([]SoftBit, 2*len(puncturedSoftBits))
 
 	p := 0
 	u := 0
@@ -351,10 +357,11 @@ func (v *ViterbiDecoder) DecodePunctured(puncturedSoftBits []Symbol, puncturePat
 	softBits = softBits[:u+u%2]
 
 	out, e := v.decode(softBits)
-	return out, e - float64(u-len(puncturedSoftBits))*softMaybe
+	// log.Printf("[DEBUG] out: %#v, vd: %#v", out, e-float64(u-len(puncturedSoftBits))*0.5)
+	return out, float64(e-uint32(u-len(puncturedSoftBits)*softMaybe)) / 0xFFFF / SymbolsPerPayload / 2 * 100
 }
 
-func (v *ViterbiDecoder) decode(softBits []Symbol) ([]byte, float64) {
+func (v *ViterbiDecoder) decode(softBits []SoftBit) ([]byte, uint32) {
 	// log.Printf("[DEBUG] decode() len(softBits): %d, softBits: %#v", len(softBits), softBits)
 	v.Init(len(softBits))
 	pos := 0
@@ -371,16 +378,15 @@ func (v *ViterbiDecoder) decode(softBits []Symbol) ([]byte, float64) {
 	return out, e
 }
 
-func (v *ViterbiDecoder) decodeBit(sb0, sb1 Symbol, pos int) {
-
+func (v *ViterbiDecoder) decodeBit(sb0, sb1 SoftBit, pos int) {
 	for i := 0; i < ConvolutionStates/2; i++ {
-		metric := math.Abs(float64(costTable0[i]-sb0)) + math.Abs(float64(costTable1[i]-sb1))
+		metric := absDiff(costTable0[i], sb0) + absDiff(costTable1[i], sb1)
 		// log.Printf("[DEBUG] i: %d, sb0: %f, sb1: %f, metric: %f", i, sb0, sb1, metric)
 
 		m0 := v.prevMetrics[i] + metric
-		m1 := v.prevMetrics[i+ConvolutionStates/2] + (2.0 - metric)
+		m1 := v.prevMetrics[i+ConvolutionStates/2] + (0x1FFFE - metric)
 
-		m2 := v.prevMetrics[i] + (2.0 - metric)
+		m2 := v.prevMetrics[i] + (0x1FFFE - metric)
 		m3 := v.prevMetrics[i+ConvolutionStates/2] + metric
 
 		i0 := 2 * i
@@ -404,17 +410,24 @@ func (v *ViterbiDecoder) decodeBit(sb0, sb1 Symbol, pos int) {
 	}
 
 	//swap
-	tmp := make([]float64, ConvolutionStates)
-	for i := 0; i < ConvolutionStates; i++ {
+	tmp := make([]uint32, ConvolutionStates)
+	for i := range ConvolutionStates {
 		tmp[i] = v.currMetrics[i]
 	}
-	for i := 0; i < ConvolutionStates; i++ {
+	for i := range ConvolutionStates {
 		v.currMetrics[i] = v.prevMetrics[i]
 		v.prevMetrics[i] = tmp[i]
 	}
 }
 
-func (v *ViterbiDecoder) chainback(pos, l int) ([]byte, float64) {
+func absDiff(v1, v2 SoftBit) uint32 {
+	if v1 > v2 {
+		return uint32(v1 - v2)
+	}
+	return uint32(v2 - v1)
+}
+
+func (v *ViterbiDecoder) chainback(pos, l int) ([]byte, uint32) {
 	state := byte(0)
 	bitPos := l + 4
 	out := make([]byte, (l-1)/8+1)
@@ -432,14 +445,7 @@ func (v *ViterbiDecoder) chainback(pos, l int) ([]byte, float64) {
 		}
 	}
 
-	cost := v.prevMetrics[0]
-
-	for i := 0; i < ConvolutionStates; i++ {
-		m := v.prevMetrics[i]
-		if m < cost {
-			cost = m
-		}
-	}
+	cost := slices.Min(v.prevMetrics)
 	// log.Printf("[DEBUG] chainback(%d, %d) cost: %f", pos, l, cost)
 
 	return out, cost

@@ -296,7 +296,7 @@ func (g Gateway) FromRelay(p m17.Packet) error {
 
 func (g *Gateway) FromModem(lsf m17.LSF, payload []byte, sid, fn uint16) error {
 	var err error
-	log.Printf("[DEBUG] FromModem lsf: %v, payload: % x, sid: %x, fn: %d", lsf, payload, sid, fn)
+	// log.Printf("[DEBUG] FromModem lsf: %v, payload: % x, sid: %x, fn: %d", lsf, payload, sid, fn)
 	if lsf.LSFType() == m17.LSFTypePacket {
 		p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
 		log.Printf("[DEBUG] received packet from modem: %v", p)

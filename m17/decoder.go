@@ -183,7 +183,9 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func(lsf LSF, payload []
 				d.lastStreamFN = int(fn) - 1
 			}
 
-			if ((d.lastStreamFN + 1) & 0xFFFF) == int(fn) { //new frame. TODO: maybe a timeout would be better
+			log.Printf("[DEBUG] d.lastStreamFN: %d, fn: %d", d.lastStreamFN, fn)
+			if (d.lastStreamFN + 1) == int(fn) { //new frame. TODO: maybe a timeout would be better
+				log.Printf("[DEBUG] new frame, d.lichParts: %02x", d.lichParts)
 				if d.lichParts != 0x3F { //6 chunks = 0b111111
 					//reconstruct LSF chunk by chunk
 					copy(d.lsfBytes[lichCnt*5:], lich)
@@ -203,6 +205,7 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func(lsf LSF, payload []
 				}
 				log.Printf("[DEBUG] Received stream frame: FN:%04X, LICH_CNT:%d, Viterbi error: %1.1f", fn, lichCnt, vd)
 				if d.gotLSF {
+					log.Printf("[DEBUG] Sending stream frame")
 					d.streamFN = (fn >> 8) | ((fn & 0xFF) << 8)
 					fromModem(d.lsf, d.frameData, d.streamID, d.streamFN)
 				}
@@ -273,11 +276,11 @@ func decodeLSF(pld []Symbol) LSF {
 	// log.Printf("[DEBUG] softBit: %#v", softBit)
 
 	//derandomize
-	softBit = DerandomizeSymbols(softBit)
+	softBit = DerandomizeSoftBits(softBit)
 	// log.Printf("[DEBUG] derandomized softBit: %#v", softBit)
 
 	//deinterleave
-	dSoftBit := DeinterleaveSymbols(softBit)
+	dSoftBit := DeinterleaveSoftBits(softBit)
 	// log.Printf("[DEBUG] dSoftBit: %#v", dSoftBit)
 
 	//decode
@@ -307,19 +310,19 @@ func decodeLSF(pld []Symbol) LSF {
 
 func (d *Decoder) decodeStreamFrame(pld []Symbol) (frameData []byte, lich []byte, fn uint16, lichCnt byte, e float64) {
 	// log.Printf("[DEBUG] decodeStreamFrame: len(pld): %d", len(pld))
-	// log.Printf("[DEBUG] pld: %#v", pld)
+	// log.Printf("[DEBUG] pld: [% 1.1f]", pld)
 
 	softBit := calcSoftbits(pld)
-	// log.Printf("[DEBUG] softBit: %#v", softBit)
+	// log.Printf("[DEBUG] softBit: [% 04x]", softBit)
 
 	//derandomize
-	softBit = DerandomizeSymbols(softBit)
-	// log.Printf("[DEBUG] derandomized softBit: %#v", softBit)
+	softBit = DerandomizeSoftBits(softBit)
+	// log.Printf("[DEBUG] derandomized softBit: [% 04x]", softBit)
 
 	//deinterleave
-	dSoftBit := DeinterleaveSymbols(softBit)
-	// log.Printf("[DEBUG] dSoftBit: %#v", dSoftBit)
-	lich = DecodeLICH(dSoftBit)
+	dSoftBit := DeinterleaveSoftBits(softBit)
+	// log.Printf("[DEBUG] deinterleaved softBit: [% 04x]", dSoftBit)
+	lich = DecodeLICH(dSoftBit[:96])
 	lichCnt = lich[5] >> 5
 
 	//decode
@@ -327,11 +330,12 @@ func (d *Decoder) decodeStreamFrame(pld []Symbol) (frameData []byte, lich []byte
 	frameData, e = vd.DecodePunctured(dSoftBit[96:], StreamPuncturePattern)
 
 	fn = (uint16(frameData[1]) << 8) | uint16(frameData[2])
-	log.Printf("[DEBUG] len(frameData): %d, frameData[0:3]: [% 2x]", len(frameData), frameData[0:3])
+	log.Printf("[DEBUG] frameData[:3]: [% 02x]", frameData[:3])
+
 	//shift 1+2 positions left - get rid of the encoded flushing bits and FN
 	frameData = frameData[1+2:]
 
-	return frameData, lich, fn, lichCnt, e
+	return frameData, lich, fn, lichCnt, e / softTrue
 }
 
 func (d *Decoder) decodePacketFrame(pld []Symbol) ([]byte, float64) {
@@ -342,11 +346,11 @@ func (d *Decoder) decodePacketFrame(pld []Symbol) ([]byte, float64) {
 	// log.Printf("[DEBUG] softBit: %#v", softBit)
 
 	//derandomize
-	softBit = DerandomizeSymbols(softBit)
+	softBit = DerandomizeSoftBits(softBit)
 	// log.Printf("[DEBUG] derandomized softBit: %#v", softBit)
 
 	//deinterleave
-	dSoftBit := DeinterleaveSymbols(softBit)
+	dSoftBit := DeinterleaveSoftBits(softBit)
 	// log.Printf("[DEBUG] dSoftBit: %#v", dSoftBit)
 
 	//decode
@@ -354,14 +358,14 @@ func (d *Decoder) decodePacketFrame(pld []Symbol) ([]byte, float64) {
 	pkt, e := vd.DecodePunctured(dSoftBit, PacketPuncturePattern)
 	// log.Printf("[DEBUG] pkt: %#v", pkt)
 
-	return pkt[1:], e
+	return pkt[1:], e / softTrue
 }
 
-func calcSoftbits(pld []Symbol) []Symbol {
+func calcSoftbits(pld []Symbol) []SoftBit {
 	if len(pld) > SymbolsPerPayload {
 		panic(fmt.Sprintf("pld contains %d symbols (>%d)", len(pld), SymbolsPerPayload))
 	}
-	softBit := make([]Symbol, 2*SymbolsPerPayload) //raw frame soft bits
+	softBit := make([]SoftBit, 2*SymbolsPerPayload) //raw frame soft bits
 
 	for i, sym := range pld {
 
@@ -369,11 +373,11 @@ func calcSoftbits(pld []Symbol) []Symbol {
 		if sym >= SymbolList[3] {
 			softBit[i*2+1] = softTrue
 		} else if sym >= SymbolList[2] {
-			softBit[i*2+1] = -softTrue/((SymbolList[3]-SymbolList[2])*SymbolList[2]) + sym*softTrue/(SymbolList[3]-SymbolList[2])
+			softBit[i*2+1] = SoftBit(-softTrue/((SymbolList[3]-SymbolList[2])*SymbolList[2]) + sym*softTrue/(SymbolList[3]-SymbolList[2]))
 		} else if sym >= SymbolList[1] {
 			softBit[i*2+1] = softFalse
 		} else if sym >= SymbolList[0] {
-			softBit[i*2+1] = softTrue/((SymbolList[1]-SymbolList[0])*SymbolList[1]) - sym*softTrue/(SymbolList[1]-SymbolList[0])
+			softBit[i*2+1] = SoftBit(softTrue/((SymbolList[1]-SymbolList[0])*SymbolList[1]) - sym*softTrue/(SymbolList[1]-SymbolList[0]))
 		} else {
 			softBit[i*2+1] = softTrue
 		}
@@ -382,7 +386,7 @@ func calcSoftbits(pld []Symbol) []Symbol {
 		if sym >= SymbolList[2] {
 			softBit[i*2] = softFalse
 		} else if sym >= SymbolList[1] {
-			softBit[i*2] = softMaybe - (sym * softTrue / (SymbolList[2] - SymbolList[1]))
+			softBit[i*2] = SoftBit(softMaybe - (sym * softTrue / (SymbolList[2] - SymbolList[1])))
 		} else {
 			softBit[i*2] = softTrue
 		}
