@@ -358,10 +358,9 @@ func TestGolaySoftDecodeFlippedData5(t *testing.T) {
 func TestLICHEncodeDecode(t *testing.T) {
 	// Test data
 	input := []uint8{0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC}
-	encoded := make([]uint8, 12)
 
 	// Encode
-	EncodeLICH(encoded, input)
+	encoded := EncodeLICH(input)
 
 	// Convert to soft bits for decoding
 	softBits := make([]SoftBit, 96)
@@ -561,10 +560,8 @@ func TestLICHEncodeDecodeExtended(t *testing.T) {
 	}
 
 	for i, input := range testCases {
-		encoded := make([]uint8, 12)
-
 		// Encode
-		EncodeLICH(encoded, input)
+		encoded := EncodeLICH(input)
 
 		// Convert to soft bits for decoding
 		softBits := make([]SoftBit, 96)
@@ -606,17 +603,4 @@ func TestSoftLogicConstants(t *testing.T) {
 	if SoftThreshold != 0x7FFF {
 		t.Errorf("SoftThreshold = %04X, expected 0x7FFF", SoftThreshold)
 	}
-}
-
-func TestPanicConditions(t *testing.T) {
-	// Test EncodeLICH with insufficient buffer sizes
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic for insufficient output buffer")
-		}
-	}()
-
-	input := make([]uint8, 6)
-	output := make([]uint8, 5) // Too small
-	EncodeLICH(output, input)
 }

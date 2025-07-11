@@ -11,17 +11,15 @@ import (
 const (
 	magicLen = 4
 
-	magicACKN           = "ACKN"
-	magicCONN           = "CONN"
-	magicDISC           = "DISC"
-	magicLSTN           = "LSTN"
-	magicNACK           = "NACK"
-	magicPING           = "PING"
-	magicPONG           = "PONG"
-	magicM17Voice       = "M17 "
-	magicM17VoiceHeader = "M17H"
-	magicM17VoiceData   = "M17D"
-	magicM17Packet      = "M17P"
+	magicACKN      = "ACKN"
+	magicCONN      = "CONN"
+	magicDISC      = "DISC"
+	magicLSTN      = "LSTN"
+	magicNACK      = "NACK"
+	magicPING      = "PING"
+	magicPONG      = "PONG"
+	magicM17Voice  = "M17 "
+	magicM17Packet = "M17P"
 )
 
 type Relay struct {
@@ -33,11 +31,12 @@ type Relay struct {
 	conn            *net.UDPConn
 	connected       bool
 	lastPing        time.Time
-	handler         func(Packet) error
+	packetHandler   func(Packet) error
+	streamHandler   func(StreamDatagram) error
 	done            bool
 }
 
-func NewRelay(server string, port uint, module string, callsign string, handler func(p Packet) error) (*Relay, error) {
+func NewRelay(server string, port uint, module string, callsign string, packetHandler func(Packet) error, streamHandler func(StreamDatagram) error) (*Relay, error) {
 	cs, err := EncodeCallsign(callsign)
 	if err != nil {
 		return nil, fmt.Errorf("bad callsign %s: %w", callsign, err)
@@ -57,7 +56,8 @@ func NewRelay(server string, port uint, module string, callsign string, handler 
 		Module:          m,
 		Callsign:        callsign,
 		EncodedCallsign: *cs,
-		handler:         handler,
+		packetHandler:   packetHandler,
+		streamHandler:   streamHandler,
 	}
 	return &c, nil
 }
@@ -121,13 +121,21 @@ func (c *Relay) Handle() {
 			c.lastPing = time.Now()
 			// case magicINFO:
 		case magicM17Voice: // M17 voice stream
-			log.Print("[DEBUG] Ignoring M17 voice data")
-			// TODO: Implement M17 voice streams
+			// log.Printf("[DEBUG] stream buffer: % 2x", buffer)
+			if c.streamHandler != nil {
+				sd, err := NewStreamDatagram(c.EncodedCallsign, buffer)
+				if err != nil {
+					log.Printf("[INFO] Dropping bad stream datagram: %v", err)
+				} else {
+					// log.Printf("[DEBUG] sd: %#v", sd)
+					c.streamHandler(sd)
+				}
+			}
 		case magicM17Packet: // M17 packet
-			p := NewPacketFromBytes(buffer[4:])
-			c.handler(p)
-		case magicM17VoiceHeader: // M17 voice two-packet header
-		case magicM17VoiceData: // M17 voice two-packet data
+			if c.packetHandler != nil {
+				p := NewPacketFromBytes(buffer[4:])
+				c.packetHandler(p)
+			}
 		}
 	}
 }
@@ -153,6 +161,7 @@ func (c *Relay) SendStream(lsf LSF, sid uint16, fn uint16, payload []byte) error
 	if time.Since(c.lastPing) > 30*time.Second {
 		log.Printf("[DEBUG] Last ping was at %s", c.lastPing)
 	}
+	// log.Printf("[DEBUG] SendStream: LSF: %v, sid: %x, fn: %d", lsf, sid, fn)
 	cmd := make([]byte, 0, 54)
 	cmd = append(cmd, []byte(magicM17Voice)...)
 	cmd, _ = binary.Append(cmd, binary.BigEndian, sid)
@@ -202,4 +211,45 @@ func (c *Relay) sendDISC() error {
 		return fmt.Errorf("error sending DISC: %w", err)
 	}
 	return nil
+}
+
+type StreamDatagram struct {
+	StreamID    uint16
+	FrameNumber uint16
+	LastFrame   bool
+	LSF         LSF
+	Payload     [16]byte
+}
+
+func NewStreamDatagram(encodedCallsign [6]byte, buffer []byte) (StreamDatagram, error) {
+	sd := StreamDatagram{}
+	if len(buffer) != 54 {
+		return sd, fmt.Errorf("stream datagram buffer length %d != 50", len(buffer))
+	}
+	if CRC(buffer) != 0 {
+		return sd, fmt.Errorf("bad CRC for stream datagram buffer")
+	}
+	buffer = buffer[4:]
+	_, err := binary.Decode(buffer, binary.BigEndian, &sd.StreamID)
+	if err != nil {
+		log.Printf("[INFO] Unable to decode streamID from stream datagram: %v", err)
+		return sd, fmt.Errorf("bad streamID from stream datagram: %v", err)
+	}
+	sd.LSF = NewLSFFromLSD(buffer[2:30])
+	dst, _ := EncodeCallsign("@ALL")
+	sd.LSF.Dst = *dst
+	sd.LSF.Type[1] |= 0x2 << 5
+	copy(sd.LSF.Meta[:], sd.LSF.Src[:])
+	copy(sd.LSF.Meta[6:], encodedCallsign[:])
+	sd.LSF.CalcCRC()
+
+	_, err = binary.Decode(buffer[30:], binary.BigEndian, &sd.FrameNumber)
+	if err != nil {
+		log.Printf("[INFO] Unable to decode frameNumber from stream datagram: %v", err)
+		return sd, fmt.Errorf("bad frameNumber from stream datagram: %v", err)
+	}
+	sd.LastFrame = sd.FrameNumber&0x8000 == 0x8000
+	// sd.FrameNumber &= 0x7fff
+	copy(sd.Payload[:], buffer[32:48])
+	return sd, nil
 }

@@ -88,6 +88,16 @@ func NewLSFFromBytes(buf []byte) LSF {
 	return lsf
 }
 
+func NewLSFFromLSD(lsd []byte) LSF {
+	var lsf LSF
+	copy(lsf.Dst[:], lsd[dstPos:srcPos])
+	copy(lsf.Src[:], lsd[srcPos:typPos])
+	copy(lsf.Type[:], lsd[typPos:metaPos])
+	copy(lsf.Meta[:], lsd[metaPos:crcPos])
+	lsf.CalcCRC()
+	return lsf
+}
+
 // Convert this LSF to a byte slice suitable for transmission
 func (l *LSF) ToLSDBytes() []byte {
 	b := make([]byte, 0, LSDLen)

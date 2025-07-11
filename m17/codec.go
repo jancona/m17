@@ -1,8 +1,9 @@
 package m17
 
 import (
+	"encoding/binary"
 	"errors"
-	"log"
+	"fmt"
 	"math"
 	"slices"
 )
@@ -318,6 +319,18 @@ func ConvolutionalEncode(in []byte, puncturePattern PuncturePattern, finalBit by
 	return &out, nil
 }
 
+func ConvolutionalEncodeStream(lichBits []Bit, sd StreamDatagram) (*[]Bit, error) {
+	frame, err := binary.Append(nil, binary.LittleEndian, sd.FrameNumber)
+	if err != nil {
+		return nil, fmt.Errorf("append frame number: %w", err)
+	}
+	frame = append(frame, sd.Payload[:]...)
+	frameBits, err := ConvolutionalEncode(frame, StreamPuncturePattern, 7)
+	bits := append(lichBits, *frameBits...)
+
+	return &bits, err
+}
+
 type ViterbiDecoder struct {
 	history []uint16
 
@@ -337,7 +350,7 @@ func (v *ViterbiDecoder) Init(l int) {
 
 func (v *ViterbiDecoder) DecodePunctured(puncturedSoftBits []SoftBit, puncturePattern PuncturePattern) ([]byte, float64) {
 	// log.Printf("[DEBUG] DecodePunctured len(puncturedSoftBits): %d, len(puncturePattern): %d", len(puncturedSoftBits), len(puncturePattern))
-	log.Printf("[DEBUG] puncturedSoftBits: %#v, puncturePattern: %#v", puncturedSoftBits, puncturePattern)
+	// log.Printf("[DEBUG] puncturedSoftBits: %#v, puncturePattern: %#v", puncturedSoftBits, puncturePattern)
 	// unpuncture input
 	var softBits = make([]SoftBit, 2*len(puncturedSoftBits))
 

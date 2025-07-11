@@ -63,14 +63,9 @@ type Line interface {
 
 type Modem interface {
 	io.ReadCloser
-	TransmitPacket(p Packet) error
-	// Read(buf []byte) (n int, err error)
-	// WriteSymbols(s []Symbol) (n int, err error)
-	// Close() error
+	TransmitPacket(Packet) error
+	TransmitVoiceStream(StreamDatagram) error
 	StartRX() error
-	// EndRX() error
-	// StartTX() error
-	// StopTX()
 	Reset() error
 	SetAFC(afc bool) error
 	SetFreqCorrection(corr int16) error
@@ -96,20 +91,26 @@ func (m *DummyModem) TransmitPacket(p Packet) error {
 	return nil
 }
 
+func (m *DummyModem) TransmitVoiceStream(sd StreamDatagram) error {
+	return nil
+}
+
 func (m *DummyModem) Read(p []byte) (n int, err error) {
 	l := len(p)
 	el := len(m.extra)
-	// log.Printf("[DEBUG] Attempting to read %d bytes, el: %d", l, el)
+	log.Printf("[DEBUG] Request to read %d bytes, el: %d", l, el)
 	if el < l {
 		rl := (l - el) / 5
-		if rl%5 > 0 {
+		if (l-el)%5 > 0 {
 			// make sure we have enough symbols
 			rl++
 		}
 		// Get whole symbols
-		rl += rl % 4
+		if rl%4 > 0 {
+			rl += 4 - rl%4
+		}
 		sBuff := make([]byte, rl)
-		// log.Printf("[DEBUG] Attempting to read %d bytes", len(sBuff))
+		log.Printf("[DEBUG] Attempting to read %d bytes", len(sBuff))
 		nn, err := m.In.Read(sBuff)
 		if err != nil {
 			log.Printf("[ERROR] DummyModem Read failed: %v", err)
@@ -117,10 +118,12 @@ func (m *DummyModem) Read(p []byte) (n int, err error) {
 				return 0, err
 			}
 		}
-		// log.Printf("[DEBUG] Read %d bytes: % x", nn, sBuff)
+		log.Printf("[DEBUG] Read %d bytes", nn)
 		if nn%4 != 0 {
-			panic("handle this!")
+			// panic("handle this!")
+			nn -= nn % 4
 		}
+		sBuff = sBuff[:nn]
 		for i := 0; i < nn; i += 4 {
 			// Repeat each read symbol 5 times
 			for range 5 {
@@ -131,7 +134,7 @@ func (m *DummyModem) Read(p []byte) (n int, err error) {
 	}
 	n = copy(p, m.extra[:l])
 	m.extra = m.extra[l:]
-	// log.Printf("[DEBUG] Returning %d bytes: % x", n, p)
+	log.Printf("[DEBUG] Returning %d bytes", n)
 	return
 }
 
@@ -179,6 +182,7 @@ type CC1200Modem struct {
 	nRST      Line
 	paEnable  Line
 	boot0     Line
+	debugLog  *os.File
 }
 
 func NewCC1200Modem(
@@ -230,15 +234,16 @@ func NewCC1200Modem(
 	}
 	go ret.processReceivedData(rxSource)
 
-	// txSamples, err := ret.txPipeline(ret.txSymbols)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("tx pipeline setup: %w", err)
-	// }
-	// go ret.processTXSamples(txSamples)
 	_, err = ret.commandWithResponse([]byte{cmdPing, 2})
 	if err != nil {
 		return nil, fmt.Errorf("test PING: %w", err)
 	}
+	// ret.debugLog, err = os.OpenFile("/home/jim/debug.sym", os.O_CREATE|os.O_WRONLY, 0644)
+	// if err != nil {
+	// 	log.Printf("[DEBUG] Failure opening debug log: %v", err)
+	// } else {
+	// 	log.Printf("[DEBUG] Opened debug log: %v", ret.debugLog)
+	// }
 	return &ret, nil
 }
 
@@ -346,6 +351,9 @@ func (m *CC1200Modem) Close() error {
 	m.nRST.Close()
 	m.paEnable.Close()
 	m.boot0.Close()
+	if m.debugLog != nil {
+		m.debugLog.Close()
+	}
 	return m.modem.Close()
 }
 
@@ -400,20 +408,10 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 	if err != nil {
 		return fmt.Errorf("failed to send preamble: %w", err)
 	}
-
-	//send LSF syncword
-	syms = AppendSyncword(syms, LSFSync)
-
-	b, err := ConvolutionalEncode(p.LSF.ToBytes(), LSFPuncturePattern, LSFFinalBit)
+	syms, err = generateLSFSymbols(p.LSF)
 	if err != nil {
-		return fmt.Errorf("unable to encode LSF: %w", err)
+		return fmt.Errorf("failed to generate LSF symbols: %w", err)
 	}
-	encodedBits := NewBits(b)
-	// encodedBits[0:len(b)] = b[:]
-	rfBits := InterleaveBits(encodedBits)
-	rfBits = RandomizeBits(rfBits)
-	// Append LSF to the oputput
-	syms = AppendBits(syms, rfBits)
 	err = m.writeSymbols(syms)
 	if err != nil {
 		return fmt.Errorf("failed to send LSF: %w", err)
@@ -458,7 +456,7 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 	syms = AppendEOT(syms)
 	err = m.writeSymbols(syms)
 	if err != nil {
-		return fmt.Errorf("failed to send: %w", err)
+		return fmt.Errorf("failed to send EOT: %w", err)
 	}
 	log.Printf("[DEBUG] Finished TransmitPacket")
 	time.Sleep(10 * 40 * time.Millisecond)
@@ -468,6 +466,120 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 	return nil
 }
 
+func (m *CC1200Modem) TransmitVoiceStream(sd StreamDatagram) error {
+	m.trxMutex.Lock()
+	if m.trxState != trxTX {
+		// First frame
+		m.trxMutex.Unlock()
+		log.Printf("[DEBUG] Sending first frame of stream %x, fn %d, lsf: %v", sd.StreamID, sd.FrameNumber, sd.LSF)
+		m.StopRX()
+		time.Sleep(2 * time.Millisecond)
+		m.StartTX()
+		time.Sleep(10 * time.Millisecond)
+
+		var syms []Symbol
+		//fill preamble
+		syms = AppendPreamble(syms, lsfPreamble)
+		err := m.writeSymbols(syms)
+		if err != nil {
+			return fmt.Errorf("failed to send preamble: %w", err)
+		}
+		syms, err = generateLSFSymbols(sd.LSF)
+		if err != nil {
+			return fmt.Errorf("failed to generate LSF symbols: %w", err)
+		}
+		err = m.writeSymbols(syms)
+		if err != nil {
+			return fmt.Errorf("failed to send LSF: %w", err)
+		}
+		syms, err = generateStreamSymbols(sd)
+		if err != nil {
+			return fmt.Errorf("failed to generate LSF symbols: %w", err)
+		}
+		err = m.writeSymbols(syms)
+		if err != nil {
+			return fmt.Errorf("failed to send stream frame: %w", err)
+		}
+	} else {
+		m.trxMutex.Unlock()
+		log.Printf("[DEBUG] Sending frame of stream %x, fn %d", sd.StreamID, sd.FrameNumber)
+		syms, err := generateStreamSymbols(sd)
+		if err != nil {
+			return fmt.Errorf("failed to generate LSF symbols: %w", err)
+		}
+		err = m.writeSymbols(syms)
+		if err != nil {
+			return fmt.Errorf("failed to send stream frame: %w", err)
+		}
+	}
+	if sd.LastFrame {
+		// send EOT
+		log.Printf("[DEBUG] Sending EOT for stream %x, fn %d", sd.StreamID, sd.FrameNumber)
+		syms := AppendEOT(nil)
+		err := m.writeSymbols(syms)
+		if err != nil {
+			return fmt.Errorf("failed to send EOT: %w", err)
+		}
+		log.Printf("[DEBUG] Finished TransmitVoiceStream")
+		time.Sleep(10 * 40 * time.Millisecond)
+		log.Printf("[DEBUG] Finished TransmitVoiceStream wait")
+		m.StopTX()
+		m.StartRX()
+	}
+	return nil
+}
+
+func generateLSFSymbols(l LSF) ([]Symbol, error) {
+	syms := AppendSyncword(nil, LSFSync)
+
+	b, err := ConvolutionalEncode(l.ToBytes(), LSFPuncturePattern, LSFFinalBit)
+	if err != nil {
+		return nil, fmt.Errorf("unable to encode LSF: %w", err)
+	}
+	encodedBits := NewBits(b)
+	// encodedBits[0:len(b)] = b[:]
+	rfBits := InterleaveBits(encodedBits)
+	rfBits = RandomizeBits(rfBits)
+	// Append LSF to the output
+	syms = AppendBits(syms, rfBits)
+	return syms, nil
+}
+
+func generateStreamSymbols(sd StreamDatagram) ([]Symbol, error) {
+	syms := AppendSyncword(nil, StreamSync)
+	lich := extractLICH(int((sd.FrameNumber&0x7fff)%6), sd.LSF)
+	encodedLICH := EncodeLICH(lich)
+	lichBits := unpackBits(encodedLICH)
+	b, err := ConvolutionalEncodeStream(lichBits, sd)
+	if err != nil {
+		return syms, fmt.Errorf("encode stream: %w", err)
+	}
+	encodedBits := NewBits(b)
+	rfBits := InterleaveBits(encodedBits)
+	rfBits = RandomizeBits(rfBits)
+	syms = AppendBits(syms, rfBits)
+	// log.Printf("[DEBUG] len(syms): %d, syms: [% v]", len(syms), syms)
+	// d := NewDecoder()
+	// frameData, li, fn, lichCnt, vd := d.decodeStreamFrame(syms[8:])
+	// log.Printf("[DEBUG] frameData: [% 2x], lich: %x, lichCnt: %d, fn: %x, FN: %d, vd: %1.1f", frameData, li, lichCnt, fn, (fn>>8)|((fn&0xFF)<<8), vd)
+	return syms, nil
+}
+
+func extractLICH(lichCnt int, lsf LSF) []byte {
+	lich := lsf.ToBytes()[lichCnt*5 : lichCnt*5+5]
+	return append(lich, byte(lichCnt)<<5)
+}
+
+func unpackBits(in []byte) []Bit {
+	bits := make([]Bit, 8*len(in))
+	for i := range in {
+		for j := range 8 {
+			bits[i*8+j].Set((in[i] >> (7 - j)) & 1)
+		}
+	}
+
+	return bits
+}
 func (m *CC1200Modem) StartTX() error {
 	m.trxMutex.Lock()
 	defer m.trxMutex.Unlock()
@@ -607,6 +719,12 @@ func (m *CC1200Modem) writeSymbols(symbols []Symbol) error {
 	// fmt.Printf("symbols: % v\n", symbols)
 	buf := m.s2s.Transform(symbols)
 	// fmt.Printf("writeSymbols: % 2x\n", buf)
+	if m.debugLog != nil {
+		_, err := m.debugLog.Write(buf)
+		if err != nil {
+			log.Printf("[DEBUG] Failed to write to debug log: %v", err)
+		}
+	}
 	_, err := m.modem.Write(buf)
 	return err
 }

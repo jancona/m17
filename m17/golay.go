@@ -350,13 +350,11 @@ func DecodeLICH(inp []SoftBit) []byte {
 }
 
 // EncodeLICH encodes 6 bytes into 12 bytes using Golay encoding
-func EncodeLICH(outp []uint8, inp []uint8) {
-	if len(outp) < 12 {
-		panic("output buffer too small for LICH encoding")
-	}
+func EncodeLICH(inp []uint8) []byte {
 	if len(inp) < 6 {
 		panic("input buffer too small for LICH encoding")
 	}
+	outp := make([]byte, 12)
 
 	val := Encode24((uint16(inp[0]) << 4) | (uint16(inp[1]) >> 4))
 	outp[0] = uint8((val >> 16) & 0xFF)
@@ -377,6 +375,7 @@ func EncodeLICH(outp []uint8, inp []uint8) {
 	outp[9] = uint8((val >> 16) & 0xFF)
 	outp[10] = uint8((val >> 8) & 0xFF)
 	outp[11] = uint8((val >> 0) & 0xFF)
+	return outp
 }
 
 // HardDecode24 performs hard-decision decoding of a Golay(24,12) codeword

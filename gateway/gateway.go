@@ -197,7 +197,11 @@ func main() {
 		modem.SetAFC(cfg.afc)
 		log.Printf("[INFO] Connected to modem on %s", cfg.modemPort)
 	} else {
-		m := m17.DummyModem{}
+		m := m17.DummyModem{
+			In:  cfg.symbolsIn,
+			Out: cfg.symbolsOut,
+		}
+
 		modem = &m
 	}
 
@@ -269,13 +273,11 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 		Port:   cfg.reflectorPort,
 		Module: cfg.reflectorModule,
 		modem:  modem,
-		in:     cfg.symbolsIn,
-		out:    cfg.symbolsOut,
 		duplex: cfg.duplex,
 	}
 
 	log.Printf("[DEBUG] Connecting to %s:%d, module %s", g.Server, g.Port, g.Module)
-	g.relay, err = m17.NewRelay(g.Server, g.Port, g.Module, cfg.callsign, g.FromRelay)
+	g.relay, err = m17.NewRelay(g.Server, g.Port, g.Module, cfg.callsign, g.TransmitPacket, g.TransmitVoiceStream)
 	if err != nil {
 		return nil, fmt.Errorf("error creating relay: %v", err)
 	}
@@ -289,21 +291,29 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 	return &g, nil
 }
 
-func (g Gateway) FromRelay(p m17.Packet) error {
+func (g Gateway) TransmitPacket(p m17.Packet) error {
 	// log.Printf("[DEBUG] received packet from relay: %#v", p)
 	return g.modem.TransmitPacket(p)
 }
 
-func (g *Gateway) FromModem(lsf m17.LSF, payload []byte, sid, fn uint16) error {
+func (g Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
+	// log.Printf("[DEBUG] received voice stream data from relay: %#v", sd)
+	return g.modem.TransmitVoiceStream(sd)
+}
+
+func (g *Gateway) SendToNetwork(lsf *m17.LSF, payload []byte, sid, fn uint16) error {
 	var err error
-	// log.Printf("[DEBUG] FromModem lsf: %v, payload: % x, sid: %x, fn: %d", lsf, payload, sid, fn)
+	if lsf == nil {
+		return fmt.Errorf("nil lsf in SendToNetwork")
+	}
+	// log.Printf("[DEBUG] SendToNetwork lsf: %v, payload: % x, sid: %x, fn: %d", lsf, payload, sid, fn)
 	if lsf.LSFType() == m17.LSFTypePacket {
 		p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
 		log.Printf("[DEBUG] received packet from modem: %v", p)
 		// TODO: Handle error?
 		err = g.relay.SendPacket(p)
 	} else { // m17.LSFTypeStream
-		err = g.relay.SendStream(lsf, sid, fn, payload)
+		err = g.relay.SendStream(*lsf, sid, fn, payload)
 	}
 
 	return err
@@ -362,13 +372,13 @@ func (g *Gateway) Run() {
 	}()
 	d := m17.NewDecoder()
 	if g.modem != nil {
-		go d.DecodeSymbols(g.modem, g.FromModem)
+		go d.DecodeSymbols(g.modem, g.SendToNetwork)
 	} else {
 		rpt := &Repeater{
 			Repeat: 5,
 			Src:    g.in,
 		}
-		go d.DecodeSymbols(rpt, g.FromModem)
+		go d.DecodeSymbols(rpt, g.SendToNetwork)
 	}
 	// Run until we're terminated then clean up
 	log.Print("[DEBUG] client: Waiting for close signal")
