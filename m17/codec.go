@@ -100,8 +100,6 @@ var PacketPuncturePattern = PuncturePattern{true, true, true, true, true, true, 
 func syncDistance(symbols []Symbol, offset int) (float32, uint16, error) {
 	var lsf, pkt, stra, strb, str float64
 
-	// log.Printf("[DEBUG] offset: %d, symbols: %#v", offset, symbols)
-	// msg := "[DEBUG] sync: ["
 	for i, s := range symbols[offset : 16*5+offset] {
 		if i%5 == 0 {
 			v := float64(s)
@@ -115,8 +113,6 @@ func syncDistance(symbols []Symbol, offset int) (float32, uint16, error) {
 		}
 	}
 
-	// log.Printf("[DEBUG] offset: %d, symbols: %#v", offset, symbols)
-	// msg := "[DEBUG] sync: ["
 	for i, s := range symbols[960+offset : 960+16*5+offset] {
 		if i%5 == 0 {
 			v := float64(s)
@@ -128,8 +124,6 @@ func syncDistance(symbols []Symbol, offset int) (float32, uint16, error) {
 	lsf = math.Sqrt(lsf)
 	pkt = math.Sqrt(pkt)
 	str = math.Sqrt(stra + strb)
-	// bert = math.Sqrt(bert)
-	// fmt.Printf(msg+"] lsf: %3.5f, pkt: %3.5f\n", lsf, pkt)
 
 	switch min(lsf, pkt, str) {
 	case lsf:

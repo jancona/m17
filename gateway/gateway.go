@@ -4,7 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -206,13 +205,11 @@ func main() {
 	}
 
 	if *reset {
-		if modem != nil {
-			log.Print("[INFO] Resetting modem")
-			err = modem.Reset()
-			if err != nil {
-				log.Printf("[ERROR] Error resetting modem: %v", err)
-				os.Exit(1)
-			}
+		log.Print("[INFO] Resetting modem")
+		err = modem.Reset()
+		if err != nil {
+			log.Printf("[ERROR] Error resetting modem: %v", err)
+			os.Exit(1)
 		}
 		os.Exit(0)
 	}
@@ -244,7 +241,7 @@ func setupLogging(c config) {
 		Writer:   logWriter,
 	}
 	log.SetOutput(filter)
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	// log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.Print("[DEBUG] Debug is on")
 }
 
@@ -309,59 +306,15 @@ func (g *Gateway) SendToNetwork(lsf *m17.LSF, payload []byte, sid, fn uint16) er
 	// log.Printf("[DEBUG] SendToNetwork lsf: %v, payload: % x, sid: %x, fn: %d", lsf, payload, sid, fn)
 	if lsf.LSFType() == m17.LSFTypePacket {
 		p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
-		log.Printf("[DEBUG] received packet from modem: %v", p)
-		// TODO: Handle error?
+		log.Printf("[DEBUG] send packet to reflector/relay: %v", p)
 		err = g.relay.SendPacket(p)
 	} else { // m17.LSFTypeStream
 		err = g.relay.SendStream(*lsf, sid, fn, payload)
 	}
-
+	// TODO: Handle error?
 	return err
 }
 
-type Repeater struct {
-	Repeat int
-	extra  []byte
-	Src    io.Reader
-}
-
-func (r *Repeater) Read(p []byte) (n int, err error) {
-	l := len(p)
-	el := len(r.extra)
-	// log.Printf("[DEBUG] Attempting to read %d bytes, el: %d", l, el)
-	if el < l {
-		rl := (l - el) / 5
-		if rl%5 > 0 {
-			// make sure we have enough symbols
-			rl++
-		}
-		// Get whole symbols
-		rl += rl % 4
-		sBuff := make([]byte, rl)
-		// log.Printf("[DEBUG] Attempting to read %d bytes", len(sBuff))
-		nn, err := r.Src.Read(sBuff)
-		if err != nil {
-			log.Printf("[ERROR] Repeater Read failed: %v", err)
-			if nn == 0 {
-				return 0, err
-			}
-		}
-		// log.Printf("[DEBUG] Read %d bytes: % x", nn, sBuff)
-		if nn%4 != 0 {
-			panic("handle this!")
-		}
-		for i := 0; i < nn; i += 4 {
-			for range r.Repeat {
-				r.extra = append(r.extra, sBuff[i:i+4]...)
-			}
-		}
-		l = min(l, len(r.extra))
-	}
-	n = copy(p, r.extra[:l])
-	r.extra = r.extra[l:]
-	// log.Printf("[DEBUG] Returning %d bytes: % x", n, p)
-	return
-}
 func (g *Gateway) Run() {
 	signalChan := make(chan os.Signal, 1)
 	// handle responses from reflector
@@ -371,15 +324,7 @@ func (g *Gateway) Run() {
 		<-signalChan
 	}()
 	d := m17.NewDecoder()
-	if g.modem != nil {
-		go d.DecodeSymbols(g.modem, g.SendToNetwork)
-	} else {
-		rpt := &Repeater{
-			Repeat: 5,
-			Src:    g.in,
-		}
-		go d.DecodeSymbols(rpt, g.SendToNetwork)
-	}
+	go d.DecodeSymbols(g.modem, g.SendToNetwork)
 	// Run until we're terminated then clean up
 	log.Print("[DEBUG] client: Waiting for close signal")
 	// wait for a close signal then clean up

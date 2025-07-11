@@ -33,15 +33,14 @@ type Decoder struct {
 	frameData  []byte //decoded frame data, 206 bits, plus 4 flushing bits
 	packetData []byte //whole packet data
 
-	timeoutCnt    int
-	firstLSFFrame bool // Frame=0 of LSF=1
-	gotLSF        bool
-	lastPacketFN  int // last packet frame number received (-1 when idle)
-	lastStreamFN  int // last stream frame number received (-1 when idle)
-	lichParts     int
-	streamID      uint16
-	streamFN      uint16
-	lsfBytes      []byte
+	timeoutCnt   int
+	gotLSF       bool
+	lastPacketFN int // last packet frame number received (-1 when idle)
+	lastStreamFN int // last stream frame number received (-1 when idle)
+	lichParts    int
+	streamID     uint16
+	streamFN     uint16
+	lsfBytes     []byte
 }
 
 // 8 preamble symbols, 8 for the syncword, and 960 for the payload.
@@ -51,14 +50,13 @@ const symbolBufSize = 8*5 + 2*(8*5+4800/25*5) + 2 + 256
 
 func NewDecoder() *Decoder {
 	d := Decoder{
-		firstLSFFrame: true,
-		lastPacketFN:  -1,
-		lastStreamFN:  -1,
-		lsfBytes:      make([]byte, 30),
+		lastPacketFN: -1,
+		lastStreamFN: -1,
+		lsfBytes:     make([]byte, 30),
 	}
 	return &d
 }
-func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func(lsf *LSF, payload []byte, sid, fn uint16) error) error {
+func (d *Decoder) DecodeSymbols(in io.Reader, sendToNetwork func(lsf *LSF, payload []byte, sid, fn uint16) error) error {
 	var symbols []Symbol
 	var err error
 
@@ -67,7 +65,6 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func(lsf *LSF, payload [
 		if symbolBufSize-l >= 256 {
 			// refill the buffer
 			symbols = append(symbols, make([]Symbol, symbolBufSize-l)...)
-			// log.Printf("[DEBUG] refilling, reading %d symbols", symbolBufSize-l)
 			err = binary.Read(in, binary.LittleEndian, symbols[l:])
 			if err == io.EOF {
 				log.Printf("refill binary.Read EOF")
@@ -110,7 +107,7 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func(lsf *LSF, payload [
 					d.lichParts = 0x3F
 					d.streamFN = 0
 					d.streamID = uint16(rand.Intn(0x10000))
-					fromModem(d.lsf, nil, d.streamID, d.streamFN)
+					sendToNetwork(d.lsf, nil, d.streamID, d.streamFN)
 				} else { // packet mode
 					d.syncedType = PacketSync
 					d.packetData = make([]byte, 33*25)
@@ -158,7 +155,7 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func(lsf *LSF, payload [
 				// fprintf(stderr, " \033[93mContent\033[39m\n");
 				if CRC(d.packetData) == 0 {
 					// log.Printf("[DEBUG] d.lsf: %v, d.packetData: %v", d.lsf, d.packetData)
-					fromModem(d.lsf, d.packetData, 0, 0)
+					sendToNetwork(d.lsf, d.packetData, 0, 0)
 				} else {
 					log.Printf("[DEBUG] Bad CRC not forwarded: %x", CRC(d.packetData))
 				}
@@ -178,11 +175,9 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func(lsf *LSF, payload [
 			var vd float64
 			var fn uint16
 			d.frameData, lich, fn, lichCnt, vd = d.decodeStreamFrame(pld)
-			log.Printf("[DEBUG] frameData: [% 2x], lich: %x, lichCnt: %d, fn: %x, FN: %d, vd: %1.1f", d.frameData, lich, lichCnt, fn, (fn>>8)|((fn&0xFF)<<8), vd)
+			// log.Printf("[DEBUG] frameData: [% 2x], lich: %x, lichCnt: %d, fn: %x, FN: %d, vd: %1.1f", d.frameData, lich, lichCnt, fn, (fn>>8)|((fn&0xFF)<<8), vd)
 
-			log.Printf("[DEBUG] d.lastStreamFN: %d, fn: %d", d.lastStreamFN, fn)
 			if d.lastStreamFN != int(fn) {
-				log.Printf("[DEBUG] new frame, d.lichParts: %02x", d.lichParts)
 				if d.lichParts != 0x3F { //6 chunks = 0b111111
 					//reconstruct LSF chunk by chunk
 					copy(d.lsfBytes[lichCnt*5:lichCnt*5+5], lich)
@@ -203,14 +198,13 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func(lsf *LSF, payload [
 				}
 				log.Printf("[DEBUG] Received stream frame: FN:%04X, LICH_CNT:%d, Viterbi error: %1.1f", fn, lichCnt, vd)
 				if d.gotLSF {
-					log.Printf("[DEBUG] Sending stream frame")
+					// log.Printf("[DEBUG] Sending stream frame")
 					d.streamFN = (fn >> 8) | ((fn & 0xFF) << 8)
-					fromModem(d.lsf, d.frameData, d.streamID, d.streamFN)
+					sendToNetwork(d.lsf, d.frameData, d.streamID, d.streamFN)
+					d.timeoutCnt = 0
 				}
-
 				d.lastStreamFN = int(fn)
 			}
-			d.firstLSFFrame = false
 		default:
 			// No one read anything, so advance one symbol
 			symbols = symbols[1:]
@@ -222,7 +216,6 @@ func (d *Decoder) DecodeSymbols(in io.Reader, fromModem func(lsf *LSF, payload [
 			if d.timeoutCnt > 960*2 {
 				d.syncedType = 0
 				d.timeoutCnt = 0
-				d.firstLSFFrame = true
 				d.lastStreamFN = -1
 				d.lastPacketFN = -1
 				d.lichParts = 0
@@ -329,7 +322,6 @@ func (d *Decoder) decodeStreamFrame(pld []Symbol) (frameData []byte, lich []byte
 	frameData, e = vd.DecodePunctured(dSoftBit[96:], StreamPuncturePattern)
 
 	fn = (uint16(frameData[1]) << 8) | uint16(frameData[2])
-	log.Printf("[DEBUG] frameData[:3]: [% 02x]", frameData[:3])
 
 	//shift 1+2 positions left - get rid of the encoded flushing bits and FN
 	frameData = frameData[1+2:]
