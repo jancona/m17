@@ -178,7 +178,7 @@ func (d *Decoder) DecodeSymbols(in io.Reader, sendToNetwork func(lsf *LSF, paylo
 			// log.Printf("[DEBUG] frameData: [% 2x], lich: %x, lichCnt: %d, fn: %x, FN: %d, vd: %1.1f", d.frameData, lich, lichCnt, fn, (fn>>8)|((fn&0xFF)<<8), vd)
 
 			if d.lastStreamFN != int(fn) {
-				if d.lichParts != 0x3F { //6 chunks = 0b111111
+				if d.lichParts != 0x3F && lichCnt < 6 { //6 chunks = 0b111111
 					//reconstruct LSF chunk by chunk
 					copy(d.lsfBytes[lichCnt*5:lichCnt*5+5], lich)
 					d.lichParts |= (1 << lichCnt)
