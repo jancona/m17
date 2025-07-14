@@ -78,7 +78,7 @@ Usage of ./m17-text-cli:
 
 ### CC1200 Modem Emulator
 
-This program emulates the [CC1200 Modem firmware](https://github.com/M17-Project/CC1200_HAT-fw). It accepts samples fropm the gateway and echos them back. It's used for development of the gateway until I have a real CC1200 hat to test with.
+This program emulates the [CC1200 Modem firmware](https://github.com/M17-Project/CC1200_HAT-fw). It accepts samples from the gateway and echos them back. It was used for development of the gateway until I had a real CC1200 hat to test with.
 
 ## Library
 
