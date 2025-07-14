@@ -94,6 +94,7 @@ func (d *Decoder) DecodeSymbols(in io.Reader, sendToNetwork func(lsf *LSF, paylo
 				// } else if err != nil {
 				// 	// Was logged in extractPayload
 			}
+			d.gotLSF = false
 			d.lsf = decodeLSF(pld)
 			log.Printf("[DEBUG] Received RF LSF: %s", d.lsf)
 			if d.lsf.CheckCRC() {
@@ -193,6 +194,7 @@ func (d *Decoder) DecodeSymbols(in io.Reader, sendToNetwork func(lsf *LSF, paylo
 						} else {
 							log.Printf("[DEBUG] Stream LSF CRC error: %v", lsfB)
 							d.lichParts = 0
+							d.gotLSF = false
 						}
 					}
 				}

@@ -1,4 +1,4 @@
-module github.com/jancona/m17text
+module github.com/jancona/m17
 
 go 1.23.0
 

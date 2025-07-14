@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jancona/m17text/m17"
+	"github.com/jancona/m17"
 )
 
 var (

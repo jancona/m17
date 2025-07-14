@@ -10,7 +10,7 @@ import (
 	"syscall"
 
 	"github.com/hashicorp/logutils"
-	"github.com/jancona/m17text/m17"
+	"github.com/jancona/m17"
 	"gopkg.in/ini.v1"
 	// _ "net/http/pprof"
 )

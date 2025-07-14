@@ -6,7 +6,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/jancona/m17text/m17"
+	"github.com/jancona/m17"
 )
 
 type ui struct {
