@@ -8,7 +8,7 @@ There are several tools and a library here:
 
 ### M17 Gateway
 
-[./m17-gateway/](./cmd/m17-gateway/) bridges between RF clients and relays/reflectors. It currently supports the [CC1200 Pi HAT](https://github.com/M17-Project/CC1200_HAT-hw). When run on a Raspberry Pi with a CC1200 HAT, it can forward M17 voice and packet traffic to and from a reflector/relay, making the Pi/CC1200 HAT an M17 voice and packet hotspot. 
+[m17-gateway](./cmd/m17-gateway/) bridges between RF clients and relays/reflectors. It currently supports the [CC1200 Pi HAT](https://github.com/M17-Project/CC1200_HAT-hw). When run on a Raspberry Pi with a CC1200 HAT, it can forward M17 voice and packet traffic to and from a reflector/relay, making the Pi/CC1200 HAT an M17 voice and packet hotspot. 
 
 To build the gateway just run `go build` in the `m17-gateway` directory. Because Go natively supports cross-compilation, you can build a Raspberry Pi executable by running `GOOS=linux GOARCH=arm GOARM=6 go build`, the using `scp` to copy the resulting executable to the Pi.
 
@@ -41,7 +41,7 @@ Bu default, the gateway looks for configuration in `gateway.ini` in the working 
 
 ### GUI Messaging Client
 
-[m17-messaging](./cmd/m17-messaging/) is a cross-platform GUI network messaging client. It's based on [Fybro](https://github.com/andydotxyz/fybro), a  messaging app built using [Fyne](https://fyne.io/), a fraemwork for building multi-platform GUI apps in Go. To build the client just run `go build` in the `m17-messaging` directory. For more packaging options, see the [Fyne docs](https://docs.fyne.io/started/packaging).
+[m17-message](./cmd/m17-message/) is a cross-platform GUI network messaging client. It's based on [Fybro](https://github.com/andydotxyz/fybro), a  messaging app built using [Fyne](https://fyne.io/), a fraemwork for building multi-platform GUI apps in Go. To build the client just run `go build` in the `m17-message` directory. For more packaging options, see the [Fyne docs](https://docs.fyne.io/started/packaging).
 
 ### CLI Messaging Client
 
