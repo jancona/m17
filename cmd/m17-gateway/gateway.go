@@ -343,6 +343,9 @@ func (g *Gateway) Close() {
 	log.Print("[DEBUG] Gateway.Close()")
 	g.done = true
 	g.relay.Close()
+	if g.modem != nil {
+		g.modem.Close()
+	}
 	if g.in != os.Stdin {
 		g.in.Close()
 	}
