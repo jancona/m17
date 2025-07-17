@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"time"
 )
@@ -34,9 +35,10 @@ type Relay struct {
 	packetHandler   func(Packet) error
 	streamHandler   func(StreamDatagram) error
 	done            bool
+	dashLog         *slog.Logger
 }
 
-func NewRelay(server string, port uint, module string, callsign string, packetHandler func(Packet) error, streamHandler func(StreamDatagram) error) (*Relay, error) {
+func NewRelay(server string, port uint, module string, callsign string, dashLog *slog.Logger, packetHandler func(Packet) error, streamHandler func(StreamDatagram) error) (*Relay, error) {
 	cs, err := EncodeCallsign(callsign)
 	if err != nil {
 		return nil, fmt.Errorf("bad callsign %s: %w", callsign, err)
@@ -58,6 +60,7 @@ func NewRelay(server string, port uint, module string, callsign string, packetHa
 		EncodedCallsign: *cs,
 		packetHandler:   packetHandler,
 		streamHandler:   streamHandler,
+		dashLog:         dashLog,
 	}
 	return &c, nil
 }
@@ -129,12 +132,18 @@ func (c *Relay) Handle() {
 				} else {
 					// log.Printf("[DEBUG] sd: %#v", sd)
 					c.streamHandler(sd)
+					if c.dashLog != nil {
+						c.dashLog.Info("", "type", "Internet", "subtype", "Voice", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
+					}
 				}
 			}
 		case magicM17Packet: // M17 packet
 			if c.packetHandler != nil {
 				p := NewPacketFromBytes(buffer[4:])
 				c.packetHandler(p)
+				if c.dashLog != nil {
+					c.dashLog.Info("", "type", "Internet", "subtype", "Packet", "src", p.LSF.Src.Callsign(), "dst", p.LSF.Dst.Callsign(), "can", p.LSF.CAN())
+				}
 			}
 		}
 	}

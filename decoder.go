@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"math/rand"
 )
 
@@ -41,6 +42,7 @@ type Decoder struct {
 	streamID     uint16
 	streamFN     uint16
 	lsfBytes     []byte
+	dashLog      *slog.Logger
 }
 
 // 8 preamble symbols, 8 for the syncword, and 960 for the payload.
@@ -48,11 +50,12 @@ type Decoder struct {
 // plus some extra so we can make larger reads
 const symbolBufSize = 8*5 + 2*(8*5+4800/25*5) + 2 + 256
 
-func NewDecoder() *Decoder {
+func NewDecoder(dashLog *slog.Logger) *Decoder {
 	d := Decoder{
 		lastPacketFN: -1,
 		lastStreamFN: -1,
 		lsfBytes:     make([]byte, 30),
+		dashLog:      dashLog,
 	}
 	return &d
 }
@@ -109,6 +112,9 @@ func (d *Decoder) DecodeSymbols(in io.Reader, sendToNetwork func(lsf *LSF, paylo
 					d.streamFN = 0
 					d.streamID = uint16(rand.Intn(0x10000))
 					sendToNetwork(d.lsf, nil, d.streamID, d.streamFN)
+					if d.dashLog != nil {
+						d.dashLog.Info("", "type", "RF", "subtype", "Voice", "src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN())
+					}
 				} else { // packet mode
 					d.syncedType = PacketSync
 					d.packetData = make([]byte, 33*25)
@@ -157,6 +163,9 @@ func (d *Decoder) DecodeSymbols(in io.Reader, sendToNetwork func(lsf *LSF, paylo
 				if CRC(d.packetData) == 0 {
 					// log.Printf("[DEBUG] d.lsf: %v, d.packetData: %v", d.lsf, d.packetData)
 					sendToNetwork(d.lsf, d.packetData, 0, 0)
+					if d.dashLog != nil {
+						d.dashLog.Info("", "type", "RF", "subtype", "Packet", "src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN())
+					}
 				} else {
 					log.Printf("[DEBUG] Bad CRC not forwarded: %x", CRC(d.packetData))
 				}

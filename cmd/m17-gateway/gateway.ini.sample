@@ -1,6 +1,7 @@
 [General]
 # Example: N1ADJ or N1ADJ G
 Callsign=
+DashboardLog=dashboard.log
 
 [Radio]
 # Hertz

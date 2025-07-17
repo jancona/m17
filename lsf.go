@@ -9,6 +9,12 @@ type LSFType byte
 type LSFDataType byte
 type LSFEncryptionType byte
 type LSFEncryptionSubtype byte
+type EncodedCallsign [EncodedCallsignLen]byte
+
+func (e EncodedCallsign) Callsign() string {
+	cs, _ := DecodeCallsign(e[:])
+	return cs
+}
 
 const (
 	LSFTypePacket LSFType = iota
@@ -45,8 +51,8 @@ const (
 
 // Link Setup Frame
 type LSF struct {
-	Dst  [EncodedCallsignLen]byte
-	Src  [EncodedCallsignLen]byte
+	Dst  EncodedCallsign
+	Src  EncodedCallsign
 	Type [typeLen]byte
 	Meta [metaLen]byte
 	CRC  [CRCLen]byte
@@ -142,13 +148,15 @@ func (l *LSF) LSFType() LSFType {
 	return LSFType(l.Type[1] & 0x1)
 }
 
+func (l *LSF) CAN() byte {
+	return (l.Type[1] >> 7) & 0xF
+}
+
 func (l LSF) String() string {
-	dst, _ := DecodeCallsign(l.Dst[:])
-	src, _ := DecodeCallsign(l.Src[:])
 	return fmt.Sprintf(`{
 	Dst: %s,
 	Src: %s,
 	Type: %#v,
 	Meta: %#v,
-	CRC: %#v`, dst, src, l.Type, l.Meta, l.CRC)
+	CRC: %#v`, l.Dst.Callsign(), l.Src.Callsign(), l.Type, l.Meta, l.CRC)
 }

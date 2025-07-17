@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,6 +18,7 @@ import (
 
 type config struct {
 	callsign        string
+	dashboardLogger *slog.Logger
 	duplex          bool
 	rxFrequency     uint32
 	txFrequency     uint32
@@ -46,6 +48,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		log.Fatalf("Fail to read config from %s: %v", iniFile, err)
 	}
 	callsign := cfg.Section("General").Key("Callsign").String()
+	dashboardLog := cfg.Section("General").Key("DashboardLog").String()
 	rxFrequency, rxFrequencyErr := cfg.Section("Radio").Key("RXFrequency").Uint()
 	txFrequency, txFrequencyErr := cfg.Section("Radio").Key("TXFrequency").Uint()
 	power, powerErr := cfg.Section("Radio").Key("Power").Float64()
@@ -108,6 +111,24 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		symbolsOut, symbolsOutErr = os.Create(outFile)
 	}
 
+	var dashboardLogFile *os.File
+	var dashboardLogErr error
+	var dashboardLogger *slog.Logger
+	if dashboardLog != "" {
+		dashboardLogFile, dashboardLogErr = os.OpenFile(dashboardLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if dashboardLogFile != nil {
+			opts := &slog.HandlerOptions{
+				ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+					if a.Key == slog.LevelKey || a.Key == slog.MessageKey {
+						return slog.Attr{} // Remove the attribute
+					}
+					return a
+				},
+			}
+			dashboardLogger = slog.New(slog.NewTextHandler(dashboardLogFile, opts))
+		}
+	}
+
 	err = errors.Join(
 		rxFrequencyErr,
 		txFrequencyErr,
@@ -126,6 +147,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		logLevelErr,
 		symbolsInErr,
 		symbolsOutErr,
+		dashboardLogErr,
 	)
 
 	return config{
@@ -150,6 +172,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		boot0Pin:        boot0Pin,
 		symbolsIn:       symbolsIn,
 		symbolsOut:      symbolsOut,
+		dashboardLogger: dashboardLogger,
 	}, err
 }
 
@@ -253,28 +276,30 @@ type Gateway struct {
 	Port   uint
 	Module string
 
-	modem  m17.Modem
-	in     *os.File
-	out    *os.File
-	relay  *m17.Relay
-	duplex bool
-	done   bool
+	modem           m17.Modem
+	in              *os.File
+	out             *os.File
+	relay           *m17.Relay
+	duplex          bool
+	done            bool
+	dashboardLogger *slog.Logger
 }
 
 func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 	var err error
 
 	g := Gateway{
-		Name:   cfg.reflectorName,
-		Server: cfg.reflectorAddr,
-		Port:   cfg.reflectorPort,
-		Module: cfg.reflectorModule,
-		modem:  modem,
-		duplex: cfg.duplex,
+		Name:            cfg.reflectorName,
+		Server:          cfg.reflectorAddr,
+		Port:            cfg.reflectorPort,
+		Module:          cfg.reflectorModule,
+		modem:           modem,
+		duplex:          cfg.duplex,
+		dashboardLogger: cfg.dashboardLogger,
 	}
 
 	log.Printf("[DEBUG] Connecting to %s:%d, module %s", g.Server, g.Port, g.Module)
-	g.relay, err = m17.NewRelay(g.Server, g.Port, g.Module, cfg.callsign, g.TransmitPacket, g.TransmitVoiceStream)
+	g.relay, err = m17.NewRelay(g.Server, g.Port, g.Module, cfg.callsign, cfg.dashboardLogger, g.TransmitPacket, g.TransmitVoiceStream)
 	if err != nil {
 		return nil, fmt.Errorf("error creating relay: %v", err)
 	}
@@ -323,7 +348,7 @@ func (g *Gateway) Run() {
 		// When Handle exits, we're done
 		<-signalChan
 	}()
-	d := m17.NewDecoder()
+	d := m17.NewDecoder(g.dashboardLogger)
 	go d.DecodeSymbols(g.modem, g.SendToNetwork)
 	// Run until we're terminated then clean up
 	log.Print("[DEBUG] client: Waiting for close signal")
