@@ -14,7 +14,6 @@ mkdir -p "${BUILD_DIR}"
 
 # Create directory structure
 mkdir -p "${BUILD_DIR}/opt/m17/m17-gateway"
-mkdir -p "${BUILD_DIR}/opt/m17/etc"
 mkdir -p "${BUILD_DIR}/etc/systemd/system"
 mkdir -p "${BUILD_DIR}/DEBIAN"
 
@@ -22,7 +21,7 @@ mkdir -p "${BUILD_DIR}/DEBIAN"
 cp "${PACKAGE_NAME}" "${BUILD_DIR}/opt/m17/m17-gateway/"
 
 # Copy configuration file
-cp "${PACKAGE_NAME}.ini.sample" "${BUILD_DIR}/opt/m17/m17-gateway/"
+cp "${PACKAGE_NAME}.ini.sample" "${BUILD_DIR}/etc/"
 
 # Copy systemd service file
 cp "${PACKAGE_NAME}.service" "${BUILD_DIR}/etc/systemd/system/"

@@ -13,15 +13,10 @@ fi
 
 # Create directories
 mkdir -p /opt/m17/m17-gateway
-mkdir -p /opt/m17/etc
 
 # Set permissions
-chown -R m17-gateway:m17-gateway /opt/m17
+chown m17-gateway:m17-gateway /opt/m17/m17-gateway
 chmod 755 /opt/m17/m17-gateway
-chmod 755 /opt/m17/etc
-
-# Copy the sample config file to its proper location
-cp /opt/m17/m17-gateway/m17-gateway.ini.sample /opt/m17/etc/m17-gateway.ini
 
 # Make binary executable
 chmod +x /opt/m17/m17-gateway/m17-gateway
@@ -43,18 +38,18 @@ if [ -n "$CALLSIGN" ]; then
     awk -v callsign="$CALLSIGN" '
         /^Callsign=CALLSIGN_PLACEHOLDER/ { print "Callsign=" callsign; next }
         { print }
-    ' /opt/m17/etc/m17-gateway.ini > /opt/m17/etc/m17-gateway.ini.tmp
-    
-    mv /opt/m17/etc/m17-gateway.ini.tmp /opt/m17/etc/m17-gateway.ini
+    ' /etc/m17-gateway.ini.sample > /etc/m17-gateway.ini
+    rm /etc/m17-gateway.ini.sample
     echo "Configuration updated with callsign: $CALLSIGN"
 else
-    echo "No callsign provided. Please edit /opt/m17/etc/m17-gateway.ini manually."
+    mv /etc/m17-gateway.ini.sample /etc/m17-gateway.ini
+    echo "No callsign provided. Please edit /etc/m17-gateway.ini manually."
     echo "Change 'CALLSIGN_PLACEHOLDER' to your actual callsign."
 fi
 
 # Set config file ownership and permissions (readable by service user)
-chown m17-gateway:m17-gateway /opt/m17/etc/m17-gateway.ini
-chmod 644 /opt/m17/etc/m17-gateway.ini
+chown m17-gateway:m17-gateway /etc/m17-gateway.ini
+chmod 644 /etc/m17-gateway.ini
 
 # Reload systemd and enable the service
 systemctl daemon-reload
@@ -62,7 +57,7 @@ systemctl enable m17-gateway.service
 
 echo
 echo "M17 Gateway installed successfully!"
-echo "Configuration file: /opt/m17/etc/m17-gateway.ini"
+echo "Configuration file: /etc/m17-gateway.ini"
 echo "View logs with: journalctl -u m17-gateway"
 echo "Start with: sudo systemctl start m17-gateway"
 echo "Check status with: sudo systemctl status m17-gateway"
