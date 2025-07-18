@@ -2,37 +2,8 @@
 
 set -e
 
-# Function to prompt for callsign
-prompt_for_callsign() {
-    local callsign=""
-    while [ -z "$callsign" ]; do
-        echo
-        echo "M17 Gateway Configuration"
-        echo "========================="
-        echo "Please enter your amateur radio callsign (e.g., N1ADJ or N1ADJ G):"
-        read -r callsign
-        
-        if [ -z "$callsign" ]; then
-            echo "Error: Callsign cannot be empty. Please try again."
-        else
-            # Basic validation - check for valid callsign format
-            if [[ "$callsign" =~ ^[A-Z0-9]{3,}([[:space:]][A-Z])?$ ]]; then
-                echo "Callsign set to: $callsign"
-                break
-            else
-                echo "Warning: '$callsign' doesn't look like a typical amateur radio callsign."
-                echo "Continue anyway? (y/n)"
-                read -r confirm
-                if [[ "$confirm" =~ ^[Yy]$ ]]; then
-                    break
-                else
-                    callsign=""
-                fi
-            fi
-        fi
-    done
-    echo "$callsign"
-}
+# Source debconf library
+. /usr/share/debconf/confmodule
 
 # Create service user and group if they don't exist
 if ! getent group m17-gateway >/dev/null; then
@@ -58,18 +29,16 @@ chmod 644 /opt/m17/etc/m17-gateway.ini
 # Make binary executable
 chmod +x /opt/m17/m17-gateway/m17-gateway
 
-# Prompt for callsign and update configuration
-if [ -t 0 ]; then
-    # Interactive installation
-    CALLSIGN=$(prompt_for_callsign)
-    # Update the configuration file with the user's callsign
+# Get the callsign from debconf
+db_get m17-gateway/callsign || true
+CALLSIGN="$RET"
+
+# Update the configuration file with the user's callsign
+if [ -n "$CALLSIGN" ]; then
     sed -i "s/CALLSIGN_PLACEHOLDER/$CALLSIGN/" /opt/m17/etc/m17-gateway.ini
     echo "Configuration updated with callsign: $CALLSIGN"
 else
-    # Non-interactive installation (e.g., automated scripts)
-    echo "Warning: Non-interactive installation detected."
-    echo "Please manually edit /opt/m17/etc/m17-gateway.ini and set your callsign."
-    echo "Change 'CALLSIGN_PLACEHOLDER' to your actual callsign."
+    echo "No callsign provided. Please edit /opt/m17/etc/m17-gateway.ini manually."
 fi
 
 # Reload systemd and enable the service
@@ -82,9 +51,6 @@ echo "Configuration file: /opt/m17/etc/m17-gateway.ini"
 echo "View logs with: journalctl -u m17-gateway"
 echo "Start with: sudo systemctl start m17-gateway"
 echo "Check status with: sudo systemctl status m17-gateway"
-echo
-if [ -t 0 ]; then
-    echo "Your callsign has been configured. You can modify other settings in the config file if needed."
-else
-    echo "IMPORTANT: Remember to set your callsign in /opt/m17/etc/m17-gateway.ini before starting the service!"
-fi
+
+# Clean up debconf database
+db_stop

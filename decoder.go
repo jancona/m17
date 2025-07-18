@@ -185,7 +185,7 @@ func (d *Decoder) DecodeSymbols(in io.Reader, sendToNetwork func(lsf *LSF, paylo
 			var vd float64
 			var fn uint16
 			d.frameData, lich, fn, lichCnt, vd = d.decodeStreamFrame(pld)
-			// log.Printf("[DEBUG] frameData: [% 2x], lich: %x, lichCnt: %d, fn: %x, FN: %d, vd: %1.1f", d.frameData, lich, lichCnt, fn, (fn>>8)|((fn&0xFF)<<8), vd)
+			log.Printf("[DEBUG] frameData: [% 2x], lich: %x, lichCnt: %d, fn: %x, vd: %1.1f", d.frameData, lich, lichCnt, fn, vd)
 
 			if d.lastStreamFN != int(fn) {
 				if d.lichParts != 0x3F && lichCnt < 6 { //6 chunks = 0b111111

@@ -1,0 +1,10 @@
+#!/bin/bash
+
+set -e
+
+# Source debconf library
+. /usr/share/debconf/confmodule
+
+# Ask for the callsign
+db_input medium m17-gateway/callsign || true
+db_go || true

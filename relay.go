@@ -83,7 +83,7 @@ func (c *Relay) Connect() error {
 	if err != nil {
 		return fmt.Errorf("error sending CONN: %w", err)
 	}
-	log.Printf("[DEBUG] Connected to %s:%d", c.Server, c.Port)
+	log.Printf("[DEBUG] Sent connect to %s:%d", c.Server, c.Port)
 	return nil
 }
 func (c *Relay) Close() error {
@@ -113,6 +113,7 @@ func (c *Relay) Handle() {
 		switch magic {
 		case magicACKN:
 			c.connected = true
+			log.Printf("[DEBUG] Received ACKN")
 		case magicNACK:
 			c.connected = false
 			log.Print("[INFO] Received NACK, disconnecting")
