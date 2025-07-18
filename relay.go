@@ -36,6 +36,7 @@ type Relay struct {
 	streamHandler   func(StreamDatagram) error
 	done            bool
 	dashLog         *slog.Logger
+	lastStreamID    uint16
 }
 
 func NewRelay(server string, port uint, module string, callsign string, dashLog *slog.Logger, packetHandler func(Packet) error, streamHandler func(StreamDatagram) error) (*Relay, error) {
@@ -61,6 +62,7 @@ func NewRelay(server string, port uint, module string, callsign string, dashLog 
 		packetHandler:   packetHandler,
 		streamHandler:   streamHandler,
 		dashLog:         dashLog,
+		lastStreamID:    0xFFFF,
 	}
 	return &c, nil
 }
@@ -132,8 +134,13 @@ func (c *Relay) Handle() {
 				} else {
 					// log.Printf("[DEBUG] sd: %#v", sd)
 					c.streamHandler(sd)
-					if c.dashLog != nil {
-						c.dashLog.Info("", "type", "Internet", "subtype", "Voice", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
+					if c.dashLog != nil && c.lastStreamID != sd.StreamID {
+						c.dashLog.Info("", "type", "Internet", "subtype", "Voice Start", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
+						c.lastStreamID = sd.StreamID
+					}
+					if c.dashLog != nil && sd.LastFrame {
+						c.dashLog.Info("", "type", "Internet", "subtype", "Voice End", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
+						c.lastStreamID = 0xFFFF
 					}
 				}
 			}

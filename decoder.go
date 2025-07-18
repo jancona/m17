@@ -113,7 +113,7 @@ func (d *Decoder) DecodeSymbols(in io.Reader, sendToNetwork func(lsf *LSF, paylo
 					d.streamID = uint16(rand.Intn(0x10000))
 					sendToNetwork(d.lsf, nil, d.streamID, d.streamFN)
 					if d.dashLog != nil {
-						d.dashLog.Info("", "type", "RF", "subtype", "Voice", "src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN())
+						d.dashLog.Info("", "type", "RF", "subtype", "Voice Start", "src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN())
 					}
 				} else { // packet mode
 					d.syncedType = PacketSync
@@ -210,9 +210,14 @@ func (d *Decoder) DecodeSymbols(in io.Reader, sendToNetwork func(lsf *LSF, paylo
 				log.Printf("[DEBUG] Received stream frame: FN:%04X, LICH_CNT:%d, Viterbi error: %1.1f", fn, lichCnt, vd)
 				if d.gotLSF {
 					// log.Printf("[DEBUG] Sending stream frame")
+					// Not sure why we have to flip the bytes here
 					d.streamFN = (fn >> 8) | ((fn & 0xFF) << 8)
 					sendToNetwork(d.lsf, d.frameData, d.streamID, d.streamFN)
 					d.timeoutCnt = 0
+					// This doesn't work because the high bit is never set in actual frams received from my CS7000
+					if d.dashLog != nil && fn&0x8000 == 0x8000 {
+						d.dashLog.Info("", "type", "RF", "subtype", "Voice End", "src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN())
+					}
 				}
 				d.lastStreamFN = int(fn)
 			}

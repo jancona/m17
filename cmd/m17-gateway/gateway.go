@@ -125,7 +125,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 					return a
 				},
 			}
-			dashboardLogger = slog.New(slog.NewTextHandler(dashboardLogFile, opts))
+			dashboardLogger = slog.New(slog.NewJSONHandler(dashboardLogFile, opts))
 		}
 	}
 
