@@ -22,7 +22,7 @@ mkdir -p "${BUILD_DIR}/DEBIAN"
 cp "${PACKAGE_NAME}" "${BUILD_DIR}/opt/m17/m17-gateway/"
 
 # Copy configuration file
-cp "${PACKAGE_NAME}.ini" "${BUILD_DIR}/opt/m17/etc/"
+cp "${PACKAGE_NAME}.ini.sample" "${BUILD_DIR}/opt/m17/etc/${PACKAGE_NAME}.ini"
 
 # Copy systemd service file
 cp "${PACKAGE_NAME}.service" "${BUILD_DIR}/etc/systemd/system/"

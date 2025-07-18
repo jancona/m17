@@ -2,16 +2,13 @@
 
 set -e
 
-# Source debconf library
-. /usr/share/debconf/confmodule
-
 # Create service user and group if they don't exist
 if ! getent group m17-gateway >/dev/null; then
     groupadd --system m17-gateway
 fi
 
 if ! getent passwd m17-gateway >/dev/null; then
-    useradd --system --gid m17-gateway --home-dir /opt/m17/m17-gateway --shell /bin/false m17-gateway
+    useradd --system --gid m17-gateway --groups dialout,gpio --home-dir /opt/m17/m17-gateway --shell /bin/false m17-gateway
 fi
 
 # Create directories
@@ -29,16 +26,32 @@ chmod 644 /opt/m17/etc/m17-gateway.ini
 # Make binary executable
 chmod +x /opt/m17/m17-gateway/m17-gateway
 
-# Get the callsign from debconf
-db_get m17-gateway/callsign || true
-CALLSIGN="$RET"
+# Prompt for callsign if we're in an interactive terminal
+CALLSIGN=""
+if [ -t 0 ]; then
+    echo
+    echo "M17 Gateway Configuration"
+    echo "========================="
+    echo "Please enter your amateur radio callsign (e.g., N1ADJ or N1ADJ G):"
+    echo "(Leave blank if you want to configure this manually later)"
+    read -r CALLSIGN
+fi
 
 # Update the configuration file with the user's callsign
 if [ -n "$CALLSIGN" ]; then
-    sed -i "s/CALLSIGN_PLACEHOLDER/$CALLSIGN/" /opt/m17/etc/m17-gateway.ini
+    # Use awk to replace the placeholder - more robust than sed for this case
+    awk -v callsign="$CALLSIGN" '
+        /^Callsign=CALLSIGN_PLACEHOLDER/ { print "Callsign=" callsign; next }
+        { print }
+    ' /opt/m17/etc/m17-gateway.ini > /opt/m17/etc/m17-gateway.ini.tmp
+    
+    mv /opt/m17/etc/m17-gateway.ini.tmp /opt/m17/etc/m17-gateway.ini
+    chmod 644 /opt/m17/etc/m17-gateway.ini
+    chown m17-gateway:m17-gateway /opt/m17/etc/m17-gateway.ini
     echo "Configuration updated with callsign: $CALLSIGN"
 else
     echo "No callsign provided. Please edit /opt/m17/etc/m17-gateway.ini manually."
+    echo "Change 'CALLSIGN_PLACEHOLDER' to your actual callsign."
 fi
 
 # Reload systemd and enable the service
@@ -51,6 +64,3 @@ echo "Configuration file: /opt/m17/etc/m17-gateway.ini"
 echo "View logs with: journalctl -u m17-gateway"
 echo "Start with: sudo systemctl start m17-gateway"
 echo "Check status with: sudo systemctl status m17-gateway"
-
-# Clean up debconf database
-db_stop

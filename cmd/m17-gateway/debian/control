@@ -3,7 +3,7 @@ Version: VERSION_PLACEHOLDER
 Section: utils
 Priority: optional
 Architecture: arm64
-Depends: systemd, debconf
+Depends: systemd
 Maintainer: Jim Ancona, N1ADJ <jim@anconafamily.com>
 Description: M17 Gateway for Raspberry Pi
  M17 Gateway service that runs as a systemd service on Raspberry Pi.
