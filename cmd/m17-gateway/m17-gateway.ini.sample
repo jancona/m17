@@ -1,7 +1,7 @@
 [General]
 # Example: N1ADJ or N1ADJ G
-Callsign=
-DashboardLog=dashboard.log
+Callsign=CALLSIGN_PLACEHOLDER
+# DashboardLog=/opt/m17/dashboard/dashboard.log
 
 [Radio]
 # Hertz

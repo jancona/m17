@@ -1,0 +1,11 @@
+Package: m17-gateway
+Version: VERSION_PLACEHOLDER
+Section: utils
+Priority: optional
+Architecture: arm64
+Depends: systemd
+Maintainer: Your Name <your.email@example.com>
+Description: M17 Gateway for Raspberry Pi
+ M17 Gateway service that runs as a systemd service on Raspberry Pi.
+ This package includes the binary, configuration file, and systemd service configuration.
+ Built for 64-bit Raspberry Pi OS (Bookworm).

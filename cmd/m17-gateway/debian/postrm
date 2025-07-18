@@ -1,0 +1,19 @@
+#!/bin/bash
+
+set -e
+
+if [ "$1" = "purge" ]; then
+    # Remove service user and group
+    if getent passwd m17-gateway >/dev/null; then
+        userdel m17-gateway
+    fi
+    
+    if getent group m17-gateway >/dev/null; then
+        groupdel m17-gateway
+    fi
+    
+    # Remove directories
+    rm -rf /opt/m17/m17-gateway
+    
+    echo "M17 Gateway service and user data removed."
+fi

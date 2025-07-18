@@ -1,0 +1,14 @@
+#!/bin/bash
+
+set -e
+
+# Stop and disable the service
+if systemctl is-active --quiet m17-gateway.service; then
+    systemctl stop m17-gateway.service
+fi
+
+if systemctl is-enabled --quiet m17-gateway.service; then
+    systemctl disable m17-gateway.service
+fi
+
+systemctl daemon-reload

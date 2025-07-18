@@ -1,0 +1,24 @@
+[Unit]
+Description=M17 Gateway Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=m17-gateway
+Group=m17-gateway
+WorkingDirectory=/opt/m17/m17-gateway
+ExecStart=/opt/m17/m17-gateway/m17-gateway
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
