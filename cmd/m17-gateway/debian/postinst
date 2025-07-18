@@ -21,30 +21,33 @@ chmod 755 /opt/m17/m17-gateway
 # Make binary executable
 chmod +x /opt/m17/m17-gateway/m17-gateway
 
-# Prompt for callsign if we're in an interactive terminal
-CALLSIGN=""
-if [ -t 0 ]; then
-    echo
-    echo "M17 Gateway Configuration"
-    echo "========================="
-    echo "Please enter your amateur radio callsign (e.g., N1ADJ or N1ADJ G):"
-    echo "(Leave blank if you want to configure this manually later)"
-    read -r CALLSIGN
-fi
+# Only modify m17-gateway.ini if it doesn't exist, i.e. this is an upgrade
+if [ ! -f /etc/m17-gateway.ini ]; then
+    # Prompt for callsign if we're in an interactive terminal
+    CALLSIGN=""
+    if [ -t 0 ]; then
+        echo
+        echo "M17 Gateway Configuration"
+        echo "========================="
+        echo "Please enter your amateur radio callsign (e.g., N1ADJ or N1ADJ G):"
+        echo "(Leave blank if you want to configure this manually later)"
+        read -r CALLSIGN
+    fi
 
-# Update the configuration file with the user's callsign
-if [ -n "$CALLSIGN" ]; then
-    # Use awk to replace the placeholder - more robust than sed for this case
-    awk -v callsign="$CALLSIGN" '
-        /^Callsign=CALLSIGN_PLACEHOLDER/ { print "Callsign=" callsign; next }
-        { print }
-    ' /etc/m17-gateway.ini.sample > /etc/m17-gateway.ini
-    rm /etc/m17-gateway.ini.sample
-    echo "Configuration updated with callsign: $CALLSIGN"
-else
-    mv /etc/m17-gateway.ini.sample /etc/m17-gateway.ini
-    echo "No callsign provided. Please edit /etc/m17-gateway.ini manually."
-    echo "Change 'CALLSIGN_PLACEHOLDER' to your actual callsign."
+    # Update the configuration file with the user's callsign
+    if [ -n "$CALLSIGN" ]; then
+        # Use awk to replace the placeholder - more robust than sed for this case
+        awk -v callsign="$CALLSIGN" '
+            /^Callsign=CALLSIGN_PLACEHOLDER/ { print "Callsign=" callsign; next }
+            { print }
+        ' /etc/m17-gateway.ini.sample > /etc/m17-gateway.ini
+        rm /etc/m17-gateway.ini.sample
+        echo "Configuration updated with callsign: $CALLSIGN"
+    else
+        mv /etc/m17-gateway.ini.sample /etc/m17-gateway.ini
+        echo "No callsign provided. Please edit /etc/m17-gateway.ini manually."
+        echo "Change 'CALLSIGN_PLACEHOLDER' to your actual callsign."
+    fi
 fi
 
 # Set config file ownership and permissions (readable by service user)

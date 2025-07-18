@@ -14,6 +14,9 @@ if [ "$1" = "purge" ]; then
     
     # Remove directories
     rm -rf /opt/m17/m17-gateway
-    
+
+    # Remove config
+    rm -f /etc/m17-gateway.ini
+
     echo "M17 Gateway service and user data removed."
 fi
