@@ -242,7 +242,7 @@ func (s *m17Server) login(prefix string, u *ui) {
 func (s *m17Server) doConnect(name string, server string, port uint, module string, u *ui) {
 	var err error
 	log.Printf("Connecting to %s:%d %s, callsign %s", server, port, module, s.callsign)
-	s.relay, err = m17.NewRelay(server, port, module, s.callsign, s.handleM17, nil)
+	s.relay, err = m17.NewRelay(server, port, module, s.callsign, nil, s.handleM17, nil)
 	if err != nil {
 		log.Printf("fail to connect create client: %v", err)
 	}
