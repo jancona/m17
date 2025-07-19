@@ -1,6 +1,6 @@
 module github.com/jancona/m17
 
-go 1.24.0
+go 1.24
 
 require github.com/hashicorp/logutils v1.0.0
 
