@@ -105,17 +105,15 @@ const (
 )
 
 type MMDVMConfig struct {
-	duplex      bool
-	rxInvert    bool
-	txInvert    bool
-	pttInvert   bool
-	debug       bool
-	txDCOffset  byte
-	txDelay     byte
-	rxLevel     float32
-	cwIdTXLevel float32
-	rxDCOffset  byte
-	fmTXLevel   float32
+	duplex     bool
+	rxInvert   bool
+	txInvert   bool
+	pttInvert  bool
+	debug      bool
+	txDCOffset byte
+	txDelay    byte
+	rxLevel    float32
+	rxDCOffset byte
 
 	m17Enabled bool
 	m17TXLevel float32
@@ -158,6 +156,17 @@ func NewMMDVMModem(
 	if speedErr == nil && !slices.Contains(mmdvmValidSpeeds, speed) {
 		speedErr = fmt.Errorf("modem Speed value is %d, must be one of %d", speed, mmdvmValidSpeeds)
 	}
+	// Defaults here are values that typically work
+	rxInvert := modemCfg.Key("RXInvert").MustBool(false)
+	txInvert := modemCfg.Key("TXInvert").MustBool(true)
+	pttInvert := modemCfg.Key("PTTInvert").MustBool(false)
+	debug := modemCfg.Key("Debug").MustBool(false)
+	txDCOffset := modemCfg.Key("TXDCOffset").MustUint(0)
+	txDelay := modemCfg.Key("TXDelay").MustUint(100)
+	rxLevel := modemCfg.Key("RXLevel").MustUint(50)
+	rxDCOffset := modemCfg.Key("RXDCOffset").MustUint(0)
+	txLevel := modemCfg.Key("TXLevel").MustUint(50)
+	txHang := modemCfg.Key("TXHang").MustUint(5)
 
 	var err error
 	err = errors.Join(
@@ -171,18 +180,18 @@ func NewMMDVMModem(
 
 	m := &MMDVMModem{
 		config: MMDVMConfig{
-			duplex: duplex,
-			// TODO: Get all of these values from the INI file
-			txInvert: true,
-
-			txDelay:     100,
-			rxLevel:     50,
-			cwIdTXLevel: 50,
-			fmTXLevel:   50,
-
+			duplex:     duplex,
+			rxInvert:   rxInvert,
+			txInvert:   txInvert,
+			pttInvert:  pttInvert,
+			debug:      debug,
+			txDCOffset: byte(txDCOffset),
+			txDelay:    byte(txDelay),
+			rxLevel:    float32(rxLevel),
+			rxDCOffset: byte(rxDCOffset),
 			m17Enabled: true,
-			m17TXLevel: 50,
-			m17TXHang:  5,
+			m17TXLevel: float32(txLevel),
+			m17TXHang:  byte(txHang),
 		},
 	}
 	log.Printf("[DEBUG] Opening modem")
@@ -561,7 +570,8 @@ func (m *MMDVMModem) setProtocol1Config() error {
 
 	cmd[7] = byte(m.config.rxLevel*2.55 + 0.5)
 
-	cmd[8] = byte(m.config.cwIdTXLevel*2.55 + 0.5)
+	// cmd[8] = byte(m.config.cwIdTXLevel*2.55 + 0.5)
+	cmd[8] = 25
 
 	// cmd[9] = m.config.dmrColorCode
 
@@ -590,7 +600,8 @@ func (m *MMDVMModem) setProtocol1Config() error {
 	// cmd[20] = byte(m.config.pocsagTXLevel*2.55 + 0.5)
 	cmd[20] = 128
 
-	cmd[21] = byte(m.config.fmTXLevel*2.55 + 0.5)
+	// cmd[21] = byte(m.config.fmTXLevel*2.55 + 0.5)
+	cmd[21] = 128
 
 	// cmd[22] = byte(m.config.p25TXHang)
 
@@ -659,29 +670,19 @@ func (m *MMDVMModem) setProtocol2Config() error {
 		cmd[4] |= 0x40
 	}
 
-	// buffer[5U] = 0x00U;
-	// if (m_pocsagEnabled)
-	// 	buffer[5U] |= 0x01U;
-	// if (m_ax25Enabled)
-	// 	buffer[5U] |= 0x02U;
+	// if pocsagEnabled
+	// 	cmd[5] |= 0x01
+	// if ax25Enabled
+	// 	cmd[5] |= 0x02
 
-	// buffer[6U] = m_txDelay / 10U;		// In 10ms units
 	cmd[6] = m.config.txDelay / 10 // In 10ms units
-
-	// buffer[7U] = MODE_IDLE;
 	cmd[7] = mmdvmModeIdle
-
-	// buffer[8U] = (unsigned char)(m_txDCOffset + 128);
 	cmd[8] = byte(m.config.txDCOffset + 128)
-	// buffer[9U] = (unsigned char)(m_rxDCOffset + 128);
 	cmd[9] = byte(m.config.rxDCOffset + 128)
-
-	// buffer[10U] = (unsigned char)(m_rxLevel * 2.55F + 0.5F);
 	cmd[10] = byte(m.config.rxLevel*2.55 + 0.5)
 
-	// buffer[11U] = (unsigned char)(m_cwIdTXLevel * 2.55F + 0.5F);
-	cmd[11] = byte(m.config.cwIdTXLevel*2.55 + 0.5)
-
+	// cmd[11] = byte(m.config.cwIdTXLevel*2.55 + 0.5)
+	cmd[11] = 25
 	// cmd[12] = byte(m.config.dstarTXLevel*2.55 + 0.5)
 	cmd[12] = 128
 	// cmd[13] = byte(m.config.dmrTXLevel*2.55 + 0.5)
@@ -691,46 +692,39 @@ func (m *MMDVMModem) setProtocol2Config() error {
 	// cmd[15] = byte(m.config.p25TXLevel*2.55 + 0.5)
 	cmd[15] = 128
 
-	// buffer[16U] = (unsigned char)(m_nxdnTXLevel * 2.55F + 0.5F);
+	// nxdnTXLevel
 	cmd[16] = 128
-	// buffer[17U] = (unsigned char)(m_m17TXLevel * 2.55F + 0.5F);
 	cmd[17] = byte(m.config.m17TXLevel*2.55 + 0.5)
 
-	// buffer[18U] = (unsigned char)(m_pocsagTXLevel * 2.55F + 0.5F);
+	// pocsagTXLevel
 	cmd[18] = 128
-	// buffer[19U] = (unsigned char)(m_fmTXLevel * 2.55F + 0.5F);
-	cmd[19] = byte(m.config.fmTXLevel*2.55 + 0.5)
-	// buffer[20U] = (unsigned char)(m_ax25TXLevel * 2.55F + 0.5F);
+	// cmd[19] = byte(m.config.fmTXLevel*2.55 + 0.5)
+	cmd[19] = 128
+	// m_ax25TXLevel
 	cmd[20] = 128
 
-	// buffer[23U] = (unsigned char)m_ysfTXHang;
+	// ysfTXHang
 	cmd[23] = 0x04
 
-	// buffer[24U] = (unsigned char)m_p25TXHang;
+	// p25TXHang
 	cmd[24] = 0x05
-	// buffer[25U] = (unsigned char)m_nxdnTXHang;
+	// nxdnTXHang
 	cmd[25] = 0x05
-	// buffer[26U] = (unsigned char)m_m17TXHang;
 	cmd[26] = byte(m.config.m17TXHang)
 
-	// buffer[29U] = m_dmrColorCode;
+	// dmrColorCode
 	cmd[29] = 0x01
-	// buffer[30U] = m_dmrDelay;
 
-	// buffer[31U] = (unsigned char)(m_ax25RXTwist + 128);
+	// cmd[30] = dmrDelay
+
+	// ax25RXTwist
 	cmd[31] = 0x86
-	// buffer[32U] = m_ax25TXDelay / 10U;		// In 10ms units
+	// ax25TXDelay
 	cmd[32] = 0x1E
-	// buffer[33U] = m_ax25SlotTime / 10U;		// In 10ms units
+	// ax25SlotTime
 	cmd[33] = 0x03
-	// buffer[34U] = m_ax25PPersist;
+	// ax25PPersist
 	cmd[34] = 0x80
-
-	// buffer[35U] = 0x00U;
-	// buffer[36U] = 0x00U;
-	// buffer[37U] = 0x00U;
-	// buffer[38U] = 0x00U;
-	// buffer[39U] = 0x00U;
 
 	// log.Printf("[DEBUG] cmd: [% x]", cmd)
 	_, err := m.port.Write(cmd)
@@ -739,10 +733,6 @@ func (m *MMDVMModem) setProtocol2Config() error {
 	}
 
 	err = m.getEmptyResponse()
-
-	// 	m.playoutTimer.start();
-
-	// return true;
 	return err
 }
 
