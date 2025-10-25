@@ -21,7 +21,7 @@ mkdir -p /opt/m17/m17-gateway
 # Set permissions
 # chown m17-gateway:m17-gateway /opt/m17 # should we do this one?
 chown -R m17-gateway:m17-gateway /opt/m17/m17-gateway
-chmod 755 /opt/m17/m17-gateway
+chmod 755 /opt/m17 /opt/m17/m17-gateway
 
 # Make binary executable
 chmod +x /opt/m17/m17-gateway/m17-gateway
