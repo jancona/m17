@@ -387,7 +387,7 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 }
 
 func (m *CC1200Modem) TransmitVoiceStream(sd StreamDatagram) error {
-	log.Printf("[DEBUG] TransmitVoiceStream id: %04x, fn: %04x, last: %v", sd.StreamID, sd.FrameNumber, sd.LastFrame)
+	// log.Printf("[DEBUG] TransmitVoiceStream id: %04x, fn: %04x, last: %v", sd.StreamID, sd.FrameNumber, sd.LastFrame)
 	m.mutex.Lock()
 	if m.txState != txTX {
 		// First frame
