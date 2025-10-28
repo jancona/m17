@@ -49,6 +49,7 @@ type Relay struct {
 	lastStreamID    uint16
 	lastLogTime     time.Time
 	lastFrameTimer  *time.Timer
+	lastLSF         *LSF // Workaround for reflectors that change the SRC during the stream
 }
 
 func NewRelay(name string, server string, port uint, module string, callsign string, dashLog *slog.Logger, packetHandler func(Packet) error, streamHandler func(StreamDatagram) error) (*Relay, error) {
@@ -206,10 +207,10 @@ func (r *Relay) handle() {
 				if err != nil {
 					log.Printf("[INFO] Dropping bad stream datagram: %v", err)
 				} else {
-					// log.Printf("[DEBUG] Received StreamDatagram id: %04x, fn: %04x, last: %v", sd.StreamID, sd.FrameNumber, sd.LastFrame)
 					// log.Printf("[DEBUG] Receive StreamDatagram: %s", sd)
 					gnss := sd.LSF.GNSS()
 					sd.LSF.Dst = *callsignAll
+					// Add Extended Callsign Data
 					sd.LSF.Type[1] &= 0x9F     // zero out Encryption Subtype
 					sd.LSF.Type[1] |= 0x2 << 5 // Set it to ECS
 					copy(sd.LSF.Meta[:], sd.LSF.Src[:])
@@ -227,14 +228,17 @@ func (r *Relay) handle() {
 							// Should never happen
 							r.lastFrameTimer.Stop()
 						}
+						log.Printf("[DEBUG] Start Internet voice stream: %s", sd)
 						r.dashLog.Info("", "type", "Internet", "subtype", "Voice Start", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
 						r.lastStreamID = sd.StreamID
+						r.lastLSF = sd.LSF
 						// Provide a backstop if we don't receive a last frame packet
 						r.lastFrameTimer = time.AfterFunc(time.Second, func() {
 							log.Printf("[DEBUG] Timed out Internet voice stream %04x", sd.StreamID)
 							r.dashLog.Info("", "type", "Internet", "subtype", "Voice End", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
 							r.lastStreamID = 0xFFFF
 							r.lastFrameTimer = nil
+							r.lastLSF = nil
 						})
 					}
 					if r.dashLog != nil && gnss != nil && gnss.ValidAltitude && time.Since(r.lastLogTime) > 15*time.Second {
@@ -267,10 +271,10 @@ func (r *Relay) handle() {
 						r.dashLog.Info("", args...)
 					}
 					if r.dashLog != nil && sd.LastFrame {
-						// log.Printf("[DEBUG] End Internet voice stream %04x", sd.StreamID)
 						log.Printf("[DEBUG] End Internet voice stream: %s", sd)
-						r.dashLog.Info("", "type", "Internet", "subtype", "Voice End", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
+						r.dashLog.Info("", "type", "Internet", "subtype", "Voice End", "src", r.lastLSF.Src.Callsign(), "dst", r.lastLSF.Dst.Callsign(), "can", r.lastLSF.CAN())
 						r.lastStreamID = 0xFFFF
+						r.lastLSF = nil
 						r.lastFrameTimer.Stop()
 						r.lastFrameTimer = nil
 					}
