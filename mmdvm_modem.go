@@ -225,14 +225,9 @@ func NewMMDVMModem(
 	if err != nil {
 		return nil, err
 	}
-	go m.run()
-	go func() {
-		for {
-			if m.getSpace() > 1 {
-				_, err = m.port.Write(<-m.sendCmds)
-			}
-		}
-	}()
+	m.setExit(false)
+	go m.modemReceive()
+	go m.modemSend()
 	return m, nil
 }
 
@@ -246,22 +241,17 @@ func (m *MMDVMModem) setExit(exit bool) {
 	m.exit = exit
 	m.mutex.Unlock()
 }
-func (m *MMDVMModem) run() {
-	log.Printf("[DEBUG] modem start running")
-	m.setExit(false)
+func (m *MMDVMModem) modemReceive() {
+	log.Printf("[DEBUG] modemReceive starting")
 	for !m.isExit() {
-		m.mutex.Lock()
-		checkStatus := time.Since(m.lastStatusCheck) > 250*time.Millisecond
-		m.mutex.Unlock()
-		if checkStatus {
-			m.getStatus()
-		}
+		m.checkStatus()
 		responseType, buf, err := m.getResponse()
 		if err == ErrMMDVMReadTimeout {
 			// nothing to do
 		} else if err != nil {
-			log.Printf("[DEBUG] Modem run getReponse() err: %v", err)
+			log.Printf("[DEBUG] modemReceive getReponse() err: %v", err)
 		} else {
+			// log.Printf("[DEBUG] modemReceive getReponse(): %x", responseType)
 			switch responseType {
 			case mmdvmM17LinkSetup:
 				// log.Printf("[DEBUG] Received M17 LSF: [% 02x]", buf)
@@ -301,13 +291,11 @@ func (m *MMDVMModem) run() {
 					if dacOverflow {
 						log.Print("[ERROR] MMDVM DAC levels have overflowed")
 					}
-					m.mutex.Lock()
 					if len(buf) > 10 {
-						m.setSpace(int(buf[10]))
+						m.setSpace(buf[10])
 					} else {
 						m.setSpace(0)
 					}
-					m.mutex.Unlock()
 				case 2:
 					adcOverflow := (buf[1] & 0x02) == 0x02
 					if adcOverflow {
@@ -325,7 +313,7 @@ func (m *MMDVMModem) run() {
 					if dacOverflow {
 						log.Print("[ERROR] MMDVM DAC levels have overflowed")
 					}
-					m.setSpace(int(buf[9]))
+					m.setSpace(buf[9])
 				}
 			case mmdvmTransparent:
 				log.Printf("[DEBUG] Received Transparent: [% 02x]", buf)
@@ -369,7 +357,21 @@ func (m *MMDVMModem) run() {
 		}
 
 	}
-	log.Printf("[DEBUG] modem stop running")
+	log.Printf("[DEBUG] modemReceive stopping")
+}
+
+func (m *MMDVMModem) modemSend() {
+	log.Printf("[DEBUG] modemSend starting")
+	for !m.isExit() {
+		if m.getSpace() > 1 /*|| m.protocolVersion == 1*/ {
+			_, err := m.port.Write(<-m.sendCmds)
+			if err != nil {
+				log.Printf("[WARN] modemSend: Error writing to modem: %v", err)
+			}
+			m.decrementSpace()
+		}
+	}
+	log.Printf("[DEBUG] modemSend stopping")
 }
 
 func decodeValue(buf []byte) int16 {
@@ -397,7 +399,13 @@ func bytesToSoftBits(buf []byte) []SoftBit {
 	return ret
 }
 
-func (m *MMDVMModem) getStatus() error {
+func (m *MMDVMModem) checkStatus() error {
+	m.mutex.Lock()
+	checkStatus := time.Since(m.lastStatusCheck) > 250*time.Millisecond
+	m.mutex.Unlock()
+	if !checkStatus {
+		return nil
+	}
 	cmd := []byte{mmdvmFrameStart, 3, mmdvmGetStatus}
 	_, err := m.port.Write(cmd)
 	if err != nil {
@@ -910,6 +918,7 @@ func (m *MMDVMModem) Reset() error {
 func (m *MMDVMModem) Close() error {
 	log.Print("[DEBUG] modem Close()")
 	m.setExit(true)
+	close(m.sendCmds)
 	return m.port.Close()
 }
 
@@ -1014,10 +1023,17 @@ func (m *MMDVMModem) getSpace() int {
 	return m.space
 }
 
-func (m *MMDVMModem) setSpace(space int) {
+func (m *MMDVMModem) setSpace(space byte) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.space = space
+	m.space = int(space)
+}
+
+func (m *MMDVMModem) decrementSpace() int {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.space--
+	return m.space
 }
 
 func (m *MMDVMModem) Start() error {
