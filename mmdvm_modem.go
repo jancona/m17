@@ -126,8 +126,10 @@ type MMDVMModem struct {
 
 	mutex sync.Mutex
 	// protected by mutex
-	port io.ReadWriteCloser
-	exit bool
+	port            io.ReadWriteCloser
+	exit            bool
+	lastStatusCheck time.Time
+	space           int
 	// end protected by mutex
 
 	capabilities    [2]byte
@@ -239,6 +241,12 @@ func (m *MMDVMModem) run() {
 	m.setExit(false)
 	for !m.isExit() {
 		m.mutex.Lock()
+		checkStatus := time.Since(m.lastStatusCheck) > 250*time.Millisecond
+		m.mutex.Unlock()
+		if checkStatus {
+			m.getStatus()
+		}
+		m.mutex.Lock()
 		responseType, buf, err := m.getResponse()
 		m.mutex.Unlock()
 		if err == ErrMMDVMReadTimeout {
@@ -266,7 +274,7 @@ func (m *MMDVMModem) run() {
 			case mmdvmM17Lost:
 				// log.Printf("[DEBUG] Received M17 Lost: [% 02x]", buf)
 			case mmdvmGetStatus:
-				log.Printf("[DEBUG] Received Get Status: [% 02x]", buf)
+				// log.Printf("[DEBUG] Received Get Status: [% 02x]", buf)
 				switch m.protocolVersion {
 				case 1:
 					adcOverflow := (buf[2] & 0x02) == 0x02
@@ -285,6 +293,13 @@ func (m *MMDVMModem) run() {
 					if dacOverflow {
 						log.Print("[ERROR] MMDVM DAC levels have overflowed")
 					}
+					m.mutex.Lock()
+					if len(buf) > 10 {
+						m.space = int(buf[10])
+					} else {
+						m.space = 0
+					}
+					m.mutex.Unlock()
 				case 2:
 					adcOverflow := (buf[1] & 0x02) == 0x02
 					if adcOverflow {
@@ -302,6 +317,9 @@ func (m *MMDVMModem) run() {
 					if dacOverflow {
 						log.Print("[ERROR] MMDVM DAC levels have overflowed")
 					}
+					m.mutex.Lock()
+					m.space = int(buf[9])
+					m.mutex.Unlock()
 				}
 			case mmdvmTransparent:
 				log.Printf("[DEBUG] Received Transparent: [% 02x]", buf)
@@ -311,6 +329,7 @@ func (m *MMDVMModem) run() {
 				log.Printf("[DEBUG] Received Serial Data: [% 02x]", buf)
 			case mmdvmACK:
 				// ignore
+				// log.Printf("[DEBUG] Received ACK: [% 02x]", buf)
 			case mmdvmNAK:
 				log.Printf("[WARN] Modem run getReponse() received a NAK, command: %02x, reason: %d", buf[0], buf[1])
 			case mmdvmDebug1, mmdvmDebug2, mmdvmDebug3, mmdvmDebug4, mmdvmDebug5, mmdvmDebugDump:
@@ -370,6 +389,18 @@ func bytesToSoftBits(buf []byte) []SoftBit {
 		}
 	}
 	return ret
+}
+
+func (m *MMDVMModem) getStatus() error {
+	cmd := []byte{mmdvmFrameStart, 3, mmdvmGetStatus}
+	_, err := m.port.Write(cmd)
+	if err != nil {
+		return fmt.Errorf("error writing GetStatus cmd: %w", err)
+	}
+	m.mutex.Lock()
+	m.lastStatusCheck = time.Now()
+	m.mutex.Unlock()
+	return nil
 }
 
 func (m *MMDVMModem) readVersion() error {
@@ -786,6 +817,7 @@ func (m *MMDVMModem) getResponse() (byte, []byte, error) {
 			return responseType, nil, ErrMMDVMReadTimeout
 		}
 		if buffer[0] != mmdvmFrameStart {
+			log.Printf("[DEBUG] getResponse expected mmdvmFrameStart, got 0x%x", buffer[offset])
 			return responseType, nil, ErrMMDVMReadTimeout
 		}
 		// log.Printf("[DEBUG] Modem mmdvmSerialStateStart read 0x%x", buffer[offset])
@@ -977,10 +1009,11 @@ func (m *MMDVMModem) TransmitVoiceStream(sd StreamDatagram) error {
 
 func (m *MMDVMModem) writeBits(typ byte, bits []Bit) error {
 	buf := packBits(bits)
-	// log.Printf("[DEBUG] writeBits type: %02x, len: %d, buf: % 02x", typ, len(buf), buf)
+	log.Printf("[DEBUG] writeBits type: %02x, len: %d, buf: % 02x", typ, len(buf), buf)
 	cmd := []byte{mmdvmFrameStart, byte(4 + len(buf)), typ, 0}
 	cmd = append(cmd, buf...)
 	_, err := m.port.Write(cmd)
+	log.Printf("[DEBUG] writeBits complete type: %02x, len: %d, buf: % 02x", typ, len(buf), buf)
 	return err
 }
 func (m *MMDVMModem) writeEOT() error {
