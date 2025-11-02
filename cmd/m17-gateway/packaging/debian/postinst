@@ -66,6 +66,6 @@ systemctl enable m17-gateway.service
 echo
 echo "M17 Gateway installed successfully!"
 echo "Configuration file: /etc/m17-gateway.ini"
-echo "View logs with: journalctl -u m17-gateway"
+echo "View logs with: journalctl -u m17-gateway -o cat -f"
 echo "Start with: sudo systemctl start m17-gateway"
 echo "Check status with: systemctl status m17-gateway"

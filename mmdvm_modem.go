@@ -131,6 +131,7 @@ type MMDVMModem struct {
 	// protected by mutex
 	exit            bool
 	lastStatusCheck time.Time
+	lastTXData      time.Time
 	space           int
 	// end protected by mutex
 
@@ -183,7 +184,8 @@ func NewMMDVMModem(
 	}
 
 	m := &MMDVMModem{
-		sendCmds: make(chan []byte, 20),
+		sendCmds:   make(chan []byte, 100), // 4 seconds
+		lastTXData: time.Now(),
 		config: MMDVMConfig{
 			duplex:     duplex,
 			rxInvert:   rxInvert,
@@ -363,7 +365,7 @@ func (m *MMDVMModem) modemReceive() {
 func (m *MMDVMModem) modemSend() {
 	log.Printf("[DEBUG] modemSend starting")
 	for !m.isExit() {
-		if m.getSpace() > 1 /*|| m.protocolVersion == 1*/ {
+		if m.getSpace() > 1 {
 			_, err := m.port.Write(<-m.sendCmds)
 			if err != nil {
 				log.Printf("[WARN] modemSend: Error writing to modem: %v", err)
@@ -1007,14 +1009,30 @@ func (m *MMDVMModem) writeBits(typ byte, bits []Bit) {
 	cmd = append(cmd, buf...)
 	m.sendToModem(cmd)
 }
+
 func (m *MMDVMModem) writeEOT() {
 	// log.Printf("[DEBUG] writeEOT")
-	cmd := []byte{mmdvmFrameStart, 3, mmdvmM17EOT}
+	var buf []byte
+	for i := 0; i < BytesPerFrame/len(EOTMarkerBytes); i++ {
+		buf = append(buf, EOTMarkerBytes...)
+	}
+	cmd := []byte{mmdvmFrameStart, byte(4 + len(buf)), mmdvmM17EOT, 0}
+	cmd = append(cmd, buf...)
 	m.sendToModem(cmd)
 }
 
 func (m *MMDVMModem) sendToModem(cmd []byte) {
-	m.sendCmds <- cmd
+	select {
+	case m.sendCmds <- cmd:
+		// okay
+		since := time.Since(m.lastTXData)
+		if since > 100*time.Millisecond {
+			log.Printf("[DEBUG] Last TX data sent %v ago", since.Round(time.Millisecond))
+		}
+		m.lastTXData = time.Now()
+	default:
+		fmt.Println("[DEBUG] sendToModem message send failed")
+	}
 }
 
 func (m *MMDVMModem) getSpace() int {

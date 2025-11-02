@@ -12,6 +12,7 @@ const (
 	SymbolsPerSyncword = 8   //symbols per syncword
 	SymbolsPerPayload  = 184 //symbols per payload in a frame
 	SymbolsPerFrame    = 192 //symbols per whole 40 ms frame, 40ms * 4800 = 192
+	BytesPerFrame      = SymbolsPerFrame * BitsPerSymbol / 8
 	BitsPerSymbol      = 2
 	BitsPerPayload     = SymbolsPerPayload * BitsPerSymbol
 )
