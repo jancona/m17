@@ -1,6 +1,7 @@
 package m17
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-zeromq/zmq4"
 	"go.bug.st/serial"
 	"gopkg.in/ini.v1"
 )
@@ -83,6 +85,7 @@ func NewCC1200Modem(
 	baudRate, baudRateErr := modemCfg.Key("Speed").Int()
 	nRSTPin, nRSTPinErr := modemCfg.Key("NRSTPin").Int()
 	boot0Pin, boot0PinErr := modemCfg.Key("Boot0Pin").Int()
+	zmqPort := modemCfg.Key("ZMQPort").MustInt()
 
 	var err error
 	err = errors.Join(
@@ -138,7 +141,28 @@ func NewCC1200Modem(
 	if err != nil {
 		return nil, fmt.Errorf("rx pipeline setup: %w", err)
 	}
-	go ret.processReceivedData(rxSource)
+	var zmqSource chan byte
+	if zmqPort > 0 {
+		zmqSource = make(chan byte, samplesPerSecond)
+		pub := zmq4.NewPub(context.Background())
+		// defer pub.Close()
+		err := pub.Listen(fmt.Sprintf("tcp://*:%d", zmqPort))
+		if err != nil {
+			log.Fatalf("Could not listen on ZeroMQ port %d: %v", zmqPort, err)
+		}
+		go func() {
+			buf := make([]byte, 0, 2048)
+			for {
+				buf = append(buf, <-zmqSource)
+				if len(buf) == 2048 {
+					pub.Send(zmq4.NewMsg(buf))
+					buf = make([]byte, 0, 2048)
+				}
+			}
+		}()
+	}
+
+	go ret.processReceivedData(rxSource, zmqSource)
 	_, err = ret.commandWithResponse([]byte{cc1200CmdPing, 2})
 	if err != nil {
 		return nil, fmt.Errorf("test PING: %w", err)
@@ -163,7 +187,7 @@ func (m *CC1200Modem) StartDecoding(sink func(typ uint16, softBits []SoftBit)) {
 	go m.processSymbols()
 }
 
-func (m *CC1200Modem) processReceivedData(rxSource chan int8) {
+func (m *CC1200Modem) processReceivedData(rxSource chan int8, zmqSource chan byte) {
 	buf := make([]byte, 1)
 	for {
 		// log.Printf("[DEBUG] processReceivedData Read()")
@@ -184,6 +208,14 @@ func (m *CC1200Modem) processReceivedData(rxSource chan int8) {
 				default:
 					// pipeline is full, so drop it
 					log.Printf("[DEBUG] processReceivedData dropped rx: %02x", buf[0])
+				}
+				if zmqSource != nil {
+					select {
+					case zmqSource <- buf[0]:
+						// sent
+					default:
+						// pipeline is full, so drop it
+					}
 				}
 			}
 		}

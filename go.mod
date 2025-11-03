@@ -8,6 +8,7 @@ require github.com/sigurn/crc16 v0.0.0-20240131213347-83fcde1e29d1
 
 require (
 	fyne.io/fyne/v2 v2.5.5
+	github.com/go-zeromq/zmq4 v0.17.0
 	github.com/icza/gog v0.0.0-20241010132004-5da24f18211d
 	github.com/warthog618/go-gpiocdev v0.9.1
 	go.bug.st/serial v1.6.2
@@ -30,6 +31,7 @@ require (
 	github.com/go-gl/glfw/v3.3/glfw v0.0.0-20240506104042-037f3cc74f2a // indirect
 	github.com/go-text/render v0.2.0 // indirect
 	github.com/go-text/typesetting v0.2.1 // indirect
+	github.com/go-zeromq/goczmq/v4 v4.2.2 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/gopherjs/gopherjs v1.17.2 // indirect
 	github.com/jeandeaual/go-locale v0.0.0-20241217141322-fcc2cadd6f08 // indirect
@@ -45,6 +47,7 @@ require (
 	golang.org/x/image v0.24.0 // indirect
 	golang.org/x/mobile v0.0.0-20250106192035-c31d5b91ecc3 // indirect
 	golang.org/x/net v0.34.0 // indirect
+	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

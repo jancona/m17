@@ -249,7 +249,6 @@ func main() {
 		}
 		os.Exit(0)
 	}
-
 	log.Printf("[DEBUG] Creating gateway cfg: %#v, modem %#v", cfg, modem)
 	g, err = NewGateway(cfg, modem)
 	if err != nil {

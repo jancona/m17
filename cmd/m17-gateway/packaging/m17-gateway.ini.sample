@@ -32,6 +32,7 @@ Speed=460800
 # CC1200-specific
 NRSTPin=21
 Boot0Pin=20
+ZMQPort=0
 # MMDVM-specific
 Protocol=uart
 RXInvert=false
