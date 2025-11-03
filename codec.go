@@ -286,7 +286,7 @@ func AppendBits(out []Symbol, data *PayloadBits) []Symbol {
 
 // Generate symbol stream for the End of Transmission marker.
 func AppendEOT(out []Symbol) []Symbol {
-	for i := 0; i < SymbolsPerFrame; i++ { //40ms * 4800 = 192
+	for i := range SymbolsPerFrame {
 		out = append(out, EOTSymbols[i%8])
 	}
 	return out

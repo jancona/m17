@@ -167,9 +167,15 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 				if d.dashLog != nil {
 					if p.Type == PacketTypeSMS && len(p.Payload) > 0 {
 						msg := string(p.Payload[0 : len(p.Payload)-1])
-						d.dashLog.Info("", "type", "RF", "subtype", "Packet", "src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN(), "mer", json.Number(fmt.Sprintf("%f", float64(d.errors)/float64(d.bits)*100)), "packetType", p.Type, "smsMessage", msg)
+						d.dashLog.Info("", "type", "RF", "subtype", "Packet",
+							"src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN(),
+							"mer", json.Number(fmt.Sprintf("%f", float64(d.errors)/float64(d.bits)*100)),
+							"packetType", p.Type, "smsMessage", msg)
 					} else {
-						d.dashLog.Info("", "type", "RF", "subtype", "Packet", "src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN(), "mer", json.Number(fmt.Sprintf("%f", float64(d.errors)/float64(d.bits)*100)), "packetType", p.Type)
+						d.dashLog.Info("", "type", "RF", "subtype", "Packet",
+							"src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN(),
+							"mer", json.Number(fmt.Sprintf("%f", float64(d.errors)/float64(d.bits)*100)),
+							"packetType", p.Type)
 					}
 				}
 			} else {
@@ -248,7 +254,9 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 				d.timeoutCnt = 0
 				if d.dashLog != nil && lastFrame {
 					log.Printf("[DEBUG] Last frame for RF voice stream %04x", d.streamID)
-					d.dashLog.Info("", "type", "RF", "subtype", "Voice End", "src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN(), "mer", json.Number(fmt.Sprintf("%f", float64(d.errors)/float64(d.bits)*100)))
+					d.dashLog.Info("", "type", "RF", "subtype", "Voice End",
+						"src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN(),
+						"mer", json.Number(fmt.Sprintf("%f", float64(d.errors)/float64(d.bits)*100)))
 				}
 			}
 			if lastFrame {
@@ -259,11 +267,14 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 		}
 	case typ == EOTMarker && d.syncedType == StreamSync:
 		if d.gotLSF {
+			// If this was already done above, gotLSF will be false
 			d.streamFN = uint16(d.lastStreamFN+1) | 0x8000
 			d.sendToNetwork(d.lsf, emptyFrameData, d.streamID, d.streamFN)
 			if d.dashLog != nil {
 				log.Printf("[DEBUG] EOT for RF voice stream %04x", d.streamID)
-				d.dashLog.Info("", "type", "RF", "subtype", "Voice End", "src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN(), "mer", 0)
+				d.dashLog.Info("", "type", "RF", "subtype", "Voice End",
+					"src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN(),
+					"mer", json.Number(fmt.Sprintf("%f", float64(d.errors)/float64(d.bits)*100)))
 			}
 		}
 		// reset
@@ -276,7 +287,9 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 			if d.dashLog != nil && d.gotLSF && d.lastStreamFN&0x8000 != 0x8000 {
 				// If we timed out of a voice stream without a last frame, send the Voice End here
 				log.Printf("[DEBUG] Timed out RF voice stream %04x", d.streamID)
-				d.dashLog.Info("", "type", "RF", "subtype", "Voice End", "src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN(), "mer", 0)
+				d.dashLog.Info("", "type", "RF", "subtype", "Voice End",
+					"src", d.lsf.Src.Callsign(), "dst", d.lsf.Dst.Callsign(), "can", d.lsf.CAN(),
+					"mer", json.Number(fmt.Sprintf("%f", float64(d.errors)/float64(d.bits)*100)))
 			}
 			d.reset()
 		}

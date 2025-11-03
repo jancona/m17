@@ -95,16 +95,16 @@ func NewCC1200Modem(
 	}
 
 	ret := &CC1200Modem{
-		rxSymbols: make(chan float32),
-		s2s:       NewSymbolToSample(rrcTaps5, TXSymbolScalingCoeff*transmitGain, false, 5),
-		cmdSource: make(chan byte),
+		rxSymbols:  make(chan float32),
+		s2s:        NewSymbolToSample(rrcTaps5, TXSymbolScalingCoeff*transmitGain, false, 5),
+		cmdSource:  make(chan byte),
+		lastTXData: time.Now(),
 	}
 	ret.txTimer = time.AfterFunc(txTimeout, func() {
 		log.Printf("[DEBUG] TX timeout")
 		ret.stopTX()
 		ret.Start()
 	})
-	ret.lastTXData = time.Now()
 	// Stop it until we transmit
 	ret.txTimer.Stop()
 	ret.txState = txIdle
@@ -601,19 +601,11 @@ func (m *CC1200Modem) writeSymbols(symbols []Symbol) error {
 			log.Printf("[DEBUG] Failed to write to debug log: %v", err)
 		}
 	}
-	// if time.Since(m.lastTXData) > 80*time.Millisecond {
-	// 	// TX may have timed out
-	// 	log.Printf("[DEBUG] writeSymbols timeout 80ms")
-	// 	m.startTX()
-	// }
-	if time.Since(m.lastTXData) > 200*time.Millisecond {
-		log.Printf("[DEBUG] time.Since(m.lastTXData) >200ms: %v", time.Since(m.lastTXData))
-	} else if time.Since(m.lastTXData) > 160*time.Millisecond {
-		log.Printf("[DEBUG] time.Since(m.lastTXData) >160ms: %v", time.Since(m.lastTXData))
-	} else if time.Since(m.lastTXData) > 120*time.Millisecond {
-		log.Printf("[DEBUG] time.Since(m.lastTXData) >120ms: %v", time.Since(m.lastTXData))
-	}
 	_, err := m.modem.Write(buf)
+	since := time.Since(m.lastTXData)
+	if since > 100*time.Millisecond {
+		log.Printf("[DEBUG] Last TX data sent %v ago", since.Round(time.Millisecond))
+	}
 	m.lastTXData = time.Now()
 	return err
 }
