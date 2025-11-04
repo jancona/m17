@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/hashicorp/logutils"
 	"github.com/jancona/m17"
@@ -298,6 +300,8 @@ type Gateway struct {
 	dashboardLogger  *slog.Logger
 	hostfile         *m17.Hostfile
 	overrideHostfile *m17.Hostfile
+
+	lastLogTime time.Time
 }
 
 func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
@@ -346,37 +350,134 @@ func (g Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	return g.modem.TransmitVoiceStream(sd)
 }
 
-func (g *Gateway) SendToNetwork(lsf *m17.LSF, payload []byte, sid, fn uint16) error {
+func (g *Gateway) receivedRFLSF(lsf *m17.LSF, ber float64) error {
+	if lsf.Type[1]&byte(m17.LSFTypeStream) == byte(m17.LSFTypeStream) {
+		g.dashboardLogger.Info("", "type", "RF", "subtype", "Voice Start", "src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(), "mer", json.Number(fmt.Sprintf("%f", ber)))
+		gnss := lsf.GNSS()
+		if gnss != nil && gnss.ValidLatLon {
+			g.lastLogTime = time.Now()
+			args := []any{
+				"type", "RF",
+				"subtype", "GNSS",
+				"src", lsf.Src.Callsign(),
+				"dataSource", gnss.DataSource,
+				"stationType", gnss.StationType,
+				"latitude", json.Number(fmt.Sprintf("%f", gnss.Latitude)),
+				"longitude", json.Number(fmt.Sprintf("%f", gnss.Longitude)),
+			}
+			if gnss.ValidAltitude {
+				args = append(args,
+					"altitude", json.Number(fmt.Sprintf("%.1f", gnss.Altitude)),
+				)
+			}
+			if gnss.ValidBearingSpeed {
+				args = append(args,
+					"speed", json.Number(fmt.Sprintf("%.1f", gnss.Speed)),
+					"bearing", gnss.Bearing,
+				)
+			}
+			if gnss.ValidRadius {
+				args = append(args,
+					"radius", gnss.Radius,
+				)
+			}
+			g.dashboardLogger.Info("", args...)
+		}
+	}
+	// TODO: Should we be sending the RF LSF here?
+	return nil
+}
+func (g *Gateway) receivedStreamRF(lsf *m17.LSF, payload []byte, sid, fn uint16, ber float64) error {
 	var err error
 	if lsf == nil {
-		return fmt.Errorf("nil lsf in SendToNetwork")
+		return fmt.Errorf("nil lsf in receivedStreamRF")
 	}
-	// log.Printf("[DEBUG] SendToNetwork lsf: %v, payload: % x, sid: %x, fn: %d", lsf, payload, sid, fn)
-	if lsf.LSFType() == m17.LSFTypePacket {
-		p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
-		log.Printf("[DEBUG] send packet to reflector/relay: %v", p)
-		err = g.relay.SendPacket(p)
-		if g.duplex {
-			g.modem.TransmitPacket(p)
-		}
-	} else { // m17.LSFTypeStream
-		if payload != nil {
-			// if payload is nil, this is an LSF frame, so there's nothing to send to the reflector
-			err = g.relay.SendStream(lsf, sid, fn, payload)
-		}
-		if g.duplex {
-			sd := m17.NewStreamDatagram(sid, fn, lsf, payload)
-			err2 := g.modem.TransmitVoiceStream(sd)
-			err = errors.Join(err, err2)
-		}
+	err = g.relay.SendStream(lsf, sid, fn, payload)
+	if g.duplex {
+		sd := m17.NewStreamDatagram(sid, fn, lsf, payload)
+		err2 := g.modem.TransmitVoiceStream(sd)
+		err = errors.Join(err, err2)
 	}
 	// TODO: Handle error?
+	return err
+}
+func (g *Gateway) receivedRFStreamLICH(lsf *m17.LSF, ber float64) error {
+	gnss := lsf.GNSS()
+	if g.dashboardLogger != nil &&
+		gnss != nil &&
+		gnss.ValidLatLon &&
+		time.Since(g.lastLogTime) > 15*time.Second {
+		g.lastLogTime = time.Now()
+		args := []any{
+			"type", "RF",
+			"subtype", "GNSS",
+			"dataSource", gnss.DataSource,
+			"stationType", gnss.StationType,
+			"src", lsf.Src.Callsign(),
+			"latitude", json.Number(fmt.Sprintf("%f", gnss.Latitude)),
+			"longitude", json.Number(fmt.Sprintf("%f", gnss.Longitude)),
+		}
+		if gnss.ValidAltitude {
+			args = append(args,
+				"altitude", json.Number(fmt.Sprintf("%.1f", gnss.Altitude)),
+			)
+		}
+		if gnss.ValidBearingSpeed {
+			args = append(args,
+				"speed", json.Number(fmt.Sprintf("%.1f", gnss.Speed)),
+				"bearing", gnss.Bearing,
+			)
+		}
+		if gnss.ValidRadius {
+			args = append(args,
+				"radius", gnss.Radius,
+			)
+		}
+		g.dashboardLogger.Info("", args...)
+	}
+	return nil
+}
+func (g *Gateway) receivedRFStreamEOT(lsf *m17.LSF, sid, fn uint16, ber float64) error {
+
+	g.dashboardLogger.Info("", "type", "RF", "subtype", "Voice End",
+		"src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(),
+		"mer", json.Number(fmt.Sprintf("%f", ber)))
+	return nil
+}
+func (g *Gateway) receivedPacketRF(lsf *m17.LSF, payload []byte, ber float64) error {
+	var err error
+	p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
+	if g.dashboardLogger != nil {
+		if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
+			msg := string(p.Payload[0 : len(p.Payload)-1])
+			g.dashboardLogger.Info("", "type", "RF", "subtype", "Packet",
+				"src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(),
+				"mer", json.Number(fmt.Sprintf("%f", ber)),
+				"packetType", p.Type, "smsMessage", msg)
+		} else {
+			g.dashboardLogger.Info("", "type", "RF", "subtype", "Packet",
+				"src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(),
+				"mer", json.Number(fmt.Sprintf("%f", ber)),
+				"packetType", p.Type)
+		}
+	}
+	log.Printf("[DEBUG] send packet to reflector/relay: %v", p)
+	err = g.relay.SendPacket(p)
+	if g.duplex {
+		g.modem.TransmitPacket(p)
+	}
 	return err
 }
 
 func (g *Gateway) Run() {
 	signalChan := make(chan os.Signal, 1)
-	d := m17.NewDecoder(g.dashboardLogger, g.SendToNetwork)
+	d := m17.NewDecoder(
+		g.receivedRFLSF,
+		g.receivedStreamRF,
+		g.receivedRFStreamLICH,
+		g.receivedRFStreamEOT,
+		g.receivedPacketRF,
+	)
 	g.modem.StartDecoding(d.DecodeFrame)
 	// Run until we're terminated then clean up
 	log.Print("[DEBUG] client: Waiting for close signal")
