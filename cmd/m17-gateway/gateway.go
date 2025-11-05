@@ -18,6 +18,8 @@ import (
 	// _ "net/http/pprof"
 )
 
+var callsignAll, _ = m17.EncodeCallsign("@ALL")
+
 type config struct {
 	callsign         string
 	dashboardLogger  *slog.Logger
@@ -300,8 +302,12 @@ type Gateway struct {
 	dashboardLogger  *slog.Logger
 	hostfile         *m17.Hostfile
 	overrideHostfile *m17.Hostfile
+	encodedCallsign  m17.EncodedCallsign
 
-	lastLogTime time.Time
+	lastLogTime    time.Time
+	lastFrameTimer *time.Timer
+	lastLSF        *m17.LSF // Workaround for reflectors that change the SRC during the stream
+	lastStreamID   uint16
 }
 
 func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
@@ -315,6 +321,7 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 		dashboardLogger:  cfg.dashboardLogger,
 		hostfile:         cfg.hostfile,
 		overrideHostfile: cfg.overrideHostfile,
+		lastStreamID:     0xFFFF,
 	}
 	h, ok := g.overrideHostfile.Hosts[g.Name]
 	if !ok {
@@ -342,12 +349,83 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 
 func (g Gateway) TransmitPacket(p m17.Packet) error {
 	// log.Printf("[DEBUG] received packet from relay: %#v", p)
+	if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
+		msg := string(p.Payload[0 : len(p.Payload)-1])
+		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Packet", "src", p.LSF.Src.Callsign(), "dst", p.LSF.Dst.Callsign(), "can", p.LSF.CAN(), "packetType", p.Type, "smsMessage", msg)
+	} else {
+		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Packet", "src", p.LSF.Src.Callsign(), "dst", p.LSF.Dst.Callsign(), "can", p.LSF.CAN(), "packetType", p.Type)
+	}
+
 	return g.modem.TransmitPacket(p)
 }
 
 func (g Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	// log.Printf("[DEBUG] received voice stream data from relay: %#v", sd)
-	return g.modem.TransmitVoiceStream(sd)
+	gnss := sd.LSF.GNSS()
+	sd.LSF.Dst = *callsignAll
+	// Replace META with Extended Callsign Data
+	sd.LSF.SetECD(g.encodedCallsign)
+	// log.Printf("[DEBUG] Handle StreamDatagram id: %04x, fn: %04x, last: %v", sd.StreamID, sd.FrameNumber, sd.LastFrame)
+	err := g.modem.TransmitVoiceStream(sd)
+	if g.lastFrameTimer != nil {
+		g.lastFrameTimer.Reset(time.Second)
+	}
+	if g.dashboardLogger != nil && g.lastStreamID != sd.StreamID {
+		if g.lastFrameTimer != nil {
+			// Should never happen
+			g.lastFrameTimer.Stop()
+		}
+		log.Printf("[DEBUG] Start Internet voice stream: %s", sd)
+		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Voice Start", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
+		g.lastStreamID = sd.StreamID
+		g.lastLSF = sd.LSF
+		// Provide a backstop if we don't receive a last frame packet
+		g.lastFrameTimer = time.AfterFunc(time.Second, func() {
+			log.Printf("[DEBUG] Timed out Internet voice stream %04x", sd.StreamID)
+			g.dashboardLogger.Info("", "type", "Internet", "subtype", "Voice End", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
+			g.lastStreamID = 0xFFFF
+			g.lastFrameTimer = nil
+			g.lastLSF = nil
+		})
+	}
+	if g.dashboardLogger != nil && gnss != nil && gnss.ValidAltitude && time.Since(g.lastLogTime) > 15*time.Second {
+		g.lastLogTime = time.Now()
+		args := []any{
+			"type", "Internet",
+			"subtype", "GNSS",
+			"dataSource", gnss.DataSource,
+			"stationType", gnss.StationType,
+			"src", sd.LSF.Src.Callsign(),
+			"latitude", json.Number(fmt.Sprintf("%f", gnss.Latitude)),
+			"longitude", json.Number(fmt.Sprintf("%f", gnss.Longitude)),
+		}
+		if gnss.ValidAltitude {
+			args = append(args,
+				"altitude", json.Number(fmt.Sprintf("%.1f", gnss.Altitude)),
+			)
+		}
+		if gnss.ValidBearingSpeed {
+			args = append(args,
+				"speed", json.Number(fmt.Sprintf("%.1f", gnss.Speed)),
+				"bearing", gnss.Bearing,
+			)
+		}
+		if gnss.ValidRadius {
+			args = append(args,
+				"radius", gnss.Radius,
+			)
+		}
+		g.dashboardLogger.Info("", args...)
+	}
+	if g.dashboardLogger != nil && sd.LastFrame {
+		log.Printf("[DEBUG] End Internet voice stream: %s", sd)
+		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Voice End", "src", g.lastLSF.Src.Callsign(), "dst", g.lastLSF.Dst.Callsign(), "can", g.lastLSF.CAN())
+		g.lastStreamID = 0xFFFF
+		g.lastLSF = nil
+		g.lastFrameTimer.Stop()
+		g.lastFrameTimer = nil
+	}
+	return err
 }
 
 func (g *Gateway) receivedRFLSF(lsf *m17.LSF, ber float64) error {
@@ -384,6 +462,8 @@ func (g *Gateway) receivedRFLSF(lsf *m17.LSF, ber float64) error {
 			g.dashboardLogger.Info("", args...)
 		}
 	}
+	// Replace META with Extended Callsign Data
+	lsf.SetECD(g.encodedCallsign)
 	// TODO: Should we be sending the RF LSF here?
 	return nil
 }

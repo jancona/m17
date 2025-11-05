@@ -220,6 +220,17 @@ func (l *LSF) ECD() *ECD {
 	return nil
 }
 
+// Replace META with Extended Callsign Data
+func (l *LSF) SetECD(gatewayCall EncodedCallsign) {
+	l.Type[1] &= 0x9F     // zero out Encryption Subtype
+	l.Type[1] |= 0x2 << 5 // Set it to ECS
+	copy(l.Meta[:], l.Src[:])
+	copy(l.Meta[6:], gatewayCall[:])
+	l.Meta[12] = 0
+	l.Meta[13] = 0
+	l.CalcCRC()
+}
+
 func (l *LSF) CAN() byte {
 	return (l.Type[0] & 0x7)
 }
