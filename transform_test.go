@@ -8,38 +8,40 @@ import (
 
 func TestDCFilter(t *testing.T) {
 	type newparams struct {
-		sink     chan int8
+		sink     chan float64
 		averageN int
 	}
 	tests := []struct {
 		name      string
 		newparams newparams
-		in        []int8
-		want      []int8
+		in        []float64
+		want      []float64
 	}{
 		{"simple",
 			newparams{
-				make(chan int8),
+				make(chan float64),
 				2,
 			},
-			[]int8{1, -1, 0, 0, -1, 1, 0, 1, -1, 0},
-			[]int8{1, -1, 0, 0, -1, 1, 0, 1, -1, 0},
+			[]float64{1, -1, 0, 0, -1, 1, 0, 1, -1, 0},
+			// []float64{1, -1, 0, 0, -1, 1, 0, 1, -1, 0},
+			[]float64{1, -1.5, 0.25, 0.125, -0.9375, 1.53125, -0.234375, 0.8828125, -1.55859375, 0.220703125},
 		},
 		{"offset",
 			newparams{
-				make(chan int8),
+				make(chan float64),
 				3,
 			},
-			[]int8{20, 0, 10, 10, 0, 20, 10, 20, 0, 10},
-			[]int8{20, -6, 6, 4, -7, 16, 1, 11, -12, 2},
+			[]float64{20, 0, 10, 10, 0, 20, 10, 20, 0, 10},
+			// []float64{20, -6, 6, 4, -7, 16, 1, 11, -12, 2},
+			[]float64{20, -6.666666666666667, 5.555555555555555, 3.7037037037037033, -7.530864197530865, 14.979423868312757, -0.013717421124828988, 9.990855052583447, -13.339429964944367, 1.1070466900370892},
 		},
 		{"empty",
 			newparams{
-				make(chan int8),
+				make(chan float64),
 				1,
 			},
-			[]int8{},
-			[]int8{},
+			[]float64{},
+			[]float64{},
 		},
 	}
 	for _, tt := range tests {
@@ -55,7 +57,7 @@ func TestDCFilter(t *testing.T) {
 				}
 				close(tt.newparams.sink)
 			}()
-			got := []int8{}
+			got := []float64{}
 			for r := range f.Source() {
 				got = append(got, r)
 			}
@@ -68,30 +70,30 @@ func TestDCFilter(t *testing.T) {
 
 func TestSampleToSymbol(t *testing.T) {
 	type newparams struct {
-		sink         chan int8
-		rrcTaps      []float32
-		scalingCoeff float32
+		sink         chan float64
+		rrcTaps      []float64
+		scalingCoeff float64
 	}
 	tests := []struct {
 		name      string
 		newparams newparams
-		warmup    []int8
-		in        []int8
+		warmup    []float64
+		in        []float64
 		want      []float32
 	}{
 		{"simple",
 			newparams{
-				make(chan int8),
+				make(chan float64),
 				rrcTaps5,
 				RXSymbolScalingCoeff,
 			},
-			[]int8{
+			[]float64{
 				42, 44, 49, 57, 61, 56, 38, 9, -23, -49,
 				-59, -49, -23, 9, 38, 56, 61, 57, 49, 44,
 				42, 44, 47, 48, 47, 46, 45, 45, 46, 47,
 				48, 47, 46, 45, 45, 46, 47, 48, 47, 44,
 				42},
-			[]int8{
+			[]float64{
 				44, 49, 57, 61, 56, 38, 9, -23, -49, -59,
 				-49, -23, 9, 38, 56, 61, 57, 49, 44, 42,
 				44, 47, 48, 47, 46, 45, 45, 46, 47, 48,
@@ -99,11 +101,11 @@ func TestSampleToSymbol(t *testing.T) {
 				44},
 			[]float32{
 				// 4.2, 4.0, 3.3, 2.0, 0.2, -1.5, -2.8, -3.3, -2.8, -1.5, 0.2, 2.0, 3.3, 4.0, 4.2, 3.9, 3.6, 3.3,
-				3.2, 3.2, 3.2, 3.3, 3.3, 3.3, 3.3, 3.3, 3.3, 3.3,
-				3.3, 3.3, 3.3, 3.3, 3.3, 3.3, 3.2, 3.2, 3.2, 3.3,
-				3.6, 3.9, 4.2, 4.0, 3.3, 2.0, 0.2, -1.5, -2.8, -3.3,
-				-2.8, -1.5, 0.2, 2.0, 3.3, 4.0, 4.2, 3.9, 3.6, 3.3,
-				3.2},
+				3.1, 3.1, 3.2, 3.3, 3.3, 3.3, 3.3, 3.3, 3.3, 3.3,
+				3.3, 3.3, 3.3, 3.3, 3.3, 3.3, 3.2, 3.1, 3.1, 3.3,
+				3.6, 3.9, 4.1, 4.0, 3.3, 2.0, 0.2, -1.5, -2.8, -3.3,
+				-2.8, -1.5, 0.2, 2.0, 3.3, 4.0, 4.1, 3.9, 3.6, 3.3,
+				3.1},
 		},
 	}
 	for _, tt := range tests {

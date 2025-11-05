@@ -52,6 +52,10 @@ const (
 const txVoiceStreamWait = 10 * 40 * time.Millisecond
 const txTimeout = txVoiceStreamWait + 80*time.Millisecond
 
+// Values calculated by SP5WWP to apply a 48us pre-emphasis
+var iirBParam = []float64{2.8233128196365653, -1.0349763850514728}
+var iirAParam = []float64{1.0, 0.7883364345850924}
+
 type Line interface {
 	SetValue(value int) error
 	Close() error
@@ -173,11 +177,26 @@ func NewCC1200Modem(
 	// } else {
 	// 	log.Printf("[DEBUG] Opened debug log: %v", ret.debugLog)
 	// }
-	ret.setRXFreq(rxFrequency)
-	ret.setTXFreq(txFrequency)
-	ret.setTXPower(power)
-	ret.setFreqCorrection(frequencyCorr)
-	ret.setAFC(afc)
+	err = ret.setRXFreq(rxFrequency)
+	if err != nil {
+		return nil, fmt.Errorf("setRXFreq: %w", err)
+	}
+	err = ret.setTXFreq(txFrequency)
+	if err != nil {
+		return nil, fmt.Errorf("setTXFreq: %w", err)
+	}
+	err = ret.setTXPower(power)
+	if err != nil {
+		return nil, fmt.Errorf("setTXPower: %w", err)
+	}
+	err = ret.setFreqCorrection(frequencyCorr)
+	if err != nil {
+		return nil, fmt.Errorf("setFreqCorrection: %w", err)
+	}
+	err = ret.setAFC(afc)
+	if err != nil {
+		return nil, fmt.Errorf("setAFC: %w", err)
+	}
 
 	return ret, nil
 }
@@ -251,24 +270,24 @@ func (m *CC1200Modem) processSymbols() {
 		dist, typ := syncDistance(symbols, 0)
 		switch {
 		case typ == LSFSync && dist < 4.5:
-			log.Printf("[DEBUG] Received LSFSync, distance: %f, type: %x", dist, typ)
+			// log.Printf("[DEBUG] Received LSFSync, distance: %f, type: %x", dist, typ)
 			var pld []SoftBit
 			symbols, pld, _ = extractPayload(dist, typ, symbols)
 			m.frameSink(typ, pld)
 
 		case typ == PacketSync && dist < 5.0:
 			var pld []SoftBit
-			log.Printf("[DEBUG] Received PacketSync, distance: %f, type: %x", dist, typ)
+			// log.Printf("[DEBUG] Received PacketSync, distance: %f, type: %x", dist, typ)
 			symbols, pld, _ = extractPayload(dist, typ, symbols)
 			m.frameSink(typ, pld)
 
 		case typ == StreamSync && dist < 5.0:
 			var pld []SoftBit
-			log.Printf("[DEBUG] Received StreamSync, distance: %f, type: %x", dist, typ)
+			// log.Printf("[DEBUG] Received StreamSync, distance: %f, type: %x", dist, typ)
 			symbols, pld, _ = extractPayload(dist, typ, symbols)
 			m.frameSink(typ, pld)
 		case typ == EOTMarker && dist < 4.5:
-			log.Printf("[DEBUG] Received EOTMarker, distance: %f, type: %x", dist, typ)
+			// log.Printf("[DEBUG] Received EOTMarker, distance: %f, type: %x", dist, typ)
 			symbols = symbols[16*5:]
 			m.frameSink(typ, nil)
 		default:
@@ -279,15 +298,24 @@ func (m *CC1200Modem) processSymbols() {
 }
 
 func (m *CC1200Modem) rxPipeline(sampleSource chan int8) (chan float32, error) {
-	// modem samples -> DC filter --> RRC filter & scale
+	// modem samples --> to float64 --> IIR filter --> RRC filter & scale
 	var err error
-	dcf, err := NewDCFilter(sampleSource, 200) //len(rrcTaps5))
+
+	conv := NewConverter[int8, float64](sampleSource)
+
+	// dcf, err := NewDCFilter(sampleSource, 200) //len(rrcTaps5))
+	// if err != nil {
+	// 	return nil, fmt.Errorf("dc filter: %w", err)
+	// }
+
+	iir, err := NewIIRFilter(conv.Source(), iirBParam, iirAParam)
 	if err != nil {
-		return nil, fmt.Errorf("dc filter: %w", err)
+		return nil, fmt.Errorf("iir filter: %w", err)
 	}
+
 	// The 1.15 factor was empirically determined. A 15 second transmission from my CS7000
 	// had a BER of 3.3%, compared to 4.9% with the factor at 1.0
-	s2s := NewSampleToSymbol(dcf.Source(), rrcTaps5, RXSymbolScalingCoeff*1.15)
+	s2s := NewSampleToSymbol(iir.Source(), rrcTaps5, RXSymbolScalingCoeff /*1.15*/)
 	// ds, err := NewDownsampler(s2s.Source(), 5, 0)
 	// if err != nil {
 	// 	return nil, fmt.Errorf("downsampler: %w", err)
@@ -545,7 +573,7 @@ func (m *CC1200Modem) setTXPower(dbm float32) error {
 }
 
 func (m *CC1200Modem) Start() error {
-	log.Printf("[DEBUG] Start()")
+	// log.Printf("[DEBUG] Start()")
 	// Sometimes we don't go into RX, so try stopping first
 	// m.stopRX()
 	m.mutex.Lock()
@@ -554,12 +582,12 @@ func (m *CC1200Modem) Start() error {
 	m.clearResponseBuf()
 	var err error
 	cmd := []byte{cc1200CmdSetRX, 0, 1}
-	log.Printf("[DEBUG] sending start cmd")
+	// log.Printf("[DEBUG] sending start cmd")
 	err = m.command(cmd)
 	if err != nil {
 		return fmt.Errorf("send set RX start error: %w", err)
 	}
-	log.Printf("[DEBUG] end Start()")
+	// log.Printf("[DEBUG] end Start()")
 	return nil
 }
 
@@ -697,7 +725,7 @@ func (m *CC1200Modem) commandWithResponse(cmd []byte) ([]byte, error) {
 	m.mutex.Lock()
 	m.isCommandWithResponse = false
 	m.mutex.Unlock()
-	log.Printf("[DEBUG] commandWithResponse() received: % 2x", resp)
+	// log.Printf("[DEBUG] commandWithResponse() received: % 2x", resp)
 	return resp, nil
 }
 

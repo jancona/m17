@@ -16,7 +16,7 @@ const (
 	//129 is `CFM_RX_DATA_OUT` register value at max. F_DEV
 	//datasheet might have this wrong (it says 64)
 
-	RXSymbolScalingCoeff = (1.0 / (0.8 / (40.0e3 / 2097152 * 0xAD) * 129.0))
+	RXSymbolScalingCoeff = (1.0 / (0.8 / (40.0e3 / 2097152 * 0xAD) * 130.0))
 
 	//0xAD is `DEVIATION_M`, 2097152=2^21
 	//+0.8kHz is the deviation for symbol +1
@@ -114,7 +114,7 @@ var transmitGain = float32(math.Sqrt(5))
 // }
 
 // alpha=0.5, span=8, sps=5, gain=sqrt(sps)
-var rrcTaps5 = []float32{
+var rrcTaps5 = []float64{
 	-0.004519384154389,
 	-0.002744505321971,
 	0.002187793653660,
@@ -198,14 +198,14 @@ func (t *Transform[I, O]) handle() {
 
 // Filter DC from int8 samples by subtracting a moving average
 type DCFilter struct {
-	Transform[int8, int8]
-	averageCnt int
-	movingAvg  int
+	Transform[float64, float64]
+	averageCnt float64
+	movingAvg  float64
 }
 
-func NewDCFilter(sink chan int8, averageCnt int) (DCFilter, error) {
+func NewDCFilter(sink chan float64, averageCnt int) (DCFilter, error) {
 	ret := DCFilter{
-		averageCnt: averageCnt,
+		averageCnt: float64(averageCnt),
 	}
 	if averageCnt < 1 {
 		return ret, fmt.Errorf("averageCnt must be greater than zero")
@@ -213,11 +213,11 @@ func NewDCFilter(sink chan int8, averageCnt int) (DCFilter, error) {
 	ret.Transform = NewTransform(sink, ret.dcFilter, 0)
 	return ret, nil
 }
-func (t *DCFilter) dcFilter(sample int8) []int8 {
-	ret := sample - int8(t.movingAvg)
-	t.movingAvg = (t.movingAvg*(t.averageCnt-1) + int(sample)) / t.averageCnt
+func (t *DCFilter) dcFilter(sample float64) []float64 {
+	ret := float64(sample) - t.movingAvg
+	t.movingAvg = (t.movingAvg*float64(t.averageCnt-1) + float64(sample)) / t.averageCnt
 	// log.Printf("[DEBUG] movingAvg: %d, sample: %d, ret: %d", t.movingAvg, sample, sample-int8(t.movingAvg))
-	return []int8{ret}
+	return []float64{ret}
 }
 
 // scale samples by a factor
@@ -237,22 +237,36 @@ func (t *Scaler[T]) scale(sample T) []T {
 	return []T{sample * t.factor}
 }
 
-// Transform int8 samples to float32 symbols by RRC filtering them
-type SampleToSymbol struct { // Make this generic in the future?
-	Transform[int8, float32]
-	fltBuff      *ring.Ring //length of this has to match RRC filter's length
-	rrcTaps      []float32
-	scalingCoeff float32
+// scale samples by a factor
+type Converter[T Number, U Number] struct {
+	Transform[T, U]
 }
 
-func NewSampleToSymbol(sink chan int8, rrcTaps []float32, scalingCoeff float32) SampleToSymbol {
+func NewConverter[T Number, U Number](sink chan T) Converter[T, U] {
+	ret := Converter[T, U]{}
+	ret.Transform = NewTransform(sink, ret.convert, 0)
+	return ret
+}
+func (t *Converter[T, U]) convert(sample T) []U {
+	return []U{U(sample)}
+}
+
+// Transform int8 samples to float32 symbols by RRC filtering them
+type SampleToSymbol struct { // Make this generic in the future?
+	Transform[float64, float32]
+	fltBuff      *ring.Ring //length of this has to match RRC filter's length
+	rrcTaps      []float64
+	scalingCoeff float64
+}
+
+func NewSampleToSymbol(sink chan float64, rrcTaps []float64, scalingCoeff float64) SampleToSymbol {
 	ret := SampleToSymbol{
 		fltBuff:      ring.New(len(rrcTaps)),
 		rrcTaps:      rrcTaps,
 		scalingCoeff: scalingCoeff,
 	}
 	for range rrcTaps {
-		ret.fltBuff.Value = float32(0)
+		ret.fltBuff.Value = float64(0)
 		ret.fltBuff = ret.fltBuff.Next()
 	}
 	ret.Transform = NewTransform(sink, ret.transform, 0)
@@ -263,32 +277,32 @@ func (t *SampleToSymbol) Source() chan float32 {
 	return t.source
 }
 
-func (t *SampleToSymbol) transform(sample int8) []float32 {
-	var symbol float32
-	t.fltBuff.Value = float32(sample)
+func (t *SampleToSymbol) transform(sample float64) []float32 {
+	var symbol float64
+	t.fltBuff.Value = sample
 	t.fltBuff = t.fltBuff.Next()
 
 	i := 0
 	t.fltBuff.Do(func(p any) {
-		f := p.(float32)
+		f := p.(float64)
 		symbol += t.rrcTaps[i] * f
 		// log.Printf("[DEBUG] i: %d, f: %f, symbol: %f", i, f, symbol)
 		i++
 	})
 	symbol *= t.scalingCoeff
-	return []float32{symbol}
+	return []float32{float32(symbol)}
 }
 
 // Transform float32 symbols to int8 samples
 type SymbolToSample struct {
 	last             *ring.Ring //length of this has to match RRC filter's length
-	rrcTaps          []float32
+	rrcTaps          []float64
 	scalingCoeff     float32
 	phaseInvert      bool
 	samplesPerSymbol int
 }
 
-func NewSymbolToSample(rrcTaps []float32, scalingCoeff float32, phaseInvert bool, samplesPerSymbol int) SymbolToSample {
+func NewSymbolToSample(rrcTaps []float64, scalingCoeff float32, phaseInvert bool, samplesPerSymbol int) SymbolToSample {
 	ret := SymbolToSample{
 		last:             ring.New(len(rrcTaps)),
 		rrcTaps:          rrcTaps,
@@ -321,7 +335,7 @@ func (t *SymbolToSample) Transform(symbols []Symbol) []byte {
 			k := 0
 			t.last.Do(func(p any) {
 				f := p.(float32)
-				acc += t.rrcTaps[k] * f
+				acc += float32(t.rrcTaps[k]) * f
 				k++
 			})
 			ret[i*t.samplesPerSymbol+j] = byte(acc * t.scalingCoeff)
@@ -359,3 +373,61 @@ func (t *Downsampler[T]) downsample(sample T) []T {
 	t.count++
 	return ret
 }
+
+// IIRFilter represents a simple first-order IIR filter
+type IIRFilter struct {
+	Transform[float64, float64]
+	b []float64
+	a []float64
+	x []float64
+	y []float64
+}
+
+// NewIIRFilter initializes and returns a new IIR filter
+func NewIIRFilter(sink chan float64, b, a []float64) (IIRFilter, error) {
+	ret := IIRFilter{
+		b: b,
+		a: a,
+		x: make([]float64, len(b)),
+		y: make([]float64, len(a)),
+	}
+	ret.Transform = NewTransform(sink, ret.process, 0)
+	return ret, nil
+}
+func (t *IIRFilter) Source() chan float64 {
+	return t.source
+}
+
+// process processes a single sample through the filter
+func (f *IIRFilter) process(xn float64) []float64 {
+	// Shift previous samples
+	copy(f.x[1:], f.x[:len(f.x)-1])
+	copy(f.y[1:], f.y[:len(f.y)-1])
+
+	// Insert current input
+	f.x[0] = xn
+
+	// Compute output
+	yn := f.b[0]*f.x[0] + f.b[1]*f.x[1] - f.a[1]*f.y[1]
+
+	// Store output
+	f.y[0] = yn
+
+	return []float64{yn}
+}
+
+// func main() {
+//     // Filter coefficients
+//     b := []float64{2.8233128196365653, -1.0349763850514728}
+//     a := []float64{1.0, 0.7883364345850924}
+
+//     filter := NewIIRFilter(b, a)
+
+//     // Example input signal (impulse)
+//     input := []float64{1, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+
+//     for i, x := range input {
+//         y := filter.Process(x)
+//         fmt.Printf("y[%d] = %f\n", i, y)
+//     }
+// }
