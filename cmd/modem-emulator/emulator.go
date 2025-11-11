@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"time"
+
+	"github.com/jancona/m17"
 )
 
 const IDENT_STR = "CC1200-HAT 420-450 MHz\nFW v1.1 by Wojciech SP5WWP"
@@ -144,7 +146,7 @@ func handle(conn io.ReadWriteCloser) {
 	var trxState byte = TRX_IDLE
 	repeater := NewRepeater(10)
 	rxbChan := make(chan []byte)
-	const rxTickTime = 40 * time.Millisecond
+	const rxTickTime = m17.FrameTime
 	rxTicker := time.NewTicker(rxTickTime)
 	// Stop it until we're in TRX_RX mode
 	rxTicker.Stop()

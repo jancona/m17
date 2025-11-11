@@ -228,8 +228,7 @@ func (r *Relay) SendPacket(p Packet) error {
 	return nil
 }
 
-func (r *Relay) SendStream(lsf *LSF, sid uint16, fn uint16, payload []byte) error {
-	sd := NewStreamDatagram(sid, fn, lsf, payload)
+func (r *Relay) SendStream(sd StreamDatagram) error {
 	// log.Printf("[DEBUG] Send StreamDatagram: %s", sd)
 	_, err := r.conn.Write(sd.ToBytes())
 	if err != nil {

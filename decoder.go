@@ -97,6 +97,8 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 				d.packetData = make([]byte, 33*25)
 			}
 			d.receivedRFLSF(d.lsf, float64(e)/3.68)
+			// } else {
+			// 	log.Printf("[DEBUG] Received RF LSF with bad CRC: %s", d.lsf)
 		}
 
 	case typ == PacketSync && d.syncedType == PacketSync:
@@ -161,7 +163,7 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 						d.lsf = lsfB
 						d.gotLSF = true
 						d.timeoutCnt = 0
-						log.Printf("[DEBUG] Received stream LSF: %v", lsfB)
+						// log.Printf("[DEBUG] Received stream LSF: %v", lsfB)
 						d.receivedRFStreamLICH(d.lsf, float64(d.errors)/float64(d.bits)*100)
 					} else {
 						log.Printf("[DEBUG] Stream LSF CRC error: %v", lsfB)
@@ -169,7 +171,7 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 					}
 				}
 			}
-			log.Printf("[DEBUG] Received stream frame: FN:%04X, LICH_CNT:%d, e: %d, BER: %1.1f", fn, lichCnt, e, float64(e)/2.72)
+			// log.Printf("[DEBUG] Received stream frame: FN:%04X, LICH_CNT:%d, e: %d, BER: %1.1f", fn, lichCnt, e, float64(e)/2.72)
 			lastFrame := fn&0x8000 == 0x8000
 			if d.gotLSF {
 				d.streamFN = fn
@@ -225,20 +227,20 @@ func decodeLSF(softBit []SoftBit) (*LSF, int) {
 	//shift the buffer 1 position left - get rid of the encoded flushing bits
 	lsf = lsf[1 : LSFLen+1]
 	// log.Printf("[DEBUG] lsf: %x", lsf)
-	if CRC(lsf) == 0 {
-		dst, err := DecodeCallsign(lsf[0:6])
-		if err != nil {
-			log.Printf("[ERROR] Bad dst callsign: %v", err)
-		}
-		src, err := DecodeCallsign(lsf[6:12])
-		if err != nil {
-			log.Printf("[ERROR] Bad src callsign: %v", err)
-		}
-		log.Printf("[DEBUG] dest: %s, src: %s", dst, src)
-		log.Printf("[DEBUG] LSF BER: %1.1f", float64(e)/3.68)
-		// } else {
-		// 	log.Printf("[DEBUG] Bad LSF CRC: %x", CRC(lsf))
-	}
+	// if CRC(lsf) == 0 {
+	// 	dst, err := DecodeCallsign(lsf[0:6])
+	// 	if err != nil {
+	// 		log.Printf("[ERROR] Bad dst callsign: %v", err)
+	// 	}
+	// 	src, err := DecodeCallsign(lsf[6:12])
+	// 	if err != nil {
+	// 		log.Printf("[ERROR] Bad src callsign: %v", err)
+	// 	}
+	// 	log.Printf("[DEBUG] dest: %s, src: %s", dst, src)
+	// 	log.Printf("[DEBUG] LSF BER: %1.1f", float64(e)/3.68)
+	// 	// } else {
+	// 	// 	log.Printf("[DEBUG] Bad LSF CRC: %x", CRC(lsf))
+	// }
 	l := NewLSFFromBytes(lsf)
 	return l, e
 }

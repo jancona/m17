@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"time"
 )
 
 const (
@@ -15,6 +16,8 @@ const (
 	BytesPerFrame      = SymbolsPerFrame * BitsPerSymbol / 8
 	BitsPerSymbol      = 2
 	BitsPerPayload     = SymbolsPerPayload * BitsPerSymbol
+	FrameTime          = 40 * time.Millisecond
+	FramesPerSecond    = time.Second / FrameTime
 )
 
 const (

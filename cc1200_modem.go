@@ -49,7 +49,7 @@ const (
 )
 
 // txTimeout must be greater than this!
-const txVoiceStreamWait = 10 * 40 * time.Millisecond
+const txVoiceStreamWait = 10 * FrameTime
 const txTimeout = txVoiceStreamWait + 80*time.Millisecond
 
 // Values calculated by SP5WWP to apply a 48us pre-emphasis
@@ -430,7 +430,7 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 		if err != nil {
 			return fmt.Errorf("failed to send: %w", err)
 		}
-		time.Sleep(40 * time.Millisecond)
+		time.Sleep(FrameTime)
 		chunkCnt++
 	}
 	syms = AppendEOT(syms)
@@ -439,7 +439,7 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 		return fmt.Errorf("failed to send EOT: %w", err)
 	}
 	log.Printf("[DEBUG] Finished TransmitPacket")
-	time.Sleep(10 * 40 * time.Millisecond)
+	time.Sleep(10 * FrameTime)
 	log.Printf("[DEBUG] Finished TransmitPacket wait")
 	m.stopTX()
 	m.Start()
