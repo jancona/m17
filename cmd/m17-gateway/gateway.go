@@ -355,7 +355,7 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 	return &g, nil
 }
 
-func (g Gateway) TransmitPacket(p m17.Packet) error {
+func (g *Gateway) TransmitPacket(p m17.Packet) error {
 	// log.Printf("[DEBUG] received packet from relay: %#v", p)
 	if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
 		msg := string(p.Payload[0 : len(p.Payload)-1])
@@ -367,20 +367,19 @@ func (g Gateway) TransmitPacket(p m17.Packet) error {
 	return g.modem.TransmitPacket(p)
 }
 
-func (g Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
+func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	// log.Printf("[DEBUG] received voice stream data from relay: %#v", sd)
 	gnss := sd.LSF.GNSS()
 	sd.LSF.Dst = *callsignAll
 	// Replace META with Extended Callsign Data
 	sd.LSF.SetECD(g.encodedCallsign)
-	// log.Printf("[DEBUG] Handle StreamDatagram id: %04x, fn: %04x, last: %v", sd.StreamID, sd.FrameNumber, sd.LastFrame)
+	// log.Printf("[DEBUG] Handle StreamDatagram id: %04x, lastStreamID: %04x, fn: %04x, last: %v", sd.StreamID, g.lastStreamID, sd.FrameNumber, sd.LastFrame)
 	err := g.modem.TransmitVoiceStream(sd)
 	if g.lastFrameTimer != nil {
 		g.lastFrameTimer.Reset(time.Second)
 	}
 	if g.dashboardLogger != nil && g.lastStreamID != sd.StreamID {
 		if g.lastFrameTimer != nil {
-			// Should never happen
 			g.lastFrameTimer.Stop()
 		}
 		log.Printf("[DEBUG] Start Internet voice stream: %s", sd)
