@@ -351,7 +351,7 @@ func ConvolutionalEncode(in []byte, puncturePattern PuncturePattern, finalBit by
 }
 
 func ConvolutionalEncodeStream(lichBits []Bit, sd StreamDatagram) ([]Bit, error) {
-	frame, err := binary.Append(nil, binary.LittleEndian, sd.FrameNumber)
+	frame, err := binary.Append(nil, binary.BigEndian, sd.FrameNumber)
 	if err != nil {
 		return nil, fmt.Errorf("append frame number: %w", err)
 	}
