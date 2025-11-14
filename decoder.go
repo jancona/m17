@@ -23,11 +23,11 @@ var (
 )
 
 type Decoder struct {
-	receivedRFLSF        func(lsf *LSF, ber float64) error
-	receivedRFStream     func(lsf *LSF, payload []byte, sid, fn uint16, ber float64) error
-	receivedRFStreamLICH func(lsf *LSF, ber float64) error
-	receivedRFStreamEOT  func(lsf *LSF, sid, fn uint16, ber float64) error
-	receivedRFPacket     func(lsf *LSF, payload []byte, ber float64) error
+	receivedRFLSF        func(lsf LSF, ber float64) error
+	receivedRFStream     func(lsf LSF, payload []byte, sid, fn uint16, ber float64) error
+	receivedRFStreamLICH func(lsf LSF, ber float64) error
+	receivedRFStreamEOT  func(lsf LSF, sid, fn uint16, ber float64) error
+	receivedRFPacket     func(lsf LSF, payload []byte, ber float64) error
 	syncedType           uint16
 
 	lsf *LSF
@@ -53,11 +53,11 @@ type Decoder struct {
 const symbolBufSize = 8*5 + 2*(8*5+4800/25*5) + 2 + 256
 
 func NewDecoder(
-	receivedRFLSF func(lsf *LSF, ber float64) error,
-	receivedRFStream func(lsf *LSF, payload []byte, sid, fn uint16, ber float64) error,
-	receivedRFStreamLICH func(lsf *LSF, ber float64) error,
-	receivedRFStreamEOT func(lsf *LSF, sid, fn uint16, ber float64) error,
-	receivedRFPacket func(lsf *LSF, payload []byte, ber float64) error,
+	receivedRFLSF func(lsf LSF, ber float64) error,
+	receivedRFStream func(lsf LSF, payload []byte, sid, fn uint16, ber float64) error,
+	receivedRFStreamLICH func(lsf LSF, ber float64) error,
+	receivedRFStreamEOT func(lsf LSF, sid, fn uint16, ber float64) error,
+	receivedRFPacket func(lsf LSF, payload []byte, ber float64) error,
 ) *Decoder {
 	d := Decoder{
 		receivedRFLSF:        receivedRFLSF,
@@ -96,7 +96,7 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 				d.syncedType = PacketSync
 				d.packetData = make([]byte, 33*25)
 			}
-			d.receivedRFLSF(d.lsf, float64(e)/3.68)
+			d.receivedRFLSF(*d.lsf, float64(e)/3.68)
 			// } else {
 			// 	log.Printf("[DEBUG] Received RF LSF with bad CRC: %s", d.lsf)
 		}
@@ -134,7 +134,7 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 			// log.Printf("[DEBUG] pktFrame[:frameNumOrByteCnt]: % 0x, d.packetData: % 0x", pktFrame[:frameNumOrByteCnt], d.packetData)
 			if CRC(d.packetData) == 0 {
 				// log.Printf("[DEBUG] d.lsf: %v, d.packetData: %v", d.lsf, d.packetData)
-				d.receivedRFPacket(d.lsf, d.packetData, float64(d.errors)/float64(d.bits)*100)
+				d.receivedRFPacket(*d.lsf, d.packetData, float64(d.errors)/float64(d.bits)*100)
 			} else {
 				log.Printf("[DEBUG] Bad CRC not forwarded: %x", CRC(d.packetData))
 			}
@@ -164,7 +164,7 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 						d.gotLSF = true
 						d.timeoutCnt = 0
 						// log.Printf("[DEBUG] Received stream LSF: %v", lsfB)
-						d.receivedRFStreamLICH(d.lsf, float64(d.errors)/float64(d.bits)*100)
+						d.receivedRFStreamLICH(*d.lsf, float64(d.errors)/float64(d.bits)*100)
 					} else {
 						log.Printf("[DEBUG] Stream LSF CRC error: %v", lsfB)
 						d.gotLSF = false
@@ -175,11 +175,11 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 			lastFrame := fn&0x8000 == 0x8000
 			if d.gotLSF {
 				d.streamFN = fn
-				d.receivedRFStream(d.lsf, d.frameData, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
+				d.receivedRFStream(*d.lsf, d.frameData, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
 				d.timeoutCnt = 0
 				if lastFrame {
 					log.Printf("[DEBUG] Last frame for RF voice stream %04x", d.streamID)
-					d.receivedRFStreamEOT(d.lsf, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
+					d.receivedRFStreamEOT(*d.lsf, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
 				}
 			}
 			if lastFrame {
@@ -192,7 +192,7 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 		if d.gotLSF {
 			// If this was already done above, gotLSF will be false
 			d.streamFN = uint16(d.lastStreamFN+1) | 0x8000
-			d.receivedRFStreamEOT(d.lsf, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
+			d.receivedRFStreamEOT(*d.lsf, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
 		}
 		// reset
 		d.reset()
@@ -204,7 +204,7 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 			if d.syncedType == StreamSync && d.gotLSF && d.lastStreamFN&0x8000 != 0x8000 {
 				// If we timed out of a voice stream without a last frame, send the Voice End here
 				log.Printf("[DEBUG] Timed out RF voice stream %04x", d.streamID)
-				d.receivedRFStreamEOT(d.lsf, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
+				d.receivedRFStreamEOT(*d.lsf, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
 			}
 			d.reset()
 		}

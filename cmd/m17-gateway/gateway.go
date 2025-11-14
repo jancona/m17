@@ -387,7 +387,7 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 		// Provide a backstop if we don't receive a last frame packet
 		g.lastFrameTimer = time.AfterFunc(time.Second, func() {
 			log.Printf("[DEBUG] Timed out Internet voice stream %04x", sd.StreamID)
-			g.dashboardLogger.Info("", "type", "Internet", "subtype", "Voice End", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
+			g.dashboardLogger.Info("", "type", "Internet", "subtype", "Voice End", "src", g.lastLSF.Src.Callsign(), "dst", g.lastLSF.Dst.Callsign(), "can", g.lastLSF.CAN())
 			g.lastStreamID = 0xFFFF
 			g.lastFrameTimer = nil
 			g.lastLSF = nil
@@ -448,7 +448,7 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	return err
 }
 
-func (g *Gateway) receivedRFLSF(lsf *m17.LSF, ber float64) error {
+func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
 	if lsf.Type[1]&byte(m17.LSFTypeStream) == byte(m17.LSFTypeStream) {
 		g.dashboardLogger.Info("", "type", "RF", "subtype", "Voice Start", "src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(), "mer", json.Number(fmt.Sprintf("%f", ber)))
 		gnss := lsf.GNSS()
@@ -489,12 +489,9 @@ func (g *Gateway) receivedRFLSF(lsf *m17.LSF, ber float64) error {
 	// TODO: Should we be sending the RF LSF here?
 	return nil
 }
-func (g *Gateway) receivedRFStreamFrame(lsf *m17.LSF, payload []byte, sid, fn uint16, ber float64) error {
+func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uint16, ber float64) error {
 	var err error
-	if lsf == nil {
-		return fmt.Errorf("nil lsf in receivedStreamRF")
-	}
-	sd := m17.NewStreamDatagram(sid, fn, lsf, payload)
+	sd := m17.NewStreamDatagram(sid, fn, &lsf, payload)
 	if g.echoMode {
 		g.echoRecord(sd)
 	} else {
@@ -510,7 +507,7 @@ func (g *Gateway) receivedRFStreamFrame(lsf *m17.LSF, payload []byte, sid, fn ui
 	// TODO: Handle error?
 	return err
 }
-func (g *Gateway) receivedRFStreamLICH(lsf *m17.LSF, ber float64) error {
+func (g *Gateway) receivedRFStreamLICH(lsf m17.LSF, ber float64) error {
 	gnss := lsf.GNSS()
 	if g.dashboardLogger != nil &&
 		gnss != nil &&
@@ -546,7 +543,7 @@ func (g *Gateway) receivedRFStreamLICH(lsf *m17.LSF, ber float64) error {
 	}
 	return nil
 }
-func (g *Gateway) receivedRFStreamEOT(lsf *m17.LSF, sid, fn uint16, ber float64) error {
+func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) error {
 	var err error
 	g.dashboardLogger.Info("", "type", "RF", "subtype", "Voice End",
 		"src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(),
@@ -556,7 +553,7 @@ func (g *Gateway) receivedRFStreamEOT(lsf *m17.LSF, sid, fn uint16, ber float64)
 	}
 	return err
 }
-func (g *Gateway) receivedRFPacket(lsf *m17.LSF, payload []byte, ber float64) error {
+func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) error {
 	var err error
 	p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
 	if g.dashboardLogger != nil {

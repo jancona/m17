@@ -364,23 +364,23 @@ func (g GNSS) String() string {
 }
 
 type ECD struct {
-	Callsign1 []byte
-	Callsign2 []byte
+	Callsign1 *EncodedCallsign
+	Callsign2 *EncodedCallsign
 }
 
 func NewECDFromMeta(meta [14]byte) ECD {
 	return ECD{
-		Callsign1: meta[:6],
-		Callsign2: meta[6:12],
+		Callsign1: (*EncodedCallsign)(meta[:6]),
+		Callsign2: (*EncodedCallsign)(meta[6:12]),
 	}
 }
 
 func (e ECD) String() string {
-	cs1, err := DecodeCallsign(e.Callsign1)
+	cs1, err := DecodeCallsign(e.Callsign1[:])
 	if err != nil {
 		cs1 = err.Error()
 	}
-	cs2, err := DecodeCallsign(e.Callsign2)
+	cs2, err := DecodeCallsign(e.Callsign2[:])
 	if err != nil {
 		cs2 = err.Error()
 	}
