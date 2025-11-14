@@ -21,6 +21,7 @@ var EncodedDestinationAllBytes = EncodedCallsign{0xff, 0xff, 0xff, 0xff, 0xff, 0
 const m17Chars = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/."
 
 var callsignRegex = regexp.MustCompile(`^([0-9]?[A-Z]{1,2}[0-9]{0,2}/)?[0-9]?[A-Z]{1,2}[0-9]{1,2}[A-Z]{1,4}([ -/\.][A-Z0-9 -/\.]*)?$`)
+var reflectorRegex = regexp.MustCompile(`^[A-Z][-A-Z0-9]{5,6}( +[ A-Z])?$`)
 var roomRegex = regexp.MustCompile(`^#[A-Z0-9 -/\.]+$`)
 
 func EncodeCallsign(callsign string) (*EncodedCallsign, error) {
@@ -38,7 +39,7 @@ func EncodeCallsign(callsign string) (*EncodedCallsign, error) {
 			return nil, fmt.Errorf("room name '%s' is not valid", callsign)
 		}
 	} else {
-		if !callsignRegex.MatchString(callsign) {
+		if !callsignRegex.MatchString(callsign) && !reflectorRegex.MatchString(callsign) {
 			return nil, fmt.Errorf("callsign '%s' is not valid", callsign)
 		}
 	}

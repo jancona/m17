@@ -80,6 +80,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	}
 	modemCfg := cfg.Section("Modem")
 
+	callsign = m17.NormalizeCallsignModule(callsign)
 	_, callsignErr := m17.EncodeCallsign(callsign)
 	// TODO: Lots of these validations are CC1200 specific
 	if rxFrequencyErr == nil {
@@ -364,28 +365,25 @@ func (g *Gateway) TransmitPacket(p m17.Packet) error {
 		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Packet", "src", p.LSF.Src.Callsign(), "dst", p.LSF.Dst.Callsign(), "can", p.LSF.CAN(), "packetType", p.Type)
 	}
 
+	// Replace META with Extended Callsign Data
+	// Don't swap Src for Packet
+	p.LSF.SetECD(&g.encodedCallsign, g.relay.EncodedName)
+	//	p.LSF.Src = g.encodedCallsign
 	return g.modem.TransmitPacket(p)
 }
 
 func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	// log.Printf("[DEBUG] received voice stream data from relay: %#v", sd)
-	gnss := sd.LSF.GNSS()
-	sd.LSF.Dst = *callsignAll
-	// Replace META with Extended Callsign Data
-	sd.LSF.SetECD(g.encodedCallsign)
-	// log.Printf("[DEBUG] Handle StreamDatagram id: %04x, lastStreamID: %04x, fn: %04x, last: %v", sd.StreamID, g.lastStreamID, sd.FrameNumber, sd.LastFrame)
-	err := g.modem.TransmitVoiceStream(sd)
-	if g.lastFrameTimer != nil {
-		g.lastFrameTimer.Reset(time.Second)
-	}
-	if g.dashboardLogger != nil && g.lastStreamID != sd.StreamID {
+	if g.lastStreamID != sd.StreamID {
 		if g.lastFrameTimer != nil {
 			g.lastFrameTimer.Stop()
 		}
 		log.Printf("[DEBUG] Start Internet voice stream: %s", sd)
 		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Voice Start", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
 		g.lastStreamID = sd.StreamID
-		g.lastLSF = sd.LSF
+		// Make a copy
+		lsf := *sd.LSF
+		g.lastLSF = &lsf
 		// Provide a backstop if we don't receive a last frame packet
 		g.lastFrameTimer = time.AfterFunc(time.Second, func() {
 			log.Printf("[DEBUG] Timed out Internet voice stream %04x", sd.StreamID)
@@ -398,7 +396,8 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 			}
 		})
 	}
-	if g.dashboardLogger != nil && gnss != nil && gnss.ValidAltitude && time.Since(g.lastLogTime) > 15*time.Second {
+	gnss := sd.LSF.GNSS()
+	if gnss != nil && gnss.ValidAltitude && time.Since(g.lastLogTime) > 15*time.Second {
 		g.lastLogTime = time.Now()
 		args := []any{
 			"type", "Internet",
@@ -427,16 +426,24 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 		}
 		g.dashboardLogger.Info("", args...)
 	}
-	if g.dashboardLogger != nil && sd.LastFrame {
+	if sd.LastFrame {
 		log.Printf("[DEBUG] End Internet voice stream: %s", sd)
 		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Voice End", "src", g.lastLSF.Src.Callsign(), "dst", g.lastLSF.Dst.Callsign(), "can", g.lastLSF.CAN())
 		g.lastStreamID = 0xFFFF
 		g.lastLSF = nil
 		g.lastFrameTimer.Stop()
 		g.lastFrameTimer = nil
-		if g.echoMode {
-			err = g.echoEnd()
-		}
+	}
+	// log.Printf("[DEBUG] Handle StreamDatagram id: %04x, lastStreamID: %04x, fn: %04x, last: %v", sd.StreamID, g.lastStreamID, sd.FrameNumber, sd.LastFrame)
+	// Shouldn't need the next line with modern reflectors
+	// sd.LSF.Dst = *callsignAll
+	// Replace META with Extended Callsign Data
+	sd.LSF.SetECD(&sd.LSF.Src, g.relay.EncodedName)
+	sd.LSF.Src = g.encodedCallsign
+	sd.LSF.CalcCRC()
+	err := g.modem.TransmitVoiceStream(sd)
+	if g.lastFrameTimer != nil {
+		g.lastFrameTimer.Reset(time.Second)
 	}
 	return err
 }
@@ -479,8 +486,6 @@ func (g *Gateway) receivedRFLSF(lsf *m17.LSF, ber float64) error {
 	case "ECHO", "#ECHO":
 		g.echoStart()
 	}
-	// Replace META with Extended Callsign Data
-	lsf.SetECD(g.encodedCallsign)
 	// TODO: Should we be sending the RF LSF here?
 	return nil
 }
@@ -495,6 +500,9 @@ func (g *Gateway) receivedRFStreamFrame(lsf *m17.LSF, payload []byte, sid, fn ui
 	} else {
 		err = g.relay.SendStream(sd)
 		if g.duplex {
+			// Replace META with Extended Callsign Data
+			sd.LSF.SetECD(&sd.LSF.Src, nil)
+			sd.LSF.Src = g.encodedCallsign
 			err2 := g.modem.TransmitVoiceStream(sd)
 			err = errors.Join(err, err2)
 		}
@@ -571,6 +579,10 @@ func (g *Gateway) receivedRFPacket(lsf *m17.LSF, payload []byte, ber float64) er
 		// log.Printf("[DEBUG] send packet to reflector/relay: %v", p)
 		err = g.relay.SendPacket(p)
 		if err == nil && g.duplex {
+			// Replace META with Extended Callsign Data
+			// Don't swap Src for packet
+			p.LSF.SetECD(&g.encodedCallsign, nil)
+			// p.LSF.Src = g.encodedCallsign
 			err = g.modem.TransmitPacket(p)
 		}
 	}
