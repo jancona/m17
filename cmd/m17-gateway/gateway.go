@@ -74,7 +74,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	if !cfg.Section("Modem").HasKey("Type") {
 		cfg.Section("Modem").Key("Type").SetValue("cc1200")
 	}
-	modemType = cfg.Section("Modem").Key("Type").In("BAD", []string{"cc1200", "mmdvm", "dummy"})
+	modemType = cfg.Section("Modem").Key("Type").In("BAD", []string{"cc1200", "cc1200v2", "mmdvm", "dummy"})
 	if modemType == "BAD" {
 		modemTypeErr = fmt.Errorf("bad Modem Type: %s", cfg.Section("Modem").Key("Type").String())
 	}
@@ -233,6 +233,12 @@ func main() {
 			log.Fatalf("Error creating CC1200 modem: %v", err)
 		}
 		log.Printf("[INFO] Connected to CC1200 modem on %s", cfg.modemCfg.Key("Port").String())
+	case "cc1200v2":
+		modem, err = m17.NewCC1200ModemV2(cfg.rxFrequency, cfg.txFrequency, int8(cfg.power), cfg.frequencyCorr, cfg.afc, cfg.modemCfg)
+		if err != nil {
+			log.Fatalf("Error creating CC1200 V2 modem: %v", err)
+		}
+		log.Printf("[INFO] Connected to CC1200 V2 modem on %s", cfg.modemCfg.Key("Port").String())
 	case "mmdvm":
 		modem, err = m17.NewMMDVMModem(cfg.rxFrequency, cfg.txFrequency, cfg.power, cfg.frequencyCorr, cfg.afc, cfg.modemCfg, cfg.duplex)
 		if err != nil {
