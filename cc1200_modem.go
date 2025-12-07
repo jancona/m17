@@ -48,19 +48,6 @@ const (
 	txTX
 )
 
-// txTimeout must be greater than this!
-const txVoiceStreamWait = 8 * FrameTime
-const txTimeout = txVoiceStreamWait + 2*FrameTime
-
-// Values calculated by SP5WWP to apply a 48us pre-emphasis
-var iirBParam = []float64{2.8233128196365653, -1.0349763850514728}
-var iirAParam = []float64{1.0, 0.7883364345850924}
-
-type Line interface {
-	SetValue(value int) error
-	Close() error
-}
-
 type CC1200Modem struct {
 	modem     io.ReadWriteCloser
 	rxSymbols chan float32
@@ -72,8 +59,8 @@ type CC1200Modem struct {
 	isCommandWithResponse bool // protected by mutex
 	txTimer               *time.Timer
 	cmdSource             chan byte
-	nRST                  Line
-	boot0                 Line
+	nRST                  gpioLine
+	boot0                 gpioLine
 	debugLog              *os.File
 	lastTXData            time.Time
 }

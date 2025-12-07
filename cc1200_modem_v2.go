@@ -32,19 +32,15 @@ const (
 	cc1200V2CmdTXData
 	cc1200V2CmdDbgEnable
 	cc1200V2CmdDbgTxt
-	//
-	cc1200V2LastSet
 	//GET
-	// cc1200V2CmdGetIdent = iota + 0x80
-	// cc1200V2CmdGetCaps
-	// cc1200V2CmdGetRXFreq
-	// cc1200V2CmdGetTXFreq
-	// cc1200V2CmdGetTXPower
-	// cc1200V2CmdGetFreqCorr
-	// cc1200V2CmdGetBSBBuff
-	// cc1200V2CmdGetRSSI
-	// //
-	// cc1200V2LastGet
+	cc1200V2CmdGetIdent = iota + 0x80
+	cc1200V2CmdGetCaps
+	cc1200V2CmdGetRXFreq
+	cc1200V2CmdGetTXFreq
+	cc1200V2CmdGetTXPower
+	cc1200V2CmdGetFreqCorr
+	cc1200V2CmdGetBSBBuff
+	cc1200V2CmdGetRSSI
 )
 
 var errBadCmd = errors.New("bad command")
@@ -64,35 +60,52 @@ func newCommandV2FromBytes(buf []byte) (commandV2, error) {
 	}
 	// Heuristics to detect bad commands
 	switch {
-	case ret.cmd >= cc1200V2LastSet:
-		// We don't do any GETs. If we add any this line need to change!
+	// All commands the firmware sends as of Dec. 2025
+	case ret.cmd == cc1200V2CmdPing && ret.size == 7:
+		fallthrough
+	case ret.cmd == cc1200V2CmdSetRXFreq && ret.size == 4:
+		fallthrough
+	case ret.cmd == cc1200V2CmdSetTXFreq && ret.size == 4:
+		fallthrough
+	case ret.cmd == cc1200V2CmdSetTXPower && ret.size == 4:
+		fallthrough
+	case ret.cmd == cc1200V2CmdSetFreqCorr && ret.size == 4:
+		fallthrough
+	case ret.cmd == cc1200V2CmdSetAFC && ret.size == 4:
+		fallthrough
+	case ret.cmd == cc1200V2CmdTXStart && ret.size == 4:
+		fallthrough
+	case ret.cmd == cc1200V2CmdRXStart && ret.size == 4:
+		fallthrough
+	case ret.cmd == cc1200V2CmdRXData && ret.size == 963:
+		fallthrough
+	case ret.cmd == cc1200V2CmdTXData && ret.size == 4:
+		fallthrough
+	// case ret.cmd == cc1200V2CmdDbgEnable && ret.size == 4:
+	// 	fallthrough
+	case ret.cmd == cc1200V2CmdDbgTxt && ret.size <= 131:
+		fallthrough
+	case ret.cmd == cc1200V2CmdGetIdent && ret.size <= 131:
+		fallthrough
+	case ret.cmd == cc1200V2CmdGetCaps && ret.size <= 4:
+		fallthrough
+	case ret.cmd == cc1200V2CmdGetRXFreq && ret.size <= 7:
+		fallthrough
+	case ret.cmd == cc1200V2CmdGetTXFreq && ret.size <= 7:
+		fallthrough
+	// case ret.cmd == cc1200V2CmdGetTXPower  && ret.size <= :
+	// 	fallthrough
+	// case ret.cmd == cc1200V2CmdGetFreqCorr  && ret.size <= :
+	// 	fallthrough
+	case ret.cmd == cc1200V2CmdGetBSBBuff && ret.size <= 4:
+		fallthrough
+	case ret.cmd == cc1200V2CmdGetRSSI && ret.size <= 4:
+		ret.data = make([]byte, ret.size-3)
+		copy(ret.data, buf[3:])
+		return ret, nil
+	default:
 		return ret, errBadCmd
-	case ret.cmd == cc1200V2CmdRXData && ret.size != 963:
-		return ret, errBadCmd
-	case ret.cmd == cc1200V2CmdPing && ret.size != 7:
-		return ret, errBadCmd
-	case ret.cmd == cc1200V2CmdSetRXFreq && ret.size != 4:
-		return ret, errBadCmd
-	case ret.cmd == cc1200V2CmdSetTXFreq && ret.size != 4:
-		return ret, errBadCmd
-	case ret.cmd == cc1200V2CmdSetTXPower && ret.size != 4:
-		return ret, errBadCmd
-	case ret.cmd == cc1200V2CmdSetFreqCorr && ret.size != 4:
-		return ret, errBadCmd
-	case ret.cmd == cc1200V2CmdSetAFC && ret.size != 4:
-		return ret, errBadCmd
-	case ret.cmd == cc1200V2CmdTXStart && ret.size != 4:
-		return ret, errBadCmd
-	case ret.cmd == cc1200V2CmdRXStart && ret.size != 4:
-		return ret, errBadCmd
-	case ret.cmd == cc1200V2CmdTXData && ret.size != 4:
-		return ret, errBadCmd
-		// case ret.cmd < cc1200V2LastSet && ret.size > 1027:
-		// 	return ret, errBadCmd
 	}
-	ret.data = make([]byte, ret.size-3)
-	copy(ret.data, buf[3:])
-	return ret, nil
 }
 
 func newCommandV2(cmd byte, data []byte) commandV2 {
@@ -117,37 +130,23 @@ func (c commandV2) String() string {
 	return fmt.Sprintf("cmd: %d, size: %d, data: [% x]", c.cmd, c.size, c.data)
 }
 
-// const (
-//
-//	//GET
-//	cc1200V2CmdGetIdent = iota + 0x80
-//	cc1200V2CmdGetCaps
-//	cc1200V2CmdGetRXFreq
-//	cc1200V2CmdGetTXFreq
-//	cc1200V2CmdGetTXPower
-//	cc1200V2CmdGetFreqCorr
-//	cc1200V2CmdGetBsbBuffer
-//	cc1200V2CmdGetRSSI
-//
-// )
-
 const (
 	txIdleV2 = iota
 	txTXV2
 )
 
 // txTimeout must be greater than this!
-// const txVoiceStreamWait = 10 * FrameTime
-// const txTimeout = txVoiceStreamWait + 80*time.Millisecond
+const txVoiceStreamWait = 8 * FrameTime
+const txTimeout = txVoiceStreamWait + 2*FrameTime
 
 // Values calculated by SP5WWP to apply a 48us pre-emphasis
-// var iirBParam = []float64{2.8233128196365653, -1.0349763850514728}
-// var iirAParam = []float64{1.0, 0.7883364345850924}
+var iirBParam = []float64{2.8233128196365653, -1.0349763850514728}
+var iirAParam = []float64{1.0, 0.7883364345850924}
 
-// type Line interface {
-// 	SetValue(value int) error
-// 	Close() error
-// }
+type gpioLine interface {
+	SetValue(value int) error
+	Close() error
+}
 
 type CC1200ModemV2 struct {
 	modem     io.ReadWriteCloser
@@ -158,8 +157,8 @@ type CC1200ModemV2 struct {
 	mutex      sync.Mutex
 	txState    int // protected by mutex
 	cmdSource  chan commandV2
-	nRST       Line
-	boot0      Line
+	nRST       gpioLine
+	boot0      gpioLine
 	debugLog   *os.File
 	lastTXData time.Time
 }
@@ -275,33 +274,54 @@ func (m *CC1200ModemV2) StartDecoding(sink func(typ uint16, softBits []SoftBit))
 }
 
 func (m *CC1200ModemV2) processReceivedData(rxSource chan int8, zmqSource chan byte) {
+	var buf []byte
 	var prevCmd commandV2
-	var prevBuf []byte
+	var badBuf []byte
+	var badCnt int
 	for {
-		// log.Printf("[DEBUG] processReceivedData Read()")
-		buf := make([]byte, 3) // cmd + size
-		_, err := io.ReadFull(m.modem, buf)
-		if err != nil {
-			log.Printf("[ERROR] Error reading cmd from modem: %v", err)
-			break
+		var n int
+		var err error
+		if badBuf == nil {
+			buf = make([]byte, 3) // cmd + size
+			n, err = io.ReadFull(m.modem, buf)
+			if err != nil {
+				log.Printf("[ERROR] Error reading cmd from modem: %v", err)
+				break
+			}
+		} else {
+			// Advance one byte and try again
+			// Shift the last two bytes to the left and add an empty one to read into
+			buf = append(buf[1:], 0)
+			// Read buf[2] so now we have three again
+			n, err = io.ReadFull(m.modem, buf[2:])
+			if err != nil {
+				log.Printf("[ERROR] Error reading cmd from modem: %v", err)
+				break
+			}
 		}
 		// buf has cmd + size but not data
 		cmd, err := newCommandV2FromBytes(buf)
 		if err == errBadCmd {
-			log.Printf("[ERROR] received bad cmd: %d, size: %d\nbuf: [% x], prevBuf: [% x]", cmd.cmd, cmd.size, buf, prevBuf)
+			// save the bad bytes to log them
+			badBuf = append(badBuf, buf[3-n:]...)
+			badCnt += n
 			continue
 		} else if err != nil {
 			log.Printf("[ERROR] Error building command: %v", err)
 			break
 		}
-		prevBuf = buf
 
 		_, err = io.ReadFull(m.modem, cmd.data)
 		if err != nil {
 			log.Printf("[ERROR] Error reading data from modem: %v", err)
 			break
 		}
-		// log.Printf("[DEBUG] processReceivedData cmd: %d, size: %d", cmd.cmd, cmd.size)
+		if badCnt > 0 {
+			log.Printf("[ERROR] received %v bad bytes: [% x]\n    prev cmd: %v\n    next cmd: %v", badCnt, badBuf, prevCmd, cmd)
+		}
+		badBuf = nil
+		badCnt = 0
+		prevCmd = cmd
 		if cmd.cmd == cc1200V2CmdRXData {
 			for _, b := range cmd.data {
 				select {
@@ -329,7 +349,6 @@ func (m *CC1200ModemV2) processReceivedData(rxSource chan int8, zmqSource chan b
 					cmd.cmd, cmd.size, prevCmd.cmd, prevCmd.size)
 			}
 		}
-		prevCmd = cmd
 	}
 }
 
