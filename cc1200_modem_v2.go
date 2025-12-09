@@ -58,6 +58,9 @@ func newCommandV2FromBytes(buf []byte) (commandV2, error) {
 	if err != nil {
 		return ret, fmt.Errorf("parse commandV2 size: %v", err)
 	}
+	if ret.size < 4 || ret.size > 963 {
+		return ret, errBadCmd
+	}
 	// Heuristics to detect bad commands
 	switch {
 	// All commands the firmware sends as of Dec. 2025
