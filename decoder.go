@@ -151,7 +151,7 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 		// log.Printf("[DEBUG] frameData: [% 2x], lich: %02x, lichCnt: %d, d.lichParts: %04x, fn: %04x, d.lastStreamFN: %04x, e: %d", d.frameData, lich, lichCnt, d.lichParts, fn, d.lastStreamFN, e)
 		d.errors += e
 		d.bits += 272
-		if d.lastStreamFN+1 == fn&0x7fff {
+		if d.lastStreamFN+1 <= fn&0x7fff {
 			if d.lichParts != 0x3F && lichCnt < 6 { //6 chunks = 0b111111
 				//reconstruct LSF chunk by chunk
 				copy(d.lsfBytes[lichCnt*5:lichCnt*5+5], lich)

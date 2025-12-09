@@ -489,7 +489,7 @@ func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
 		}
 	}
 	switch lsf.Dst.Callsign() {
-	case "ECHO", "#ECHO":
+	case "/ECHO", "#ECHO":
 		g.echoStart()
 	}
 	// TODO: Should we be sending the RF LSF here?

@@ -378,30 +378,32 @@ func (m *CC1200ModemV2) processSymbols() {
 		dist, typ := syncDistance(symbols, 0)
 		switch {
 		case typ == LSFSync && dist < 4.5:
-			log.Printf("[DEBUG] Received LSFSync, distance: %f, type: %x", dist, typ)
+			// log.Printf("[DEBUG] Received LSFSync, distance: %f, type: %x", dist, typ)
 			// log.Printf("[DEBUG] symbols: %v", symbols)
 			var pld []SoftBit
 			symbols, pld, _ = extractPayload(dist, typ, symbols)
 			m.frameSink(typ, pld)
 
 		case typ == PacketSync && dist < 5.0:
-			log.Printf("[DEBUG] Received PacketSync, distance: %f, type: %x", dist, typ)
+			// log.Printf("[DEBUG] Received PacketSync, distance: %f, type: %x", dist, typ)
 			// log.Printf("[DEBUG] symbols: %v", symbols)
 			var pld []SoftBit
 			symbols, pld, _ = extractPayload(dist, typ, symbols)
 			m.frameSink(typ, pld)
 
 		case typ == StreamSync && dist < 5.0:
-			log.Printf("[DEBUG] Received StreamSync, distance: %f, type: %x", dist, typ)
+			// log.Printf("[DEBUG] Received StreamSync, distance: %f, type: %x", dist, typ)
 			// log.Printf("[DEBUG] symbols: %v", symbols)
 			var pld []SoftBit
 			symbols, pld, _ = extractPayload(dist, typ, symbols)
 			m.frameSink(typ, pld)
+
 		case typ == EOTMarker && dist < 4.5:
-			log.Printf("[DEBUG] Received EOTMarker, distance: %f, type: %x", dist, typ)
+			// log.Printf("[DEBUG] Received EOTMarker, distance: %f, type: %x", dist, typ)
 			// log.Printf("[DEBUG] symbols: %v", symbols)
 			symbols = symbols[16*5:]
 			m.frameSink(typ, nil)
+
 		default:
 			// No one read anything, so advance one symbol
 			symbols = symbols[1:]
