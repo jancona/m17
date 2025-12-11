@@ -167,7 +167,7 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 						d.receivedRFStreamLICH(*d.lsf, float64(d.errors)/float64(d.bits)*100)
 					} else {
 						log.Printf("[DEBUG] Stream LSF CRC error: %v", lsfB)
-						d.gotLSF = false
+						// d.gotLSF = false
 					}
 				}
 			}
