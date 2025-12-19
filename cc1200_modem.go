@@ -370,7 +370,7 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 
 	var syms []Symbol
 	//fill preamble
-	syms = AppendPreamble(syms, lsfPreamble)
+	syms = AppendPreamble(nil, lsfPreamble)
 	err := m.writeSymbols(syms)
 	if err != nil {
 		return fmt.Errorf("failed to send preamble: %w", err)
@@ -387,7 +387,7 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 	chunkCnt := 0
 	packetData := p.PayloadBytes()
 	for bytesLeft := len(packetData); bytesLeft > 0; bytesLeft -= 25 {
-		syms = AppendSyncwordSymbols(syms, PacketSync)
+		syms = AppendSyncwordSymbols(nil, PacketSync)
 		chunk := make([]byte, 25+1) // 25 bytes from the packet plus 6 bits of metadata
 		if bytesLeft > 25 {
 			// not the last chunk
