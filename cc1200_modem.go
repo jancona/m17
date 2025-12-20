@@ -436,9 +436,10 @@ func (m *CC1200Modem) TransmitPacket(p Packet) error {
 func (m *CC1200Modem) TransmitVoiceStream(sd StreamDatagram) error {
 	// log.Printf("[DEBUG] TransmitVoiceStream id: %04x, fn: %04x, last: %v", sd.StreamID, sd.FrameNumber, sd.LastFrame)
 	m.mutex.Lock()
-	if m.txState != txTX {
+	firstFrame := m.txState != txTX
+	m.mutex.Unlock()
+	if firstFrame {
 		// First frame
-		m.mutex.Unlock()
 		log.Printf("[DEBUG] Sending first frame of stream %x, fn %d, lsf: %v", sd.StreamID, sd.FrameNumber, sd.LSF)
 		m.stopRX()
 		time.Sleep(2 * time.Millisecond)
@@ -461,25 +462,15 @@ func (m *CC1200Modem) TransmitVoiceStream(sd StreamDatagram) error {
 		if err != nil {
 			return fmt.Errorf("failed to send LSF: %w", err)
 		}
-		syms, err = generateStreamSymbols(sd)
-		if err != nil {
-			return fmt.Errorf("failed to generate LSF symbols: %w", err)
-		}
-		err = m.writeSymbols(syms)
-		if err != nil {
-			return fmt.Errorf("failed to send stream frame: %w", err)
-		}
-	} else {
-		m.mutex.Unlock()
-		// log.Printf("[DEBUG] Sending frame of stream %x, fn %d", sd.StreamID, sd.FrameNumber)
-		syms, err := generateStreamSymbols(sd)
-		if err != nil {
-			return fmt.Errorf("failed to generate LSF symbols: %w", err)
-		}
-		err = m.writeSymbols(syms)
-		if err != nil {
-			return fmt.Errorf("failed to send stream frame: %w", err)
-		}
+	}
+	// log.Printf("[DEBUG] Sending frame of stream %x, fn %d", sd.StreamID, sd.FrameNumber)
+	syms, err := generateStreamSymbols(sd)
+	if err != nil {
+		return fmt.Errorf("failed to generate stream symbols: %w", err)
+	}
+	err = m.writeSymbols(syms)
+	if err != nil {
+		return fmt.Errorf("failed to send stream frame: %w", err)
 	}
 	m.txTimer.Reset(txTimeout)
 	if sd.LastFrame {
@@ -492,7 +483,7 @@ func (m *CC1200Modem) TransmitVoiceStream(sd StreamDatagram) error {
 		}
 		log.Printf("[DEBUG] Finished TransmitVoiceStream")
 		m.txTimer.Reset(txTimeout)
-		time.Sleep(txVoiceStreamWait)
+		time.Sleep(endTXWait)
 		log.Printf("[DEBUG] Finished TransmitVoiceStream wait")
 		m.stopTX()
 		m.Start()
@@ -648,6 +639,7 @@ func (m *CC1200Modem) writeSymbols(symbols []Symbol) error {
 			log.Printf("[DEBUG] Failed to write to debug log: %v", err)
 		}
 	}
+	time.Sleep(time.Until(m.lastTXData.Add(FrameTime)))
 	_, err := m.modem.Write(buf)
 	since := time.Since(m.lastTXData)
 	if since > 100*time.Millisecond {

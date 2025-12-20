@@ -256,19 +256,19 @@ func (m *MMDVMModem) modemReceive() {
 			// log.Printf("[DEBUG] modemReceive getReponse(): %x", responseType)
 			switch responseType {
 			case mmdvmM17LinkSetup:
-				// log.Printf("[DEBUG] Received M17 LSF: [% 02x]", buf)
+				log.Printf("[DEBUG] Received M17 LSF: [% 02x]", buf)
 				sb := bytesToSoftBits(buf[3 : 46+3])
 				m.frameSink(LSFSync, sb)
 			case mmdvmM17Stream:
-				// log.Printf("[DEBUG] Received M17 Stream frame: [% 02x]", buf)
+				log.Printf("[DEBUG] Received M17 Stream frame: [% 02x]", buf)
 				sb := bytesToSoftBits(buf[3 : 46+3])
 				m.frameSink(StreamSync, sb)
 			case mmdvmM17Packet:
-				// log.Printf("[DEBUG] Received M17 Packet frame: [% 02x]", buf)
+				log.Printf("[DEBUG] Received M17 Packet frame: [% 02x]", buf)
 				sb := bytesToSoftBits(buf[3 : 46+3])
 				m.frameSink(PacketSync, sb)
 			case mmdvmM17EOT:
-				// log.Printf("[DEBUG] Received M17 EOT: [% 02x]", buf)
+				log.Printf("[DEBUG] Received M17 EOT: [% 02x]", buf)
 				sb := bytesToSoftBits(buf[3 : 46+3])
 				m.frameSink(EOTMarker, sb)
 			case mmdvmM17Lost:
@@ -980,11 +980,11 @@ func (m *MMDVMModem) transmitLSF(lsf LSF) error {
 }
 
 func (m *MMDVMModem) TransmitVoiceStream(sd StreamDatagram) error {
-	// log.Printf("[DEBUG] TransmitVoiceStream id: %04x, fn: %04x, last: %v", sd.StreamID, sd.FrameNumber, sd.LastFrame)
+	log.Printf("[DEBUG] TransmitVoiceStream id: %04x, fn: %04x, last: %v", sd.StreamID, sd.FrameNumber, sd.LastFrame)
 	var bits []Bit
 	var err error
-
 	if sd.FrameNumber == 0 && sd.LSF != nil { // first frame
+		time.Sleep(time.Until(m.lastTXData.Add(FrameTime)))
 		err = m.transmitLSF(*sd.LSF)
 		if err != nil {
 			return fmt.Errorf("failed to send stream LSF: %w", err)
@@ -994,9 +994,12 @@ func (m *MMDVMModem) TransmitVoiceStream(sd StreamDatagram) error {
 	if err != nil {
 		return fmt.Errorf("failed to generate stream bits: %w", err)
 	}
+	time.Sleep(time.Until(m.lastTXData.Add(FrameTime)))
+
 	m.writeBits(mmdvmM17Stream, bits)
 	if sd.LastFrame {
 		// send EOT
+		time.Sleep(time.Until(m.lastTXData.Add(FrameTime)))
 		m.writeEOT()
 	}
 	return nil
@@ -1029,10 +1032,10 @@ func (m *MMDVMModem) sendToModem(cmd []byte) {
 		if since > 100*time.Millisecond {
 			log.Printf("[DEBUG] Last TX data sent %v ago", since.Round(time.Millisecond))
 		}
-		m.lastTXData = time.Now()
 	default:
-		fmt.Println("[DEBUG] sendToModem message send failed")
+		log.Println("[DEBUG] sendToModem message send failed")
 	}
+	m.lastTXData = time.Now()
 }
 
 func (m *MMDVMModem) getSpace() int {

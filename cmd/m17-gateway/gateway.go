@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
-	"math/rand"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,7 +20,7 @@ import (
 	// _ "net/http/pprof"
 )
 
-var callsignAll, _ = m17.EncodeCallsign("@ALL")
+// var callsignAll, _ = m17.EncodeCallsign("@ALL")
 
 type config struct {
 	callsign         string
@@ -45,6 +46,7 @@ type config struct {
 	symbolsOut       *os.File
 	hostfile         *m17.Hostfile
 	overrideHostfile *m17.Hostfile
+	audioDir         string
 }
 
 func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
@@ -55,6 +57,15 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	}
 	callsign := cfg.Section("General").Key("Callsign").String()
 	dashboardLog := cfg.Section("General").Key("DashboardLog").String()
+	audioDir := cfg.Section("General").Key("AudioDir").MustString("audio/")
+	if !filepath.IsAbs(audioDir) {
+		exe, err := os.Executable()
+		if err != nil {
+			log.Fatalf("Unable to find executable location: %v", err)
+		}
+		audioDir = filepath.Join(filepath.Dir(exe), audioDir)
+	}
+
 	rxFrequency, rxFrequencyErr := cfg.Section("Radio").Key("RXFrequency").Uint()
 	txFrequency, txFrequencyErr := cfg.Section("Radio").Key("TXFrequency").Uint()
 	power, powerErr := cfg.Section("Radio").Key("Power").Float64()
@@ -192,6 +203,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		dashboardLogger:  dashboardLogger,
 		hostfile:         reflectorHostfile,
 		overrideHostfile: reflectorOverrideHostfile,
+		audioDir:         audioDir,
 	}, err
 }
 
@@ -293,6 +305,18 @@ func setupLogging(c config) {
 	log.Print("[DEBUG] Debug is on")
 }
 
+type gatewayState int
+
+const (
+	Idle gatewayState = iota
+	RFStreamRX
+	RFPacketRX
+	NetStreamRX
+	NetPacketRX
+	Echo
+	LocalCommand
+)
+
 // Gateway connects to a reflector, converts traffic to/from audio format on stdout,
 // so it can be used in a pipeline with other tools
 type Gateway struct {
@@ -311,13 +335,16 @@ type Gateway struct {
 	hostfile         *m17.Hostfile
 	overrideHostfile *m17.Hostfile
 	encodedCallsign  m17.EncodedCallsign
+	callsign         string
+	stateMutex       sync.Mutex
+	state            gatewayState
 
 	lastLogTime    time.Time
 	lastFrameTimer *time.Timer
 	lastLSF        *m17.LSF // Workaround for reflectors that change the SRC during the stream
 	lastStreamID   uint16
-	echoMode       bool
 	echoStream     []m17.StreamDatagram
+	audioClips     map[string][]byte
 }
 
 func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
@@ -336,7 +363,13 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 		hostfile:         cfg.hostfile,
 		overrideHostfile: cfg.overrideHostfile,
 		encodedCallsign:  *cs,
+		callsign:         cfg.callsign,
+		state:            Idle,
 		lastStreamID:     0xFFFF,
+	}
+	err = g.loadAudioClips(cfg.audioDir, cfg.callsign)
+	if err != nil {
+		return nil, err
 	}
 	h, ok := g.overrideHostfile.Hosts[g.Name]
 	if !ok {
@@ -397,8 +430,8 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 			g.lastStreamID = 0xFFFF
 			g.lastFrameTimer = nil
 			g.lastLSF = nil
-			if g.echoMode {
-				g.echoEnd()
+			if g.getState() == Echo {
+				g.echoStreamEnd()
 			}
 		})
 	}
@@ -448,14 +481,31 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	sd.LSF.Src = g.encodedCallsign
 	sd.LSF.CalcCRC()
 	err := g.modem.TransmitVoiceStream(sd)
+	if err != nil {
+		log.Printf("[ERROR] Error transmitting voice stream: %v", err)
+	}
 	if g.lastFrameTimer != nil {
 		g.lastFrameTimer.Reset(time.Second)
 	}
 	return err
 }
 
+func (g *Gateway) getState() gatewayState {
+	g.stateMutex.Lock()
+	defer g.stateMutex.Unlock()
+	return g.state
+}
+
+func (g *Gateway) setState(state gatewayState) {
+	// log.Printf("[DEBUG] setState(%v)", state)
+	g.stateMutex.Lock()
+	defer g.stateMutex.Unlock()
+	g.state = state
+}
+
 func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
-	if lsf.Type[1]&byte(m17.LSFTypeStream) == byte(m17.LSFTypeStream) {
+	if g.getState() == Idle &&
+		lsf.Type[1]&byte(m17.LSFTypeStream) == byte(m17.LSFTypeStream) {
 		g.dashboardLogger.Info("", "type", "RF", "subtype", "Voice Start", "src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(), "mer", json.Number(fmt.Sprintf("%f", ber)))
 		gnss := lsf.GNSS()
 		if gnss != nil && gnss.ValidLatLon {
@@ -487,20 +537,29 @@ func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
 			}
 			g.dashboardLogger.Info("", args...)
 		}
+		switch lsf.Dst.Callsign() {
+		case "/ECHO", "#ECHO":
+			log.Printf("[DEBUG] receivedRFLSF() Echo")
+			g.setState(Echo)
+			g.echoStreamStart()
+		case "/INFO", "#INFO":
+			log.Printf("[DEBUG] receivedRFLSF() Info")
+			g.setState(LocalCommand)
+		default:
+			log.Printf("[DEBUG] receivedRFLSF() RFStream: %s", lsf.Dst.Callsign())
+			g.setState(RFStreamRX)
+		}
+		// TODO: Should we be sending the RF LSF here?
 	}
-	switch lsf.Dst.Callsign() {
-	case "/ECHO", "#ECHO":
-		g.echoStart()
-	}
-	// TODO: Should we be sending the RF LSF here?
 	return nil
 }
 func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uint16, ber float64) error {
 	var err error
 	sd := m17.NewStreamDatagram(sid, fn, &lsf, payload)
-	if g.echoMode {
-		g.echoRecord(sd)
-	} else {
+	switch g.getState() {
+	case Echo:
+		g.echoStreamRecord(sd)
+	case RFStreamRX:
 		err = g.relay.SendStream(sd)
 		if g.duplex {
 			// Replace META with Extended Callsign Data
@@ -514,50 +573,60 @@ func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uin
 	return err
 }
 func (g *Gateway) receivedRFStreamLICH(lsf m17.LSF, ber float64) error {
-	gnss := lsf.GNSS()
-	if g.dashboardLogger != nil &&
-		gnss != nil &&
-		gnss.ValidLatLon &&
-		time.Since(g.lastLogTime) > 15*time.Second {
-		g.lastLogTime = time.Now()
-		args := []any{
-			"type", "RF",
-			"subtype", "GNSS",
-			"dataSource", gnss.DataSource,
-			"stationType", gnss.StationType,
-			"src", lsf.Src.Callsign(),
-			"latitude", json.Number(fmt.Sprintf("%f", gnss.Latitude)),
-			"longitude", json.Number(fmt.Sprintf("%f", gnss.Longitude)),
+	if g.getState() == RFStreamRX {
+		gnss := lsf.GNSS()
+		if g.dashboardLogger != nil &&
+			gnss != nil &&
+			gnss.ValidLatLon &&
+			time.Since(g.lastLogTime) > 15*time.Second {
+			g.lastLogTime = time.Now()
+			args := []any{
+				"type", "RF",
+				"subtype", "GNSS",
+				"dataSource", gnss.DataSource,
+				"stationType", gnss.StationType,
+				"src", lsf.Src.Callsign(),
+				"latitude", json.Number(fmt.Sprintf("%f", gnss.Latitude)),
+				"longitude", json.Number(fmt.Sprintf("%f", gnss.Longitude)),
+			}
+			if gnss.ValidAltitude {
+				args = append(args,
+					"altitude", json.Number(fmt.Sprintf("%.1f", gnss.Altitude)),
+				)
+			}
+			if gnss.ValidBearingSpeed {
+				args = append(args,
+					"speed", json.Number(fmt.Sprintf("%.1f", gnss.Speed)),
+					"bearing", gnss.Bearing,
+				)
+			}
+			if gnss.ValidRadius {
+				args = append(args,
+					"radius", gnss.Radius,
+				)
+			}
+			g.dashboardLogger.Info("", args...)
 		}
-		if gnss.ValidAltitude {
-			args = append(args,
-				"altitude", json.Number(fmt.Sprintf("%.1f", gnss.Altitude)),
-			)
-		}
-		if gnss.ValidBearingSpeed {
-			args = append(args,
-				"speed", json.Number(fmt.Sprintf("%.1f", gnss.Speed)),
-				"bearing", gnss.Bearing,
-			)
-		}
-		if gnss.ValidRadius {
-			args = append(args,
-				"radius", gnss.Radius,
-			)
-		}
-		g.dashboardLogger.Info("", args...)
 	}
 	return nil
 }
 func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) error {
-	var err error
+	switch g.getState() {
+	case Echo:
+		go g.echoStreamEnd()
+	case LocalCommand:
+		switch lsf.Dst.Callsign() {
+		case "/INFO", "#INFO":
+			go g.playMessage("welcome", "callsign", "is_linked_to", g.relay.Name+" "+string(g.relay.Module))
+		}
+	case RFStreamRX:
+		log.Printf("[DEBUG] receivedRFStreamEOT() setState(Idle)")
+		g.setState(Idle)
+	}
 	g.dashboardLogger.Info("", "type", "RF", "subtype", "Voice End",
 		"src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(),
 		"mer", json.Number(fmt.Sprintf("%f", ber)))
-	if g.echoMode {
-		err = g.echoEnd()
-	}
-	return err
+	return nil
 }
 func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) error {
 	var err error
@@ -576,10 +645,17 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 				"packetType", p.Type)
 		}
 	}
-	if g.echoMode {
-		err = g.echoPacket(p)
-	} else {
-		// log.Printf("[DEBUG] send packet to reflector/relay: %v", p)
+	switch lsf.Dst.Callsign() {
+	case "/ECHO", "#ECHO":
+		g.setState(Echo)
+		log.Printf("[DEBUG] receivedRFPacket() Echo")
+		go g.echoPacket(p)
+	case "/INFO", "#INFO":
+		g.setState(LocalCommand)
+		log.Printf("[DEBUG] receivedRFPacket() Info")
+		go g.infoPacket(p)
+	default:
+		log.Printf("[DEBUG] receivedRFPacket() packet dst: %s", lsf.Dst.Callsign())
 		err = g.relay.SendPacket(p)
 		if err == nil && g.duplex {
 			// Replace META with Extended Callsign Data
@@ -589,53 +665,6 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 			err = g.modem.TransmitPacket(p)
 		}
 	}
-	return err
-}
-
-func (g *Gateway) echoStart() {
-	log.Printf("[DEBUG] echoStart()")
-	g.echoMode = true
-	// g.echoStream = make([]m17.StreamDatagram, 0, 10*m17.FramesPerSecond)
-	g.echoStream = make([]m17.StreamDatagram, 0)
-}
-func (g *Gateway) echoRecord(sd m17.StreamDatagram) {
-	if g.echoMode {
-		// log.Printf("[DEBUG] echoRecord(%v)", sd)
-		g.echoStream = append(g.echoStream, sd)
-	}
-}
-func (g *Gateway) echoPacket(p m17.Packet) error {
-	var err error
-	if g.echoMode {
-		log.Printf("[DEBUG] echoPacket(%v)", p)
-		p.LSF.Dst = p.LSF.Src
-		p.LSF.Src = g.encodedCallsign
-		p.LSF.CalcCRC()
-		err = g.modem.TransmitPacket(p)
-	}
-	g.echoMode = false
-	return err
-}
-func (g *Gateway) echoEnd() error {
-	var err error
-	if g.echoMode {
-		log.Printf("[DEBUG] echoEnd() %d frames", len(g.echoStream))
-		time.Sleep(250 * time.Millisecond)
-		sid := uint16(rand.Intn(0x10000))
-		for _, sd := range g.echoStream {
-			sd.StreamID = sid
-			sd.LSF.Dst = sd.LSF.Src
-			sd.LSF.Src = g.encodedCallsign
-			sd.LSF.CalcCRC()
-			// log.Printf("[DEBUG] echoEnd id: %04x, fn: %04x, last: %v, payload: [% 02x]", sd.StreamID, sd.FrameNumber, sd.LastFrame, sd.Payload)
-			err = g.modem.TransmitVoiceStream(sd)
-			if err != nil {
-				break
-			}
-		}
-	}
-	g.echoStream = nil
-	g.echoMode = false
 	return err
 }
 
@@ -676,4 +705,29 @@ func (g *Gateway) Close() {
 	if g.out != os.Stdout {
 		g.out.Close()
 	}
+}
+
+func (g *Gateway) echoPacket(p m17.Packet) error {
+	defer g.setState(Idle)
+	var err error
+	log.Printf("[DEBUG] echoPacket(%v)", p)
+	p.LSF.Dst = p.LSF.Src
+	p.LSF.Src = g.encodedCallsign
+	p.LSF.CalcCRC()
+	err = g.modem.TransmitPacket(p)
+	return err
+}
+
+func (g *Gateway) infoPacket(p m17.Packet) error {
+	defer g.setState(Idle)
+	var err error
+	log.Printf("[DEBUG] infoPacket(%v)", p)
+	p.LSF.Dst = p.LSF.Src
+	p.LSF.Src = g.encodedCallsign
+	p.LSF.CalcCRC()
+	msg := g.callsign + " is linked to " + g.relay.Name + " " + string(g.relay.Module)
+	p.Payload = append(([]byte)(msg), 0) // NULL terminate the string
+	p.CalcCRC()
+	err = g.modem.TransmitPacket(p)
+	return err
 }

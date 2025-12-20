@@ -52,8 +52,7 @@ func NewPacket(dst, src string, t PacketType, data []byte) (*Packet, error) {
 		Type: t,
 	}
 	p.Payload = append(p.Payload, data...)
-	pb := p.PayloadBytes()
-	p.CRC = CRC(pb[:len(pb)-2])
+	p.CalcCRC()
 	return &p, nil
 }
 
@@ -76,6 +75,13 @@ func (p *Packet) PayloadBytes() []byte {
 		log.Printf("[ERROR] Error encoding CRC: %v", err)
 	}
 	return b
+}
+
+// Calculate CRC
+func (p *Packet) CalcCRC() uint16 {
+	pb := p.PayloadBytes()
+	p.CRC = CRC(pb[:len(pb)-2])
+	return p.CRC
 }
 
 // Check if the CRC is correct

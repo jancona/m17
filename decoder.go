@@ -133,7 +133,7 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 			d.packetData = d.packetData[:(d.lastPacketFN+1)*25+frameNumOrByteCnt]
 			// log.Printf("[DEBUG] pktFrame[:frameNumOrByteCnt]: % 0x, d.packetData: % 0x", pktFrame[:frameNumOrByteCnt], d.packetData)
 			if CRC(d.packetData) == 0 {
-				// log.Printf("[DEBUG] d.lsf: %v, d.packetData: %v", d.lsf, d.packetData)
+				log.Printf("[DEBUG] d.lsf: %v, d.packetData: %v", d.lsf, d.packetData)
 				d.receivedRFPacket(*d.lsf, d.packetData, float64(d.errors)/float64(d.bits)*100)
 			} else {
 				log.Printf("[DEBUG] Bad CRC not forwarded: %x", CRC(d.packetData))
@@ -167,7 +167,6 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 						d.receivedRFStreamLICH(*d.lsf, float64(d.errors)/float64(d.bits)*100)
 					} else {
 						log.Printf("[DEBUG] Stream LSF CRC error: %v", lsfB)
-						// d.gotLSF = false
 					}
 				}
 			}

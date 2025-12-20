@@ -125,6 +125,7 @@ func NewLSF(destCall, sourceCall string, t LSFType, dt LSFDataType, can byte) (L
 	}
 	lsf.Type[0] = (can & 0x7)
 	lsf.Type[1] = (byte(t) & 0x1) | ((byte(dt) & 0x3) << 1)
+	lsf.CalcCRC()
 	return lsf, nil
 }
 

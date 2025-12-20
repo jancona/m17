@@ -2,6 +2,7 @@
 # Example: N1ADJ or N1ADJ G
 Callsign=CALLSIGN_PLACEHOLDER
 DashboardLog=/opt/m17/m17-gateway/dashboard.log
+AudioDir=audio/
 
 [Radio]
 # Hertz

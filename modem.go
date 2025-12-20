@@ -58,6 +58,7 @@ func generateLSFBits(l LSF) ([]Bit, error) {
 }
 
 func generateLSFSymbols(l *LSF) ([]Symbol, error) {
+	// log.Printf("[DEBUG] generateLSFSymbols(%v)", *l)
 	// bits, err := generateLSFBits(l)
 	// if err != nil {
 	// 	return nil, fmt.Errorf("unable to encode LSF: %w", err)
