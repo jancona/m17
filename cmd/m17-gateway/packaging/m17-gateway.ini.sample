@@ -26,7 +26,7 @@ Level=DEBUG
 
 [Modem]
 # Change Type to mmdvm for MMDVM modems/hotspots
-Type=cc1200
+Type=cc1200v2
 Port=/dev/ttyAMA0
 # 460800 for cc1200. Typically 115200 or 460800 for MMDVM.
 Speed=460800
