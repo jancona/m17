@@ -25,6 +25,8 @@ cd packaging
 # Copy hostfiles
 cp "M17Hosts.txt" "../${BUILD_DIR}/opt/m17/m17-gateway/"
 cp "OverrideHosts.txt" "../${BUILD_DIR}/opt/m17/m17-gateway/"
+# Copy audio files
+cp -r "audio/" "../${BUILD_DIR}/opt/m17/m17-gateway/"
 
 # Copy configuration file
 cp "${PACKAGE_NAME}.ini.sample" "../${BUILD_DIR}/etc/"
