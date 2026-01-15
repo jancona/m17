@@ -7,20 +7,21 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 	"time"
 )
 
 const (
 	magicLen = 4
 
-	magicACKN = "ACKN"
-	magicCONN = "CONN"
-	magicDISC = "DISC"
-	// magicLSTN      = "LSTN"
+	magicACKN      = "ACKN"
+	magicCONN      = "CONN"
+	magicDISC      = "DISC"
+	magicLSTN      = "LSTN"
 	magicNACK      = "NACK"
 	magicPING      = "PING"
 	magicPONG      = "PONG"
-	magicM17Voice  = "M17 "
+	magicM17Stream = "M17 "
 	magicM17Packet = "M17P"
 
 	maxRetries = 10
@@ -50,11 +51,11 @@ func NewRelay(name string, server string, port uint, module string, callsign str
 	if err != nil {
 		return nil, fmt.Errorf("bad callsign %s: %w", callsign, err)
 	}
-	n := NormalizeCallsignModule(name + " " + module)
-	encodedName, err := EncodeCallsign(n)
-	if err != nil {
-		return nil, fmt.Errorf("bad name/module %s: %w", n, err)
-	}
+	// n := NormalizeCallsignModule(name + " " + module)
+	// encodedName, err := EncodeCallsign(n)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("bad name/module %s: %w", n, err)
+	// }
 	var m byte
 	switch {
 	case len(module) == 0:
@@ -66,11 +67,11 @@ func NewRelay(name string, server string, port uint, module string, callsign str
 	}
 	var r *Relay
 	r = &Relay{
-		Name:            name,
-		Server:          server,
-		Port:            port,
-		Module:          m,
-		EncodedName:     encodedName,
+		Name:   name,
+		Server: server,
+		Port:   port,
+		Module: m,
+		// EncodedName:     encodedName,
 		callsign:        callsign,
 		encodedCallsign: cs,
 		packetHandler:   packetHandler,
@@ -188,7 +189,7 @@ func (r *Relay) handle() {
 			r.sendPONG()
 			r.pingTimer.Reset(30 * time.Second)
 			// case magicINFO:
-		case magicM17Voice: // M17 voice stream
+		case magicM17Stream: // M17 voice stream
 			// log.Printf("[DEBUG] stream buffer: % 2x", buffer)
 			if r.streamHandler != nil {
 				sd, err := NewStreamDatagramFromBytes(buffer)
@@ -317,7 +318,7 @@ func NewStreamDatagram(streamID uint16, frameNumber uint16, lsf *LSF, payload []
 
 func (sd StreamDatagram) ToBytes() []byte {
 	buf := make([]byte, 0, 54)
-	buf = append(buf, []byte(magicM17Voice)...)
+	buf = append(buf, []byte(magicM17Stream)...)
 	buf, _ = binary.Append(buf, binary.BigEndian, sd.StreamID)
 	buf = append(buf, sd.LSF.ToLSDBytes()...)
 	buf, _ = binary.Append(buf, binary.BigEndian, sd.FrameNumber)
@@ -335,4 +336,296 @@ func (sd StreamDatagram) String() string {
 	LSF: %s,
 	Payload: [% 2x],
 }`, sd.StreamID, sd.FrameNumber, sd.LastFrame, sd.LSF, sd.Payload)
+}
+
+type Server struct {
+	Name          string
+	InterfaceAddr string
+	conn          *net.UDPConn
+	modules       map[byte]Module
+	running       bool
+	mutex         sync.Mutex
+	clients       map[string]*client
+}
+
+func NewServer(name string, addr string, modules map[byte]Module) *Server {
+	s := Server{
+		Name:          name,
+		InterfaceAddr: addr,
+		modules:       modules,
+		clients:       map[string]*client{},
+	}
+	return &s
+}
+func (s *Server) Start() error {
+	udpAddr, err := net.ResolveUDPAddr("udp", s.InterfaceAddr)
+	if err != nil {
+		log.Printf("[ERROR] Failed to resolve address %s", s.InterfaceAddr)
+		return err
+	}
+
+	s.conn, err = net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		log.Printf("[ERROR] Failed to listen on %v", udpAddr)
+		return err
+	}
+	log.Printf("[INFO] Listening on: %s", s.InterfaceAddr)
+
+	s.handle()
+
+	return nil
+}
+func (s *Server) handle() {
+	log.Print("[INFO] Server is ready")
+	for {
+		buf := make([]byte, 1024)
+		s.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		n, addr, err := s.conn.ReadFromUDP(buf)
+		if err != nil {
+			if ne, ok := err.(*net.OpError); ok && ne.Timeout() {
+				continue
+			}
+			if ne, ok := err.(*net.OpError); ok && ne.Op == "read" && ne.Err.Error() == "use of closed network connection" {
+				log.Print("[DEBUG] Socket closed, exiting listen loop.", nil)
+				return
+			}
+			log.Printf("[ERROR] Error reading packet: %v", err)
+			continue
+		}
+		buf = buf[:n]
+		if n < magicLen {
+			log.Printf("[DEBUG] Ignoring short packet from %s: [% x]", addr, buf)
+			continue
+		}
+		magic := string(buf[:magicLen])
+		if magic != magicPING && magic != magicPONG {
+			log.Printf("[DEBUG] Received packet from %s: magic: %s, [% x]", addr, magic, buf)
+		}
+		switch magic {
+		case magicACKN:
+			// s.recvACKN(buf)
+		case magicCONN:
+			s.recvConnect(buf, addr, false)
+		case magicDISC:
+			if n != 10 {
+				log.Printf("[INFO] Bad DISC packet length %d, should be 19", n)
+			} else {
+				c := s.lookupClient(addr)
+				if c != nil {
+					log.Printf("[INFO] Disconnecting client %s", addr.String())
+					c.pongTimer.Stop()
+					c.pingTimer.Stop()
+					s.removeClient(c)
+				}
+			}
+		case magicLSTN:
+			s.recvConnect(buf, addr, true)
+		case magicNACK:
+			// s.recvNACK(buf)
+		case magicPING:
+			fallthrough
+		case magicPONG:
+			if n != 10 {
+				log.Printf("[INFO] Bad PING/PONG packet length %d, should be 10", n)
+			} else {
+				c := s.lookupClient(addr)
+				if c != nil {
+					// log.Printf("[DEBUG] Received PING/PONG from client %v", *c)
+					c.pongTimer.Reset(30 * time.Second)
+				}
+			}
+		case magicM17Stream:
+			log.Printf("[DEBUG] Server received stream message: % 2x", buf)
+			sd, err := NewStreamDatagramFromBytes(buf)
+			if err != nil {
+				log.Printf("[INFO] Dropping bad stream datagram: %v", err)
+				s.sendNACK(addr)
+			} else {
+				log.Printf("[DEBUG] Server received StreamDatagram: %s", sd)
+				c := s.lookupClient(addr)
+				if c != nil {
+					err := c.module.HandleStreamDatagram(sd)
+					if err != nil {
+						log.Printf("[ERROR] Error calling streamHandler: %v", err)
+						s.sendNACK(addr)
+					}
+					// Send the datagram to other clients of the module
+					for _, cl := range s.lookupClientsByModule(c.module.Name()) {
+						if c != cl {
+							s.SendDatagram(&sd, cl.addr)
+						}
+					}
+				}
+			}
+		case magicM17Packet:
+			p := NewPacketFromBytes(buf[4:])
+			log.Printf("[DEBUG] Server received packet: %s", p.String())
+			c := s.lookupClient(addr)
+			if c != nil {
+				c.module.HandlePacket(p)
+				// Send the packet to other clients of the module, becuase the module won't send it back
+				// Should this be here or in the module?
+				for _, cl := range s.lookupClientsByModule(c.module.Name()) {
+					if c != cl {
+						s.SendPacket(&p, cl.addr)
+					}
+				}
+			}
+		}
+	}
+}
+
+func (s *Server) Close() {
+	s.conn.Close()
+}
+
+func (s *Server) recvConnect(buf []byte, addr *net.UDPAddr, listenOnly bool) {
+	if len(buf) != 11 {
+		s.sendNACK(addr)
+		log.Printf("[INFO] Bad CONN packet length %d, should be 11", len(buf))
+		return
+	}
+	module := s.modules[buf[10]]
+	if module == nil {
+		s.sendNACK(addr)
+		log.Printf("[INFO] Invalid module '%s'", string(buf[10]))
+		return
+	}
+	c := s.newClient(buf[4:10], module, addr, listenOnly)
+	log.Printf("[INFO] Connecting client %s", addr.String())
+	s.addClient(c)
+	s.sendACKN(addr)
+}
+
+func (s *Server) sendACKN(addr *net.UDPAddr) error {
+	// log.Print("[DEBUG] Sending ACKN")
+	cmd := make([]byte, 10)
+	copy(cmd, []byte(magicACKN))
+	_, err := s.conn.WriteToUDP(cmd, addr)
+	if err != nil {
+		return fmt.Errorf("error sending ACKN: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) sendNACK(addr *net.UDPAddr) error {
+	// log.Print("[DEBUG] Sending NACK")
+	cmd := make([]byte, 10)
+	copy(cmd, []byte(magicNACK))
+	_, err := s.conn.WriteToUDP(cmd, addr)
+	if err != nil {
+		return fmt.Errorf("error sending NACK: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) sendPING(encodedCallsign []byte, addr *net.UDPAddr) error {
+	// log.Print("[DEBUG] Sending PING")
+	cmd := make([]byte, 10)
+	copy(cmd, []byte(magicPING))
+	copy(cmd[4:10], encodedCallsign)
+	_, err := s.conn.WriteToUDP(cmd, addr)
+	if err != nil {
+		return fmt.Errorf("error sending PONG: %w", err)
+	}
+	return nil
+}
+
+// func (s *Server) sendDISC(encodedCallsign []byte, addr *net.UDPAddr) error {
+// 	cmd := make([]byte, 10)
+// 	copy(cmd, []byte(magicDISC))
+// 	copy(cmd[4:10], encodedCallsign[:])
+// 	log.Printf("[DEBUG] Sending DISC cmd: %#v", cmd)
+// 	_, err := s.conn.WriteToUDP(cmd, addr)
+// 	if err != nil {
+// 		return fmt.Errorf("error sending DISC: %w", err)
+// 	}
+// 	return nil
+// }
+
+func (s *Server) SendPacket(p *Packet, addr *net.UDPAddr) error {
+	cmd := []byte("M17P")
+	cmd = append(cmd, p.ToBytes()...)
+	log.Printf("[DEBUG] Sending Packet: %#v", cmd)
+	_, err := s.conn.WriteToUDP(cmd, addr)
+	if err != nil {
+		return fmt.Errorf("error sending DISC: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) SendDatagram(sd *StreamDatagram, addr *net.UDPAddr) error {
+	cmd := []byte("M17 ")
+	cmd = append(cmd, sd.ToBytes()...)
+	log.Printf("[DEBUG] Sending StreamDatagram: %#v to %s", cmd, addr.String())
+	_, err := s.conn.WriteToUDP(cmd, addr)
+	if err != nil {
+		return fmt.Errorf("error sending DISC: %w", err)
+	}
+	return nil
+}
+
+type client struct {
+	encodedCallsign []byte
+	callsign        string
+	module          Module
+	addr            *net.UDPAddr
+	pongTimer       *time.Timer
+	pingTimer       *time.Timer
+	listenOnly      bool
+}
+
+func (s *Server) newClient(callsign []byte, module Module, addr *net.UDPAddr, listenOnly bool) *client {
+	var c client
+	cs, _ := DecodeCallsign(callsign)
+	c = client{
+		encodedCallsign: callsign,
+		callsign:        cs,
+		module:          module,
+		addr:            addr,
+		listenOnly:      listenOnly,
+		pongTimer: time.AfterFunc(30*time.Second, func() {
+			log.Printf("[DEBUG] No PONGs received in > 30 seconds. Disconnecting.")
+			c.pongTimer.Stop()
+			c.pingTimer.Stop()
+			s.removeClient(&c)
+		}),
+		pingTimer: time.AfterFunc(3*time.Second, func() {
+			// log.Printf("[DEBUG] Sending PING to %s at %s", c.callsign, c.addr.String())
+			s.sendPING(c.encodedCallsign, c.addr)
+			c.pingTimer.Reset(3 * time.Second)
+		}),
+	}
+	return &c
+}
+
+func (s *Server) addClient(c *client) {
+	s.mutex.Lock()
+	s.clients[c.addr.String()] = c
+	s.mutex.Unlock()
+}
+
+func (s *Server) removeClient(c *client) {
+	s.mutex.Lock()
+	delete(s.clients, c.addr.String())
+	s.mutex.Unlock()
+}
+
+func (s *Server) lookupClient(addr *net.UDPAddr) *client {
+	key := addr.String()
+	s.mutex.Lock()
+	c := s.clients[key]
+	s.mutex.Unlock()
+	// log.Printf("[DEBUG] lookupClient(%s): %v", key, c)
+	return c
+}
+
+func (s *Server) lookupClientsByModule(m byte) []*client {
+	ret := []*client{}
+	for _, c := range s.clients {
+		if c.module.Name() == m {
+			ret = append(ret, c)
+		}
+	}
+	return ret
 }
