@@ -324,7 +324,7 @@ type Gateway struct {
 	modem            m17.Modem
 	in               *os.File
 	out              *os.File
-	relay            *m17.Relay
+	inetClient       *m17.InetClient
 	duplex           bool
 	done             bool
 	dashLog          *m17.DashboardLogger
@@ -376,11 +376,11 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 	g.Server = h.Server
 	g.Port = h.Port
 	log.Printf("[DEBUG] Connecting to %s, %s:%d, module %s", g.Name, g.Server, g.Port, g.Module)
-	g.relay, err = m17.NewRelay(g.Name, g.Server, g.Port, g.Module, cfg.callsign, g.dashLog, g.TransmitPacket, g.TransmitVoiceStream)
+	g.inetClient, err = m17.NewInetClient(g.Name, g.Server, g.Port, g.Module, cfg.callsign, m17.NewDashboardLogger(cfg.dashboardLogger), g.TransmitPacket, g.TransmitVoiceStream)
 	if err != nil {
-		return nil, fmt.Errorf("error creating relay: %v", err)
+		return nil, fmt.Errorf("error creating client: %v", err)
 	}
-	err = g.relay.Connect()
+	err = g.inetClient.Connect()
 	if err != nil {
 		return nil, fmt.Errorf("error connecting to %s %s:%d %s: %v", g.Name, g.Server, g.Port, g.Module, err)
 	}
@@ -391,7 +391,7 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 }
 
 func (g *Gateway) TransmitPacket(p m17.Packet) error {
-	// log.Printf("[DEBUG] received packet from relay: %#v", p)
+	// log.Printf("[DEBUG] received packet from server: %#v", p)
 	if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
 		msg := string(p.Payload[0 : len(p.Payload)-1])
 		g.dashLog.LogFrame(p.LSF, "Internet", "Packet", "packetType", p.Type, "smsMessage", msg)
@@ -402,13 +402,13 @@ func (g *Gateway) TransmitPacket(p m17.Packet) error {
 
 	// Replace META with Extended Callsign Data
 	// Don't swap Src for Packet
-	p.LSF.SetECD(&g.encodedCallsign, g.relay.EncodedName)
+	p.LSF.SetECD(&g.encodedCallsign, g.inetClient.EncodedName)
 	//	p.LSF.Src = g.encodedCallsign
 	return g.modem.TransmitPacket(p)
 }
 
 func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
-	// log.Printf("[DEBUG] received voice stream data from relay: %#v", sd)
+	// log.Printf("[DEBUG] received voice stream data from server: %#v", sd)
 	if g.lastStreamID != sd.StreamID {
 		if g.lastFrameTimer != nil {
 			g.lastFrameTimer.Stop()
@@ -444,7 +444,7 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	// Shouldn't need the next line with modern reflectors
 	// sd.LSF.Dst = *callsignAll
 	// Replace META with Extended Callsign Data
-	sd.LSF.SetECD(&sd.LSF.Src, g.relay.EncodedName)
+	sd.LSF.SetECD(&sd.LSF.Src, g.inetClient.EncodedName)
 	sd.LSF.Src = g.encodedCallsign
 	sd.LSF.CalcCRC()
 	err := g.modem.TransmitVoiceStream(sd)
@@ -498,7 +498,7 @@ func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uin
 	case Echo:
 		g.echoStreamRecord(sd)
 	case RFStreamRX:
-		err = g.relay.SendStream(sd)
+		err = g.inetClient.SendStream(sd)
 		if g.duplex {
 			// Replace META with Extended Callsign Data
 			sd.LSF.SetECD(&sd.LSF.Src, nil)
@@ -523,7 +523,7 @@ func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) 
 	case LocalCommand:
 		switch lsf.Dst.Callsign() {
 		case "/INFO", "#INFO":
-			go g.playMessage("welcome", "callsign", "is_linked_to", g.relay.Name+" "+string(g.relay.Module))
+			go g.playMessage("welcome", "callsign", "is_linked_to", g.inetClient.Name+" "+string(g.inetClient.Module))
 		}
 	case RFStreamRX:
 		log.Printf("[DEBUG] receivedRFStreamEOT() setState(Idle)")
@@ -553,7 +553,7 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 		go g.infoPacket(p)
 	default:
 		log.Printf("[DEBUG] receivedRFPacket() packet dst: %s", lsf.Dst.Callsign())
-		err = g.relay.SendPacket(p)
+		err = g.inetClient.SendPacket(p)
 		if err == nil && g.duplex {
 			// Replace META with Extended Callsign Data
 			// Don't swap Src for packet
@@ -592,7 +592,7 @@ func (g *Gateway) Run() {
 func (g *Gateway) Close() {
 	log.Print("[DEBUG] Gateway.Close()")
 	g.done = true
-	g.relay.Close()
+	g.inetClient.Close()
 	if g.modem != nil {
 		g.modem.Close()
 	}
@@ -622,7 +622,7 @@ func (g *Gateway) infoPacket(p m17.Packet) error {
 	p.LSF.Dst = p.LSF.Src
 	p.LSF.Src = g.encodedCallsign
 	p.LSF.CalcCRC()
-	msg := g.callsign + " is linked to " + g.relay.Name + " " + string(g.relay.Module)
+	msg := g.callsign + " is linked to " + g.inetClient.Name + " " + string(g.inetClient.Module)
 	p.Payload = append(([]byte)(msg), 0) // NULL terminate the string
 	p.CalcCRC()
 	err = g.modem.TransmitPacket(p)

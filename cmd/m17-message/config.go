@@ -68,7 +68,7 @@ func (u *ui) loginContent(a fyne.App) fyne.CanvasObject {
 		})
 	list.OnSelected = func(id widget.ListItemID) {
 		opt := opts[id]
-		title.SetText(fmt.Sprintf("Add %s reflector/relay", strings.Title(opt.id)))
+		title.SetText(fmt.Sprintf("Add %s reflector", strings.Title(opt.id)))
 		details.Objects = []fyne.CanvasObject{
 			opts[id].content,
 		}

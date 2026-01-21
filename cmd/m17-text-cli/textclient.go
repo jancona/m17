@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	serverArg   *string = flag.String("server", "", "Reflector server address (e.g. relay.n1adj.net)")
+	serverArg   *string = flag.String("server", "", "Reflector server address (e.g. m17.openquad.net)")
 	portArg     *uint   = flag.Uint("port", 17000, "Port the reflector listens on")
 	moduleArg   *string = flag.String("module", "P", "Module to connect to")
 	callsignArg *string = flag.String("callsign", "N0CALL", "Client user's callsign (e.g. N1ADJ)")
@@ -37,7 +37,7 @@ func main() {
 	}
 
 	// TODO: Add name argument and hostfile lookup
-	r, err := m17.NewRelay(*serverArg, *serverArg, *portArg, *moduleArg, *callsignArg, nil, handleM17, nil)
+	r, err := m17.NewInetClient(*serverArg, *serverArg, *portArg, *moduleArg, *callsignArg, nil, handleM17, nil)
 	if err != nil {
 		fmt.Printf("Error creating client: %v", err)
 		os.Exit(1)
@@ -75,7 +75,7 @@ func handleM17(p m17.Packet) error {
 
 // keep watching for console input
 // send the "message" command to the chat server when we have some
-func handleConsoleInput(c *m17.Relay) {
+func handleConsoleInput(c *m17.InetClient) {
 	var done bool
 
 	reader := bufio.NewReader(os.Stdin)

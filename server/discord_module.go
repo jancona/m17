@@ -1,4 +1,4 @@
-package m17
+package server
 
 import (
 	"fmt"
@@ -7,23 +7,24 @@ import (
 
 	bridge "github.com/StalkR/discordgo-bridge"
 	"github.com/bwmarrin/discordgo"
+	"github.com/jancona/m17"
 )
 
 type Module interface {
 	Name() byte
-	HandlePacket(Packet) error
-	HandleStreamDatagram(StreamDatagram) error
+	HandlePacket(m17.Packet) error
+	HandleStreamDatagram(m17.StreamDatagram) error
 }
 
 type DiscordModule struct {
 	name    byte
-	server  *Server
+	server  *InetServer
 	channel *bridge.Channel
 	bot     *bridge.Bot
 	session *discordgo.Session
 }
 
-func NewDiscordModule(name byte, server *Server, channelName string, webhookURL string, botToken string) (*DiscordModule, error) {
+func NewDiscordModule(name byte, server *InetServer, channelName string, webhookURL string, botToken string) (*DiscordModule, error) {
 	log.Printf("[DEBUG] NewDiscordModule(%s, %s, %s, %s)", string(name), channelName, webhookURL, botToken)
 	m := DiscordModule{
 		name:   name,
@@ -53,7 +54,7 @@ func (m *DiscordModule) Name() byte {
 	return m.name
 }
 
-func (m *DiscordModule) HandlePacket(p Packet) error {
+func (m *DiscordModule) HandlePacket(p m17.Packet) error {
 	log.Printf("[DEBUG] Received packet: %s", p.String())
 	err := m.channel.Send(p.LSF.Src.Callsign(), string(p.Payload))
 	if err != nil {
@@ -61,7 +62,7 @@ func (m *DiscordModule) HandlePacket(p Packet) error {
 	}
 	return err
 }
-func (m *DiscordModule) HandleStreamDatagram(sd StreamDatagram) error {
+func (m *DiscordModule) HandleStreamDatagram(sd m17.StreamDatagram) error {
 	log.Printf("[DEBUG] Ignoring StreamDatagram: %v", sd)
 	return nil
 }
@@ -76,7 +77,7 @@ func (m *DiscordModule) recvMessage(nick string, text string) {
 	// log.Printf("[DEBUG] member: %v", member[0].DisplayName())
 	// nick = strings.ToUpper(member[0].DisplayName())
 	nick = strings.ToUpper(nick)
-	loc := csRegex.FindStringIndex(nick)
+	loc := m17.CallsignRegex.FindStringIndex(nick)
 	if loc == nil || loc[1] == 0 {
 		log.Printf("[INFO] No callsign found in nick: %s", nick)
 		return
@@ -84,7 +85,7 @@ func (m *DiscordModule) recvMessage(nick string, text string) {
 	callsign := nick[loc[0]:loc[1]]
 	log.Printf("[DEBUG] loc: %v, callsign: %s", loc, callsign)
 	msg := append([]byte(text), 0)
-	p, err := NewPacket("@ALL", callsign, PacketTypeSMS, msg)
+	p, err := m17.NewPacket("@ALL", callsign, m17.PacketTypeSMS, msg)
 	if err != nil {
 		log.Printf("[INFO] Error building packet: %v", err)
 		return

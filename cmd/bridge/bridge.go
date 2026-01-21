@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/hashicorp/logutils"
-	"github.com/jancona/m17"
+	"github.com/jancona/m17/server"
 	"gopkg.in/ini.v1"
 )
 
@@ -120,23 +120,43 @@ func setupLogging(c *config) {
 }
 
 type Bridge struct {
-	server *m17.Server
+	server *server.InetServer
 }
 
 func NewBridge(cfg *config) (*Bridge, error) {
 	var err error
 	ret := Bridge{}
-	modules := map[byte]m17.Module{}
-	ret.server = m17.NewServer(cfg.name, cfg.listenAddress+":"+cfg.listenPort, modules)
+	modules := map[byte]server.Module{}
+	ret.server = server.NewInetServer(cfg.name, cfg.listenAddress+":"+cfg.listenPort, modules)
 	for k, m := range cfg.modules {
 		switch m.Key("Type").String() {
 		case "Discord":
-			modules[k], err = m17.NewDiscordModule(
+			modules[k], err = server.NewDiscordModule(
 				k,
 				ret.server,
 				m.Key("ChannelName").String(),
 				m.Key("WebhookURL").String(),
 				m.Key("BotToken").String(),
+			)
+			if err != nil {
+				return nil, err
+			}
+		case "IRC":
+			port, err := m.Key("Port").Uint()
+			if err != nil {
+				return nil, err
+			}
+			useTLS, err := m.Key("UseTLS").Bool()
+			if err != nil {
+				return nil, err
+			}
+			modules[k], err = server.NewIRCModule(
+				k,
+				ret.server,
+				m.Key("Server").String(),
+				port,
+				useTLS,
+				m.Key("ServerPassword").String(),
 			)
 			if err != nil {
 				return nil, err

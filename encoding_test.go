@@ -246,7 +246,7 @@ func TestCSRegex(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := csRegex.FindStringIndex(tt.args.callsign)
+			got := CallsignRegex.FindStringIndex(tt.args.callsign)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("callsignRegex.FindStringIndex() = %v, want %v", got, tt.want)
 			}

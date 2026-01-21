@@ -21,9 +21,10 @@ var EncodedDestinationAllBytes = EncodedCallsign{0xff, 0xff, 0xff, 0xff, 0xff, 0
 const m17Chars = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/."
 
 var exactCallsignRegex = regexp.MustCompile(`^([0-9]?[A-Z]{1,2}[0-9]{0,2}/)?[0-9]?[A-Z]{1,2}[0-9]{1,2}[A-Z]{1,4}([ -/\.][A-Z0-9 -/\.]*)?$`)
-var csRegex = regexp.MustCompile(`([a-zA-Z0-9]{1,3}/)?[a-zA-Z0-9]{1,3}[0-9][a-zA-Z0-9]{0,3}[a-zA-Z](/[a-zA-Z0-9]{1,3})?`)
 var reflectorRegex = regexp.MustCompile(`^[A-Z][-A-Z0-9]{5,6}( +[ A-Z])?$`)
 var roomRegex = regexp.MustCompile(`^#[A-Z0-9 -/\.]+$`)
+
+var CallsignRegex = regexp.MustCompile(`([a-zA-Z0-9]{1,3}/)?[a-zA-Z0-9]{1,3}[0-9][a-zA-Z0-9]{0,3}[a-zA-Z](/[a-zA-Z0-9]{1,3})?`)
 
 func EncodeCallsign(callsign string) (*EncodedCallsign, error) {
 	if len(callsign) > MaxCallsignLen {

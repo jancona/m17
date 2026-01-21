@@ -12,6 +12,7 @@ require (
 	fyne.io/fyne/v2 v2.5.5
 	github.com/StalkR/discordgo-bridge v1.0.10
 	github.com/bwmarrin/discordgo v0.29.0
+	github.com/ergochat/irc-go v0.5.0
 	github.com/go-zeromq/zmq4 v0.17.0
 	github.com/icza/gog v0.0.0-20241010132004-5da24f18211d
 	github.com/warthog618/go-gpiocdev v0.9.1
