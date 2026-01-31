@@ -399,6 +399,7 @@ func (g *Gateway) TransmitPacket(p m17.Packet) error {
 	} else {
 		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Packet", "src", p.LSF.Src.Callsign(), "dst", p.LSF.Dst.Callsign(), "can", p.LSF.CAN(), "packetType", p.Type)
 	}
+	g.logGNSS(p.LSF, "Internet")
 
 	// Replace META with Extended Callsign Data
 	// Don't swap Src for Packet
@@ -431,36 +432,7 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 			}
 		})
 	}
-	gnss := sd.LSF.GNSS()
-	if gnss != nil && gnss.ValidAltitude && time.Since(g.lastLogTime) > 15*time.Second {
-		g.lastLogTime = time.Now()
-		args := []any{
-			"type", "Internet",
-			"subtype", "GNSS",
-			"dataSource", gnss.DataSource,
-			"stationType", gnss.StationType,
-			"src", sd.LSF.Src.Callsign(),
-			"latitude", json.Number(fmt.Sprintf("%f", gnss.Latitude)),
-			"longitude", json.Number(fmt.Sprintf("%f", gnss.Longitude)),
-		}
-		if gnss.ValidAltitude {
-			args = append(args,
-				"altitude", json.Number(fmt.Sprintf("%.1f", gnss.Altitude)),
-			)
-		}
-		if gnss.ValidBearingSpeed {
-			args = append(args,
-				"speed", json.Number(fmt.Sprintf("%.1f", gnss.Speed)),
-				"bearing", gnss.Bearing,
-			)
-		}
-		if gnss.ValidRadius {
-			args = append(args,
-				"radius", gnss.Radius,
-			)
-		}
-		g.dashboardLogger.Info("", args...)
-	}
+	g.logGNSS(sd.LSF, "Internet")
 	if sd.LastFrame {
 		log.Printf("[DEBUG] End Internet voice stream: %s", sd)
 		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Voice End", "src", g.lastLSF.Src.Callsign(), "dst", g.lastLSF.Dst.Callsign(), "can", g.lastLSF.CAN())
@@ -503,36 +475,7 @@ func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
 	if g.getState() == Idle &&
 		lsf.Type[1]&byte(m17.LSFTypeStream) == byte(m17.LSFTypeStream) {
 		g.dashboardLogger.Info("", "type", "RF", "subtype", "Voice Start", "src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(), "mer", json.Number(fmt.Sprintf("%f", ber)))
-		gnss := lsf.GNSS()
-		if gnss != nil && gnss.ValidLatLon {
-			g.lastLogTime = time.Now()
-			args := []any{
-				"type", "RF",
-				"subtype", "GNSS",
-				"src", lsf.Src.Callsign(),
-				"dataSource", gnss.DataSource,
-				"stationType", gnss.StationType,
-				"latitude", json.Number(fmt.Sprintf("%f", gnss.Latitude)),
-				"longitude", json.Number(fmt.Sprintf("%f", gnss.Longitude)),
-			}
-			if gnss.ValidAltitude {
-				args = append(args,
-					"altitude", json.Number(fmt.Sprintf("%.1f", gnss.Altitude)),
-				)
-			}
-			if gnss.ValidBearingSpeed {
-				args = append(args,
-					"speed", json.Number(fmt.Sprintf("%.1f", gnss.Speed)),
-					"bearing", gnss.Bearing,
-				)
-			}
-			if gnss.ValidRadius {
-				args = append(args,
-					"radius", gnss.Radius,
-				)
-			}
-			g.dashboardLogger.Info("", args...)
-		}
+		g.logGNSS(&lsf, "RF")
 		switch lsf.Dst.Callsign() {
 		case "/ECHO", "#ECHO":
 			log.Printf("[DEBUG] receivedRFLSF() Echo")
@@ -570,39 +513,7 @@ func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uin
 }
 func (g *Gateway) receivedRFStreamLICH(lsf m17.LSF, ber float64) error {
 	if g.getState() == RFStreamRX {
-		gnss := lsf.GNSS()
-		if g.dashboardLogger != nil &&
-			gnss != nil &&
-			gnss.ValidLatLon &&
-			time.Since(g.lastLogTime) > 15*time.Second {
-			g.lastLogTime = time.Now()
-			args := []any{
-				"type", "RF",
-				"subtype", "GNSS",
-				"dataSource", gnss.DataSource,
-				"stationType", gnss.StationType,
-				"src", lsf.Src.Callsign(),
-				"latitude", json.Number(fmt.Sprintf("%f", gnss.Latitude)),
-				"longitude", json.Number(fmt.Sprintf("%f", gnss.Longitude)),
-			}
-			if gnss.ValidAltitude {
-				args = append(args,
-					"altitude", json.Number(fmt.Sprintf("%.1f", gnss.Altitude)),
-				)
-			}
-			if gnss.ValidBearingSpeed {
-				args = append(args,
-					"speed", json.Number(fmt.Sprintf("%.1f", gnss.Speed)),
-					"bearing", gnss.Bearing,
-				)
-			}
-			if gnss.ValidRadius {
-				args = append(args,
-					"radius", gnss.Radius,
-				)
-			}
-			g.dashboardLogger.Info("", args...)
-		}
+		g.logGNSS(&lsf, "RF")
 	}
 	return nil
 }
@@ -628,6 +539,7 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 	var err error
 	p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
 	if g.dashboardLogger != nil {
+		g.logGNSS(&lsf, "RF")
 		if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
 			msg := string(p.Payload[0 : len(p.Payload)-1])
 			g.dashboardLogger.Info("", "type", "RF", "subtype", "Packet",
@@ -662,6 +574,39 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 		}
 	}
 	return err
+}
+
+func (g *Gateway) logGNSS(lsf *m17.LSF, logType string) {
+	if lsf.GNSS() != nil && lsf.GNSS().ValidLatLon && time.Since(g.lastLogTime) > 15*time.Second {
+		log.Printf("[DEBUG] Writing GNSS data to dashboard.log: %s", lsf.GNSS().String())
+		g.lastLogTime = time.Now()
+		args := []any{
+			"type", logType,
+			"subtype", "GNSS",
+			"dataSource", lsf.GNSS().DataSource,
+			"stationType", lsf.GNSS().StationType,
+			"src", lsf.Src.Callsign(),
+			"latitude", json.Number(fmt.Sprintf("%f", lsf.GNSS().Latitude)),
+			"longitude", json.Number(fmt.Sprintf("%f", lsf.GNSS().Longitude)),
+		}
+		if lsf.GNSS().ValidAltitude {
+			args = append(args,
+				"altitude", json.Number(fmt.Sprintf("%.1f", lsf.GNSS().Altitude)),
+			)
+		}
+		if lsf.GNSS().ValidBearingSpeed {
+			args = append(args,
+				"speed", json.Number(fmt.Sprintf("%.1f", lsf.GNSS().Speed)),
+				"bearing", lsf.GNSS().Bearing,
+			)
+		}
+		if lsf.GNSS().ValidRadius {
+			args = append(args,
+				"radius", lsf.GNSS().Radius,
+			)
+		}
+		g.dashboardLogger.Info("", args...)
+	}
 }
 
 func (g *Gateway) Run() {
