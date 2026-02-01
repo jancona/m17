@@ -327,7 +327,7 @@ type Gateway struct {
 	relay            *m17.Relay
 	duplex           bool
 	done             bool
-	dashboardLogger  *slog.Logger
+	dashLog          *m17.DashboardLogger
 	hostfile         *m17.Hostfile
 	overrideHostfile *m17.Hostfile
 	encodedCallsign  m17.EncodedCallsign
@@ -335,7 +335,6 @@ type Gateway struct {
 	stateMutex       sync.Mutex
 	state            gatewayState
 
-	lastLogTime    time.Time
 	lastFrameTimer *time.Timer
 	lastLSF        *m17.LSF // Workaround for reflectors that change the SRC during the stream
 	lastStreamID   uint16
@@ -355,7 +354,7 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 		Module:           cfg.defaultModule,
 		modem:            modem,
 		duplex:           cfg.duplex,
-		dashboardLogger:  cfg.dashboardLogger,
+		dashLog:          m17.NewDashboardLogger(cfg.dashboardLogger),
 		hostfile:         cfg.hostfile,
 		overrideHostfile: cfg.overrideHostfile,
 		encodedCallsign:  *cs,
@@ -377,7 +376,7 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 	g.Server = h.Server
 	g.Port = h.Port
 	log.Printf("[DEBUG] Connecting to %s, %s:%d, module %s", g.Name, g.Server, g.Port, g.Module)
-	g.relay, err = m17.NewRelay(g.Name, g.Server, g.Port, g.Module, cfg.callsign, cfg.dashboardLogger, g.TransmitPacket, g.TransmitVoiceStream)
+	g.relay, err = m17.NewRelay(g.Name, g.Server, g.Port, g.Module, cfg.callsign, g.dashLog, g.TransmitPacket, g.TransmitVoiceStream)
 	if err != nil {
 		return nil, fmt.Errorf("error creating relay: %v", err)
 	}
@@ -395,11 +394,11 @@ func (g *Gateway) TransmitPacket(p m17.Packet) error {
 	// log.Printf("[DEBUG] received packet from relay: %#v", p)
 	if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
 		msg := string(p.Payload[0 : len(p.Payload)-1])
-		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Packet", "src", p.LSF.Src.Callsign(), "dst", p.LSF.Dst.Callsign(), "can", p.LSF.CAN(), "packetType", p.Type, "smsMessage", msg)
+		g.dashLog.LogFrame(p.LSF, "Internet", "Packet", "packetType", p.Type, "smsMessage", msg)
 	} else {
-		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Packet", "src", p.LSF.Src.Callsign(), "dst", p.LSF.Dst.Callsign(), "can", p.LSF.CAN(), "packetType", p.Type)
+		g.dashLog.LogFrame(p.LSF, "Internet", "Packet", "packetType", p.Type)
 	}
-	g.logGNSS(p.LSF, "Internet")
+	g.dashLog.LogGNSS(p.LSF, "Internet")
 
 	// Replace META with Extended Callsign Data
 	// Don't swap Src for Packet
@@ -415,7 +414,7 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 			g.lastFrameTimer.Stop()
 		}
 		log.Printf("[DEBUG] Start Internet voice stream: %s", sd)
-		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Voice Start", "src", sd.LSF.Src.Callsign(), "dst", sd.LSF.Dst.Callsign(), "can", sd.LSF.CAN())
+		g.dashLog.LogFrame(sd.LSF, "Internet", "Voice Start")
 		g.lastStreamID = sd.StreamID
 		// Make a copy
 		lsf := *sd.LSF
@@ -423,7 +422,7 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 		// Provide a backstop if we don't receive a last frame packet
 		g.lastFrameTimer = time.AfterFunc(time.Second, func() {
 			log.Printf("[DEBUG] Timed out Internet voice stream %04x", sd.StreamID)
-			g.dashboardLogger.Info("", "type", "Internet", "subtype", "Voice End", "src", g.lastLSF.Src.Callsign(), "dst", g.lastLSF.Dst.Callsign(), "can", g.lastLSF.CAN())
+			g.dashLog.LogFrame(g.lastLSF, "Internet", "Voice End")
 			g.lastStreamID = 0xFFFF
 			g.lastFrameTimer = nil
 			g.lastLSF = nil
@@ -432,10 +431,10 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 			}
 		})
 	}
-	g.logGNSS(sd.LSF, "Internet")
+	g.dashLog.LogGNSS(sd.LSF, "Internet")
 	if sd.LastFrame {
 		log.Printf("[DEBUG] End Internet voice stream: %s", sd)
-		g.dashboardLogger.Info("", "type", "Internet", "subtype", "Voice End", "src", g.lastLSF.Src.Callsign(), "dst", g.lastLSF.Dst.Callsign(), "can", g.lastLSF.CAN())
+		g.dashLog.LogFrame(g.lastLSF, "Internet", "Voice End")
 		g.lastStreamID = 0xFFFF
 		g.lastLSF = nil
 		g.lastFrameTimer.Stop()
@@ -474,8 +473,8 @@ func (g *Gateway) setState(state gatewayState) {
 func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
 	if g.getState() == Idle &&
 		lsf.Type[1]&byte(m17.LSFTypeStream) == byte(m17.LSFTypeStream) {
-		g.dashboardLogger.Info("", "type", "RF", "subtype", "Voice Start", "src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(), "mer", json.Number(fmt.Sprintf("%f", ber)))
-		g.logGNSS(&lsf, "RF")
+		g.dashLog.LogFrame(&lsf, "RF", "Voice Start", "mer", json.Number(fmt.Sprintf("%f", ber)))
+		g.dashLog.LogGNSS(&lsf, "RF")
 		switch lsf.Dst.Callsign() {
 		case "/ECHO", "#ECHO":
 			log.Printf("[DEBUG] receivedRFLSF() Echo")
@@ -513,7 +512,7 @@ func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uin
 }
 func (g *Gateway) receivedRFStreamLICH(lsf m17.LSF, ber float64) error {
 	if g.getState() == RFStreamRX {
-		g.logGNSS(&lsf, "RF")
+		g.dashLog.LogGNSS(&lsf, "RF")
 	}
 	return nil
 }
@@ -530,28 +529,18 @@ func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) 
 		log.Printf("[DEBUG] receivedRFStreamEOT() setState(Idle)")
 		g.setState(Idle)
 	}
-	g.dashboardLogger.Info("", "type", "RF", "subtype", "Voice End",
-		"src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(),
-		"mer", json.Number(fmt.Sprintf("%f", ber)))
+	g.dashLog.LogFrame(&lsf, "RF", "Voice End", "mer", json.Number(fmt.Sprintf("%f", ber)))
 	return nil
 }
 func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) error {
 	var err error
 	p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
-	if g.dashboardLogger != nil {
-		g.logGNSS(&lsf, "RF")
-		if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
-			msg := string(p.Payload[0 : len(p.Payload)-1])
-			g.dashboardLogger.Info("", "type", "RF", "subtype", "Packet",
-				"src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(),
-				"mer", json.Number(fmt.Sprintf("%f", ber)),
-				"packetType", p.Type, "smsMessage", msg)
-		} else {
-			g.dashboardLogger.Info("", "type", "RF", "subtype", "Packet",
-				"src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN(),
-				"mer", json.Number(fmt.Sprintf("%f", ber)),
-				"packetType", p.Type)
-		}
+	g.dashLog.LogGNSS(&lsf, "RF")
+	if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
+		msg := string(p.Payload[0 : len(p.Payload)-1])
+		g.dashLog.LogFrame(&lsf, "RF", "Packet", "mer", json.Number(fmt.Sprintf("%f", ber)), "packetType", p.Type, "smsMessage", msg)
+	} else {
+		g.dashLog.LogFrame(&lsf, "RF", "Packet", "mer", json.Number(fmt.Sprintf("%f", ber)), "packetType", p.Type)
 	}
 	switch lsf.Dst.Callsign() {
 	case "/ECHO", "#ECHO":
@@ -574,39 +563,6 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 		}
 	}
 	return err
-}
-
-func (g *Gateway) logGNSS(lsf *m17.LSF, logType string) {
-	if lsf.GNSS() != nil && lsf.GNSS().ValidLatLon && time.Since(g.lastLogTime) > 15*time.Second {
-		log.Printf("[DEBUG] Writing GNSS data to dashboard.log: %s", lsf.GNSS().String())
-		g.lastLogTime = time.Now()
-		args := []any{
-			"type", logType,
-			"subtype", "GNSS",
-			"dataSource", lsf.GNSS().DataSource,
-			"stationType", lsf.GNSS().StationType,
-			"src", lsf.Src.Callsign(),
-			"latitude", json.Number(fmt.Sprintf("%f", lsf.GNSS().Latitude)),
-			"longitude", json.Number(fmt.Sprintf("%f", lsf.GNSS().Longitude)),
-		}
-		if lsf.GNSS().ValidAltitude {
-			args = append(args,
-				"altitude", json.Number(fmt.Sprintf("%.1f", lsf.GNSS().Altitude)),
-			)
-		}
-		if lsf.GNSS().ValidBearingSpeed {
-			args = append(args,
-				"speed", json.Number(fmt.Sprintf("%.1f", lsf.GNSS().Speed)),
-				"bearing", lsf.GNSS().Bearing,
-			)
-		}
-		if lsf.GNSS().ValidRadius {
-			args = append(args,
-				"radius", lsf.GNSS().Radius,
-			)
-		}
-		g.dashboardLogger.Info("", args...)
-	}
 }
 
 func (g *Gateway) Run() {

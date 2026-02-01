@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"log/slog"
 	"net"
 	"os"
 	"time"
@@ -43,10 +42,10 @@ type Relay struct {
 	packetHandler   func(Packet) error
 	streamHandler   func(StreamDatagram) error
 	running         bool
-	dashLog         *slog.Logger
+	dashLog         *DashboardLogger
 }
 
-func NewRelay(name string, server string, port uint, module string, callsign string, dashLog *slog.Logger, packetHandler func(Packet) error, streamHandler func(StreamDatagram) error) (*Relay, error) {
+func NewRelay(name string, server string, port uint, module string, callsign string, dashLog *DashboardLogger, packetHandler func(Packet) error, streamHandler func(StreamDatagram) error) (*Relay, error) {
 	cs, err := EncodeCallsign(callsign)
 	if err != nil {
 		return nil, fmt.Errorf("bad callsign %s: %w", callsign, err)
@@ -81,9 +80,7 @@ func NewRelay(name string, server string, port uint, module string, callsign str
 			log.Printf("[DEBUG] No PINGs received in > 30 seconds. Disconnected.")
 			r.pingTimer.Stop()
 			r.connected = false
-			if r.dashLog != nil {
-				r.dashLog.Info("", "type", "Reflector", "subtype", "Disconnect", "name", r.Name, "module", string(r.Module))
-			}
+			r.dashLog.Log("Reflector", "Disconnect", "name", r.Name, "module", string(r.Module))
 			r.retryCount = 0
 			for !r.connected && r.retryCount < maxRetries {
 				// Close connection before retrying
@@ -137,9 +134,7 @@ func (r *Relay) Close() error {
 	r.running = false
 	r.pingTimer.Stop()
 	r.sendDISC()
-	if r.dashLog != nil {
-		r.dashLog.Info("", "type", "Reflector", "subtype", "Disconnect", "name", r.Name, "module", string(r.Module))
-	}
+	r.dashLog.Log("Reflector", "Disconnect", "name", r.Name, "module", string(r.Module))
 	return r.conn.Close()
 }
 
@@ -174,26 +169,20 @@ func (r *Relay) handle() {
 		case magicACKN:
 			r.connected = true
 			r.connecting = false
-			if r.dashLog != nil {
-				r.dashLog.Info("", "type", "Reflector", "subtype", "Connect", "name", r.Name, "module", string(r.Module))
-			}
+			r.dashLog.Log("Reflector", "Connect", "name", r.Name, "module", string(r.Module))
 			r.pingTimer.Reset(30 * time.Second)
 			log.Printf("[DEBUG] Received ACKN")
 		case magicNACK:
 			r.connected = false
 			r.connecting = false
 			log.Print("[INFO] Received NACK, disconnecting")
-			if r.dashLog != nil {
-				r.dashLog.Info("", "type", "Reflector", "subtype", "Disconnect", "name", r.Name, "module", string(r.Module))
-			}
+			r.dashLog.Log("Reflector", "Disconnect", "name", r.Name, "module", string(r.Module))
 			// r.done = true
 		case magicDISC:
 			r.connected = false
 			r.connecting = false
 			log.Print("[INFO] Received DISC, disconnecting")
-			if r.dashLog != nil {
-				r.dashLog.Info("", "type", "Reflector", "subtype", "Disconnect", "name", r.Name, "module", string(r.Module))
-			}
+			r.dashLog.Log("Reflector", "Disconnect", "name", r.Name, "module", string(r.Module))
 			// r.done = true
 		case magicPING:
 			r.sendPONG()
