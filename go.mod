@@ -12,6 +12,7 @@ require (
 	fyne.io/fyne/v2 v2.5.5
 	github.com/StalkR/discordgo-bridge v1.0.10
 	github.com/bwmarrin/discordgo v0.29.0
+	github.com/ebarkie/aprs v1.0.4
 	github.com/ergochat/irc-go v0.5.0
 	github.com/go-zeromq/zmq4 v0.17.0
 	github.com/icza/gog v0.0.0-20241010132004-5da24f18211d
@@ -27,6 +28,7 @@ require (
 	fyne.io/systray v1.11.0 // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/ebarkie/weatherlink v1.0.9 // indirect
 	github.com/fredbi/uri v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/fyne-io/gl-js v0.0.0-20230506162202-1fdaa286a934 // indirect

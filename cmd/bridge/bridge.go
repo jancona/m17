@@ -161,6 +161,17 @@ func NewBridge(cfg *config) (*Bridge, error) {
 			if err != nil {
 				return nil, err
 			}
+		case "APRS":
+			modules[k], err = server.NewAPRSModule(
+				k,
+				ret.server,
+				m.Key("Server").String(),
+				m.Key("Callsign").String(),
+				m.Key("Symbol").String(),
+			)
+			if err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("unknown module type '%s'", m.Key("Type").String())
 		}
