@@ -1,0 +1,30 @@
+#!/bin/bash
+
+set -e
+
+# Create service user and groups if they don't exist
+if ! getent group m17-bridge >/dev/null; then
+    groupadd --system m17-bridge
+fi
+
+if ! getent passwd m17-bridge >/dev/null; then
+    useradd --system --gid m17-bridge --shell /bin/false m17-bridge
+fi
+
+# Make binary executable
+chmod +x /usr/bin/m17-bridge
+
+# Set config file ownership and permissions (readable by service user, writable by service control group)
+chown m17-bridge:m17-bridge /etc/m17-bridge.ini
+chmod 664 /etc/m17-bridge.ini
+
+# Reload systemd and enable the service
+systemctl daemon-reload
+systemctl enable m17-bridge.service
+
+echo
+echo "M17 Messaging Bridge installed successfully!"
+echo "Configuration file: /etc/m17-bridge.ini"
+echo "View logs with: journalctl -u m17-bridge -o cat -f"
+echo "Start with: sudo systemctl start m17-bridge"
+echo "Check status with: systemctl status m17-bridge"

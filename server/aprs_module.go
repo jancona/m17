@@ -61,7 +61,7 @@ func (u *aprsUser) sendGNSSFrame(s *m17.GNSS) error {
 	return f.SendTCP(u.module.serverName+clientDefinedFilterPort, int(u.passcode))
 }
 
-func NewAPRSModule(name byte, server *InetServer, serverName string, aprsCallsign string, aprsSymbol string) (*APRSModule, error) {
+func NewAPRSModule(name byte, server *InetServer, serverName string, aprsSymbol string) (*APRSModule, error) {
 	log.Printf("[DEBUG] NewAPRSModule(%s, %s)", string(name), serverName)
 	if len(aprsSymbol) != 2 {
 		return nil, fmt.Errorf("Bad APRS symbol '%s'", aprsSymbol)

@@ -75,7 +75,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/ebarkie/aprs v1.0.4 h1:Jw2Ta2gTCqswU4Xfr1Gx0WnhY3hmvPkoI+pUOtDRVLI=
 github.com/ebarkie/aprs v1.0.4/go.mod h1:DGhO4rvpN8oNnexuJldM10Xo5ZHJSRthNACVpHtbU/k=
-github.com/ebarkie/weatherlink v1.0.2 h1:+sj1JQDlmU9mrV7ppCZEswR3N0N6VmYsilQ64B5l/dA=
+github.com/ebarkie/aprs v1.0.5 h1:nmP0WzS3g8aDjbFpa+tCkOqL6rkOXH6sLyDfnB1PR/0=
+github.com/ebarkie/aprs v1.0.5/go.mod h1:yJdxbayy/w88jxDh9TxY3D7/887y5kJsywLVs6V10CU=
 github.com/ebarkie/weatherlink v1.0.2/go.mod h1:PS5QOQWlOtW8czp7fIe15AfPscdw511cOFngx90QbVg=
 github.com/ebarkie/weatherlink v1.0.9 h1:uPDC4EiEpAgXUf2dulfCPBo5189CVRDB8QoA3Z+kYzg=
 github.com/ebarkie/weatherlink v1.0.9/go.mod h1:PyxCfM38gqkEk11AEisc71c1QXhCRINu5HC0I3iyjgE=

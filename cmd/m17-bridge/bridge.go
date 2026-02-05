@@ -66,7 +66,7 @@ func loadConfig(iniFile string) (*config, error) {
 }
 
 var (
-	configFile *string = flag.String("config", "./bridge.ini", "Configuration file")
+	configFile *string = flag.String("config", "./m17-bridge.ini", "Configuration file")
 	helpArg    *bool   = flag.Bool("h", false, "Print arguments")
 )
 
@@ -166,7 +166,6 @@ func NewBridge(cfg *config) (*Bridge, error) {
 				k,
 				ret.server,
 				m.Key("Server").String(),
-				m.Key("Callsign").String(),
 				m.Key("Symbol").String(),
 			)
 			if err != nil {

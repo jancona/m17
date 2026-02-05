@@ -1,0 +1,24 @@
+[Unit]
+Description=M17 Messaging Bridge
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=m17-bridge
+Group=m17-bridge
+# WorkingDirectory=/opt/m17/m17-bridge
+ExecStart=/usr/bin/m17-bridge -config /etc/m17-bridge.ini
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

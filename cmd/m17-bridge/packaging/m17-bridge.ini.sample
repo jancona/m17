@@ -1,0 +1,28 @@
+[General]
+Name=TestBridge
+ListenAddress=127.0.0.1
+ListenPort=17000
+Modules=DIA
+
+[Log]
+# Logging levels: ERROR, INFO, DEBUG
+Level=DEBUG
+
+[Module-D]
+Type=Discord
+ChannelName=ham-only
+WebhookURL="<Discord Webhook URL>"
+BotToken=<Discord Bot Token>
+
+[Module-I]
+Type=IRC
+Server=127.0.0.1
+Port=6667
+UseTLS=false
+ServerPassword=<server password>
+
+[Module-A]
+Type=APRS
+# Server for your area. See http://aprs2.net/
+Server=noam.aprs2.net
+Symbol=// # APRS symbol. See https://www.aprs.org/symbols.html
