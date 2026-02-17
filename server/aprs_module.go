@@ -1,14 +1,13 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"log"
-	"math"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/ebarkie/aprs"
+	fap "github.com/hessu/go-aprs-fap"
 
 	"github.com/jancona/m17"
 )
@@ -16,8 +15,9 @@ import (
 const (
 	clientDefinedFilterPort = ":14580"
 	deviceID                = "APZ001" // Experimental
-	metersToFeet            = 3.280839895
-	mpsToKnots              = 1.94384
+	mpsToKmh                = 3.6
+	readTimeout             = 5 * time.Minute
+	reconnectDelay          = 10 * time.Second
 )
 
 type APRSModule struct {
@@ -30,35 +30,46 @@ type APRSModule struct {
 
 type aprsUser struct {
 	module             *APRSModule
-	aprsCallsign       aprs.Addr
-	passcode           uint16
-	ctx                context.Context
-	frames             <-chan aprs.Frame
+	aprsCallsign       string
+	passcode           int16
+	mu                 sync.Mutex
+	conn               *fap.Conn
 	lastGet            time.Time
 	lastPositionReport time.Time // limit how often we send position reports
 }
 
 func (u *aprsUser) sendGNSSFrame(s *m17.GNSS) error {
-	p := aprs.PositionReport{ // create a position report
-		Lat:            float64(s.Latitude),
-		Lon:            float64(s.Longitude),
-		Symbol:         u.module.aprsSymbol,
-		MessageCapable: true, // all our clients can receive messages
+	var speed, course, altitude *float64
+	if s.ValidBearingSpeed {
+		sp := float64(s.Speed) * mpsToKmh
+		speed = &sp
+		c := float64(s.Bearing)
+		course = &c
 	}
 	if s.ValidAltitude {
-		p.Altitude = int(math.Round(float64(s.Altitude) * metersToFeet))
-	}
-	if s.ValidBearingSpeed {
-		p.CSExtension(int(s.Bearing), int(math.Round(float64(s.Speed)*mpsToKnots)), 0, 0)
+		alt := float64(s.Altitude)
+		altitude = &alt
 	}
 
-	f := aprs.Frame{}
-	f.Src = u.aprsCallsign
-	f.Dst.FromString(deviceID)
-	f.Path.FromString("WIDE1-1,WIDE2-1")
-	f.Text = p.String()
-	log.Printf("[DEBUG] Sending GNSS position report: %v, f: %#v", s, f)
-	return f.SendTCP(u.module.serverName+clientDefinedFilterPort, int(u.passcode))
+	posStr, err := fap.MakePosition(
+		float64(s.Latitude),
+		float64(s.Longitude),
+		speed, course, altitude,
+		u.module.aprsSymbol,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("making position report: %w", err)
+	}
+
+	frame := fmt.Sprintf("%s>%s,WIDE1-1,WIDE2-1:%s", u.aprsCallsign, deviceID, posStr)
+	log.Printf("[DEBUG] Sending GNSS position report: %v, frame: %s", s, frame)
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.conn == nil {
+		return fmt.Errorf("APRS-IS connection not available for %s", u.aprsCallsign)
+	}
+	return u.conn.SendLine(frame)
 }
 
 func NewAPRSModule(name byte, server *InetServer, serverName string, aprsSymbol string) (*APRSModule, error) {
@@ -84,12 +95,13 @@ func (m *APRSModule) HandlePacket(p m17.Packet) error {
 	log.Printf("[DEBUG] Received packet: %s", p.String())
 	u := m.getAPRSUser(p.LSF.Src.Callsign())
 	if u != nil {
-		f := aprs.Frame{}
-		f.Src = u.aprsCallsign
-		f.Dst.FromString(deviceID)
-		f.Text = fmt.Sprintf(":%-9s:", aprsCallsign(p.LSF.Dst.Callsign())) + strings.ReplaceAll(string(p.Payload), "\x00", "")
-		log.Printf("[DEBUG] Sending frame: '%s' to %s, passcode: %d", f.String(), m.serverName+clientDefinedFilterPort, u.passcode)
-		err := f.SendTCP(m.serverName+clientDefinedFilterPort, int(u.passcode))
+		dst := aprsCallsign(p.LSF.Dst.Callsign())
+		msgText := strings.ReplaceAll(string(p.Payload), "\x00", "")
+		frame := fmt.Sprintf("%s>%s::%-9s:%s", u.aprsCallsign, deviceID, dst, msgText)
+		log.Printf("[DEBUG] Sending frame: '%s', passcode: %d", frame, u.passcode)
+		u.mu.Lock()
+		err := u.conn.SendLine(frame)
+		u.mu.Unlock()
 		if err != nil {
 			log.Printf("[INFO] Unable to send message: %v", err)
 		}
@@ -131,41 +143,59 @@ func (m *APRSModule) getAPRSUser(callsign string) *aprsUser {
 			module: m,
 		}
 
-		aprsCallsign := aprsCallsign(callsign)
-		filter := "g/" + aprsCallsign
-		if !strings.Contains(aprsCallsign, "-") {
+		ac := aprsCallsign(callsign)
+		filter := "g/" + ac
+		if !strings.Contains(ac, "-") {
 			filter += "*"
 		}
-		u.aprsCallsign.FromString(aprsCallsign)
-		u.passcode = aprs.GenPass(aprsCallsign)
-		u.ctx = context.Background()
+		u.aprsCallsign = ac
+		u.passcode = fap.AprsPasscode(ac)
+		passcodeStr := fmt.Sprintf("%d", u.passcode)
+		log.Printf("[DEBUG] Calling Dial(%s, %s, %s, m17-bridge, 0.1, %s)", m.serverName+clientDefinedFilterPort, u.aprsCallsign, passcodeStr, filter)
+		conn, err := fap.Dial(m.serverName+clientDefinedFilterPort, u.aprsCallsign, passcodeStr, "m17-bridge", "0.1", filter)
+		if err != nil {
+			log.Printf("[INFO] Unable to connect to APRS-IS: %v", err)
+			return nil
+		}
+		u.conn = conn
+		log.Printf("[DEBUG] u.conn: %#v", u.conn)
 		go func() {
 			for {
-				log.Printf("[DEBUG] Calling RecvIS(ctx, %s, %v, %d, %s)", m.serverName+clientDefinedFilterPort, u.aprsCallsign, int(u.passcode), filter)
-				u.frames = aprs.RecvIS(u.ctx, m.serverName+clientDefinedFilterPort, u.aprsCallsign, int(u.passcode), filter)
-				for f := range u.frames {
-					log.Printf("[DEBUG] received frame: %#v", f)
-					dst, msgText, ack := decodeMsg(f.Text)
-					log.Printf("[DEBUG] dst: %s, msgText: %s, ack: %s, aprsCallsign: %s", dst, msgText, ack, aprsCallsign)
-					if ack != "" {
+				for {
+					raw, err := conn.ReadPacket(readTimeout)
+					if err != nil {
+						log.Printf("[DEBUG] ReadPacket error: %v", err)
+						u.mu.Lock()
+						conn.Close()
+						u.conn = nil
+						u.mu.Unlock()
+						break
+					}
+					log.Printf("[DEBUG] received packet: %s", raw)
+					pkt, err := fap.Parse(raw)
+					if err != nil {
+						log.Printf("[DEBUG] Parse error: %v", err)
+						continue
+					}
+					if pkt.Type != fap.PacketTypeMessage || pkt.Message == nil {
+						continue
+					}
+					msg := pkt.Message
+					log.Printf("[DEBUG] dst: %s, msgText: %s, msgID: %s, aprsCallsign: %s", msg.Destination, msg.Text, msg.ID, ac)
+					if msg.ID != "" {
 						// Send ack
-						a := aprs.Frame{}
-						a.Src = u.aprsCallsign
-						a.Dst.FromString(deviceID)
-						c := f.Src.Call
-						if f.Src.SSID > 0 {
-							c += fmt.Sprintf("-%d", f.Src.SSID)
-						}
-						a.Text = fmt.Sprintf(":%-9s:", c) + "ack" + ack[1:]
-						log.Printf("[DEBUG] Sending frame: '%s' to %s, passcode: %d", a.String(), m.serverName+clientDefinedFilterPort, u.passcode)
-						err := a.SendTCP(m.serverName+clientDefinedFilterPort, int(u.passcode))
+						ackFrame := fmt.Sprintf("%s>%s::%-9s:ack%s", u.aprsCallsign, deviceID, pkt.SrcCallsign, msg.ID)
+						log.Printf("[DEBUG] Sending ack frame: '%s'", ackFrame)
+						u.mu.Lock()
+						err := conn.SendLine(ackFrame)
+						u.mu.Unlock()
 						if err != nil {
-							log.Printf("[INFO] Unable to send message: %v", err)
+							log.Printf("[INFO] Unable to send ack: %v", err)
 						}
 					}
-					if dst == aprsCallsign {
-						msg := append([]byte(msgText), 0)
-						p, err := m17.NewPacket(callsign, strings.ReplaceAll(f.Src.String(), "-", " "), m17.PacketTypeSMS, msg)
+					if msg.Destination == ac {
+						msgBytes := append([]byte(msg.Text), 0)
+						p, err := m17.NewPacket(callsign, strings.ReplaceAll(pkt.SrcCallsign, "-", " "), m17.PacketTypeSMS, msgBytes)
 						if err != nil {
 							log.Printf("[INFO] Error building packet: %v", err)
 							return
@@ -176,7 +206,19 @@ func (m *APRSModule) getAPRSUser(callsign string) *aprsUser {
 						}
 					}
 				}
-				log.Printf("[DEBUG] Exiting RecvIS loop for %s", u.aprsCallsign)
+				log.Printf("[DEBUG] Reconnecting APRS-IS for %s", u.aprsCallsign)
+				time.Sleep(reconnectDelay)
+				passcodeStr := fmt.Sprintf("%d", u.passcode)
+				log.Printf("[DEBUG] Calling Dial(%s, %s, %s, m17-bridge, 0.1, %s)", m.serverName+clientDefinedFilterPort, u.aprsCallsign, passcodeStr, filter)
+				newConn, err := fap.Dial(m.serverName+clientDefinedFilterPort, u.aprsCallsign, passcodeStr, "m17-bridge", "0.1", filter)
+				if err != nil {
+					log.Printf("[INFO] Unable to reconnect to APRS-IS: %v", err)
+					continue
+				}
+				u.mu.Lock()
+				conn = newConn
+				u.conn = conn
+				u.mu.Unlock()
 			}
 		}()
 		m.users[callsign] = u
@@ -186,28 +228,6 @@ func (m *APRSModule) getAPRSUser(callsign string) *aprsUser {
 	return u
 }
 
-func decodeMsg(text string) (dst string, msg string, ack string) {
-	if len(text) == 0 || text[0] != ':' {
-		// Not an APRS message
-		return
-	}
-	text = text[1:]
-	parts := strings.SplitN(text, ":", 2)
-	switch len(parts) {
-	case 1: // No ":"'s
-		dst = strings.TrimSpace(parts[0])
-	case 2:
-		dst = strings.TrimSpace(parts[0])
-		i := strings.LastIndex(parts[1], "{")
-		if i == -1 {
-			msg = parts[1]
-		} else {
-			msg = parts[1][:i]
-			ack = parts[1][i:]
-		}
-	}
-	return
-}
 func aprsCallsign(callsign string) string {
 	// build APRS callsign by removing non-numeric suffix
 	parts := strings.Split(callsign, " ")

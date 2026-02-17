@@ -1,8 +1,6 @@
 module github.com/jancona/m17
 
-go 1.24.0
-
-toolchain go1.24.3
+go 1.26
 
 require github.com/hashicorp/logutils v1.0.0
 
@@ -12,9 +10,9 @@ require (
 	fyne.io/fyne/v2 v2.5.5
 	github.com/StalkR/discordgo-bridge v1.0.10
 	github.com/bwmarrin/discordgo v0.29.0
-	github.com/ebarkie/aprs v1.0.5
 	github.com/ergochat/irc-go v0.5.0
 	github.com/go-zeromq/zmq4 v0.17.0
+	github.com/hessu/go-aprs-fap v0.0.5
 	github.com/icza/gog v0.0.0-20241010132004-5da24f18211d
 	github.com/warthog618/go-gpiocdev v0.9.1
 	go.bug.st/serial v1.6.2
@@ -28,7 +26,6 @@ require (
 	fyne.io/systray v1.11.0 // indirect
 	github.com/BurntSushi/toml v1.4.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/ebarkie/weatherlink v1.0.9 // indirect
 	github.com/fredbi/uri v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/fyne-io/gl-js v0.0.0-20230506162202-1fdaa286a934 // indirect
