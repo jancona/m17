@@ -6,9 +6,18 @@ There are several tools and a library here:
 
 ## Tools
 
+### M17 Messaging Bridge
+
+[m17-bridge](./cmd/m17-bridge/) is an experimental network service that bridges M17 SMS messages to and from other messaging protocols. It speaks the [M17 Internet protocol](https://github.com/M17-Project/M17_inet/blob/main/M17%20Internet%20Interface.md), so it looks like a reflector to hotspots/repeaters that connect to it.
+
+It bridges to these systems:
+* **Discord:** An M17 module letter is connected to a Discord channel. All M17 messages are send to the channel and all channel messages are sent to connected hotspots/repeaters. Since all received traffic is sent over the air, membertship in the Discord channels should be restricted to licensed hams.
+* **IRC:** An M17 module letter is connected to an IRC server and allows sending and receiving private messages via M17 SMS. Because received traffic is sent over the air, accounts on the server should probably be restricted to licensed hams. 
+* **APRS:** An M17 module letter is connected to an APRS-IS server. Radios can use M17 SMS messaging to send APRS messages. When it sees M17 GNSS data, the bridge will also send periodiic APRS position reports. The bridge will send APRS messages to connected radios. A radio must send a message in order to register to receive APRS messages.
+
 ### M17 Gateway
 
-[m17-gateway](./cmd/m17-gateway/) makes allows a computer and modem to act as a repeater/hotspot. It also connects RF clients to Internet services such as reflectors. It currently supports the [CC1200 Pi HAT](https://github.com/M17-Project/CC1200_HAT-hw) and MMDVM-compatible hotspots and modem. When run on a Raspberry Pi with a CC1200 HAT, it can forward M17 voice and packet traffic to and from a reflector, making the Pi/CC1200 HAT an M17 voice and packet hotspot. 
+[m17-gateway](./cmd/m17-gateway/) allows a computer and modem to act as a repeater/hotspot. It also connects RF clients to Internet services such as reflectors. It currently supports the [CC1200 Pi HAT](https://github.com/M17-Project/CC1200_HAT-hw) and MMDVM-compatible hotspots and modem. When run on a Raspberry Pi with a CC1200 HAT, it can forward M17 voice and packet traffic to and from a reflector, making the Pi/CC1200 HAT an M17 voice and packet hotspot. 
 
 The easiest way to get a working CC1200 hotspot, including `m17-gateway` and a [web dashboard](https://github.com/M17-Project/rpi-dashboard) is using DK1MI's [excellent installer script](https://github.com/DK1MI/cc1200-hotspot-installer). Highly recommended!
 
