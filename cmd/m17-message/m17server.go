@@ -36,14 +36,14 @@ func init() {
 }
 
 type m17Server struct {
-	ID       string
-	app      fyne.App
-	callsign string
-	name     string
-	host     string
-	port     uint
-	module   string
-	relay    *m17.Relay
+	ID         string
+	app        fyne.App
+	callsign   string
+	name       string
+	host       string
+	port       uint
+	module     string
+	inetClient *m17.InetClient
 }
 
 func initM17Server(a fyne.App) service {
@@ -105,8 +105,8 @@ func (s *m17Server) configure(u *ui) (fyne.CanvasObject, func(prefix string, a f
 }
 
 func (s *m17Server) disconnect() {
-	if s.relay != nil {
-		s.relay.Close()
+	if s.inetClient != nil {
+		s.inetClient.Close()
 	}
 }
 
@@ -163,7 +163,7 @@ func (s *m17Server) disconnect() {
 // }
 
 func (s *m17Server) send(ch *channel, text string) {
-	// s.relay.SendSMS(ch.name, s.callsign, text)
+	// s.inetClient.SendSMS(ch.name, s.callsign, text)
 	// Add a trailing NUL
 	msg := append([]byte(text), 0)
 	p, err := m17.NewPacket(ch.name, s.callsign, m17.PacketTypeSMS, []byte(msg))
@@ -171,7 +171,7 @@ func (s *m17Server) send(ch *channel, text string) {
 		fmt.Printf("Error creating Packet: %v\n", err)
 		return
 	}
-	err = s.relay.SendPacket(*p)
+	err = s.inetClient.SendPacket(*p)
 	if err != nil {
 		fmt.Printf("Error sending message: %v\n", err)
 		return
@@ -242,11 +242,11 @@ func (s *m17Server) login(prefix string, u *ui) {
 func (s *m17Server) doConnect(name string, server string, port uint, module string, u *ui) {
 	var err error
 	log.Printf("Connecting to %s, %s:%d %s, callsign %s", name, server, port, module, s.callsign)
-	s.relay, err = m17.NewRelay(name, server, port, module, s.callsign, nil, s.handleM17, nil)
+	s.inetClient, err = m17.NewInetClient(name, server, port, module, s.callsign, nil, s.handleM17, nil)
 	if err != nil {
 		log.Printf("fail to connect create client: %v", err)
 	}
-	err = s.relay.Connect()
+	err = s.inetClient.Connect()
 	if err != nil {
 		fmt.Printf("Error connecting to %s:%d %s: %v", server, port, module, err)
 	}

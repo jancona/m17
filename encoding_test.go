@@ -213,3 +213,43 @@ func TestNormalizeCallsignModule(t *testing.T) {
 		})
 	}
 }
+
+func TestCSRegex(t *testing.T) {
+	type args struct {
+		callsign string
+	}
+	tests := []struct {
+		name string
+		args args
+		want []int
+	}{
+		{name: "N1ADJ",
+			args: args{callsign: "N1ADJ"},
+			want: []int{0, 5},
+		},
+		{name: "N1ADJ B",
+			args: args{callsign: "N1ADJ B"},
+			want: []int{0, 5},
+		},
+		{name: "N1ADJ - Jim",
+			args: args{callsign: "N1ADJ - Jim"},
+			want: []int{0, 5},
+		},
+		{name: "Jim - N1ADJ",
+			args: args{callsign: "Jim - N1ADJ"},
+			want: []int{6, 11},
+		},
+		{name: "SP5/N1ADJ",
+			args: args{callsign: "SP5/N1ADJ"},
+			want: []int{0, 9},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CallsignRegex.FindStringIndex(tt.args.callsign)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("callsignRegex.FindStringIndex() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

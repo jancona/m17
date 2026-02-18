@@ -1,0 +1,14 @@
+#!/bin/bash
+
+set -e
+
+# Stop and disable the service
+if systemctl is-active --quiet m17-bridge.service; then
+    systemctl stop m17-bridge.service
+fi
+
+if systemctl is-enabled --quiet m17-bridge.service; then
+    systemctl disable m17-bridge.service
+fi
+
+systemctl daemon-reload

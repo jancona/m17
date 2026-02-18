@@ -46,7 +46,7 @@ jobs:
     - name: Run tests
       run: go test .
     
-    - name: Build for Raspberry Pi (ARM64)
+    - name: Build m17-gateway for Raspberry Pi (ARM64)
       run: |
         cd cmd/m17-gateway
         echo "Building M17 Gateway for ARM64 architecture (64-bit Raspberry Pi OS)..."
@@ -55,32 +55,64 @@ jobs:
         ls -la m17-gateway
         file m17-gateway
     
-    - name: Make build script executable
+    - name: Make m17-gateway build script executable
       run: |
         cd cmd/m17-gateway
         chmod +x ./packaging/scripts/build-deb.sh
     
-    - name: Build .deb package
+    - name: Build m17-gateway .deb package
       run: |
         cd cmd/m17-gateway
         ./packaging/scripts/build-deb.sh ${{ steps.version.outputs.VERSION }}
     
-    - name: List build artifacts
+    - name: List m17-gateway build artifacts
       run: |
         cd cmd/m17-gateway
         ls -la build/
     
-    - name: Upload .deb package
+    - name: Upload m17-gateway .deb package
       uses: actions/upload-artifact@v4
       with:
         name: m17-gateway-debian-package
         path: cmd/m17-gateway/build/*.deb
     
+    - name: Build m17-bridge for Raspberry Pi (ARM64)
+      run: |
+        cd cmd/m17-bridge
+        echo "Building M17 Gateway for ARM64 architecture (64-bit Raspberry Pi OS)..."
+        GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o m17-bridge .
+        echo "Build completed successfully"
+        ls -la m17-bridge
+        file m17-bridge
+    
+    - name: Make m17-bridge build script executable
+      run: |
+        cd cmd/m17-bridge
+        chmod +x ./packaging/scripts/build-deb.sh
+    
+    - name: Build m17-bridge .deb package
+      run: |
+        cd cmd/m17-bridge
+        ./packaging/scripts/build-deb.sh ${{ steps.version.outputs.VERSION }}
+    
+    - name: List m17-bridge build artifacts
+      run: |
+        cd cmd/m17-bridge
+        ls -la build/
+    
+    - name: Upload m17-bridge .deb package
+      uses: actions/upload-artifact@v4
+      with:
+        name: m17-bridge-debian-package
+        path: cmd/m17-bridge/build/*.deb
+    
     - name: Create Release
       if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v1
       with:
-        files: cmd/m17-gateway/build/*.deb
+        files: |
+          cmd/m17-gateway/build/*.deb
+          cmd/m17-bridge/build/*.deb
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -92,20 +124,40 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Download .deb package
+    - name: Download m17-gateway .deb package
       uses: actions/download-artifact@v4
       with:
         name: m17-gateway-debian-package
         path: ./
     
-    - name: Test package info
+    - name: Test m17-gateway package info
       run: |
         # Install dpkg tools
         sudo apt-get update
         sudo apt-get install -y dpkg-dev
         
         # Check package info
-        DEB_FILE=$(ls *.deb)
+        DEB_FILE=$(ls m17-gateway*.deb)
+        echo "Package contents:"
+        dpkg -c "$DEB_FILE"
+        
+        echo "Package info:"
+        dpkg -I "$DEB_FILE"
+
+    - name: Download m17-bridge .deb package
+      uses: actions/download-artifact@v4
+      with:
+        name: m17-bridge-debian-package
+        path: ./
+    
+    - name: Test m17-bridge package info
+      run: |
+        # Install dpkg tools
+        sudo apt-get update
+        sudo apt-get install -y dpkg-dev
+        
+        # Check package info
+        DEB_FILE=$(ls m17-bridge*.deb)
         echo "Package contents:"
         dpkg -c "$DEB_FILE"
         
