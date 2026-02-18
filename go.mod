@@ -12,7 +12,7 @@ require (
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/ergochat/irc-go v0.5.0
 	github.com/go-zeromq/zmq4 v0.17.0
-	github.com/hessu/go-aprs-fap v0.0.5
+	github.com/hessu/go-aprs-fap v0.0.7
 	github.com/icza/gog v0.0.0-20241010132004-5da24f18211d
 	github.com/warthog618/go-gpiocdev v0.9.1
 	go.bug.st/serial v1.6.2

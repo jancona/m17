@@ -51,7 +51,7 @@ func (u *aprsUser) sendGNSSFrame(s *m17.GNSS) error {
 		altitude = &alt
 	}
 
-	posStr, err := fap.MakePosition(
+	posStr, err := fap.EncodePosition(
 		float64(s.Latitude),
 		float64(s.Longitude),
 		speed, course, altitude,
@@ -97,10 +97,18 @@ func (m *APRSModule) HandlePacket(p m17.Packet) error {
 	if u != nil {
 		dst := aprsCallsign(p.LSF.Dst.Callsign())
 		msgText := strings.ReplaceAll(string(p.Payload), "\x00", "")
-		frame := fmt.Sprintf("%s>%s::%-9s:%s", u.aprsCallsign, deviceID, dst, msgText)
-		log.Printf("[DEBUG] Sending frame: '%s', passcode: %d", frame, u.passcode)
+		body, err := fap.EncodeMessage(&fap.Message{
+			Destination: dst,
+			Text:        msgText,
+		})
+		if err != nil {
+			log.Printf("[INFO] Unable to encode APRS message: %v", err)
+			return err
+		}
+		packet := fmt.Sprintf("%s>%s:%s", u.aprsCallsign, deviceID, body)
+		log.Printf("[DEBUG] Sending packet: '%s', passcode: %d", packet, u.passcode)
 		u.mu.Lock()
-		err := u.conn.SendLine(frame)
+		err = u.conn.SendLine(packet)
 		u.mu.Unlock()
 		if err != nil {
 			log.Printf("[INFO] Unable to send message: %v", err)
