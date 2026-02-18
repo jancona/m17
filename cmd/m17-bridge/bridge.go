@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/hashicorp/logutils"
 	"github.com/jancona/m17/server"
@@ -162,11 +163,14 @@ func NewBridge(cfg *config) (*Bridge, error) {
 				return nil, err
 			}
 		case "APRS":
+			staleMinutes := m.Key("StaleMinutes").MustInt(60)
 			modules[k], err = server.NewAPRSModule(
 				k,
 				ret.server,
 				m.Key("Server").String(),
+				m.Key("Callsign").String(),
 				m.Key("Symbol").String(),
+				time.Duration(staleMinutes)*time.Minute,
 			)
 			if err != nil {
 				return nil, err
