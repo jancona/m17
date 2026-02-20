@@ -1,3 +1,4 @@
+/m17-gateway
 cmd/bridge/bridge
 cmd/bridge/bridge.ini
 cmd/m17-text-cli/m17-text-cli

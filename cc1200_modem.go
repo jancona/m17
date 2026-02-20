@@ -376,59 +376,7 @@ func (m *CC1200Modem) processReceivedData(rxSource chan int8, zmqSource chan byt
 }
 
 func (m *CC1200Modem) processSymbols() {
-	var symbols []Symbol
-	// logTicker := time.NewTicker(time.Second)
-	// defer logTicker.Stop()
-
-	for {
-		// Refill symbol buffer
-		// log.Printf("[DEBUG] Refill symbol buffer: %d", symbolBufSize-len(symbols))
-		for range symbolBufSize - len(symbols) {
-			symbols = append(symbols, Symbol(<-m.rxSymbols))
-		}
-		// select {
-		// case <-logTicker.C:
-		// 	log.Printf("[DEBUG] symbols: %v", symbols)
-		// default:
-		// 	//
-		// }
-
-		// Looking for a sync burst
-		//calculate euclidean norm
-		dist, typ := syncDistance(symbols, 0)
-		switch {
-		case typ == LSFSync && dist < 4.5:
-			// log.Printf("[DEBUG] Received LSFSync, distance: %f, type: %x", dist, typ)
-			// log.Printf("[DEBUG] symbols: %v", symbols)
-			var pld []SoftBit
-			symbols, pld, _ = extractPayload(dist, typ, symbols)
-			m.frameSink(typ, pld)
-
-		case typ == PacketSync && dist < 5.0:
-			// log.Printf("[DEBUG] Received PacketSync, distance: %f, type: %x", dist, typ)
-			// log.Printf("[DEBUG] symbols: %v", symbols)
-			var pld []SoftBit
-			symbols, pld, _ = extractPayload(dist, typ, symbols)
-			m.frameSink(typ, pld)
-
-		case typ == StreamSync && dist < 5.0:
-			// log.Printf("[DEBUG] Received StreamSync, distance: %f, type: %x", dist, typ)
-			// log.Printf("[DEBUG] symbols: %v", symbols)
-			var pld []SoftBit
-			symbols, pld, _ = extractPayload(dist, typ, symbols)
-			m.frameSink(typ, pld)
-
-		case typ == EOTMarker && dist < 4.5:
-			// log.Printf("[DEBUG] Received EOTMarker, distance: %f, type: %x", dist, typ)
-			// log.Printf("[DEBUG] symbols: %v", symbols)
-			symbols = symbols[16*5:]
-			m.frameSink(typ, nil)
-
-		default:
-			// No one read anything, so advance one symbol
-			symbols = symbols[1:]
-		}
-	}
+	processSymbolStream(m.rxSymbols, m.frameSink, 5)
 }
 
 func (m *CC1200Modem) rxPipeline(sampleSource chan int8) (chan float32, error) {

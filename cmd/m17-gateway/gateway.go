@@ -85,7 +85,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	if !cfg.Section("Modem").HasKey("Type") {
 		cfg.Section("Modem").Key("Type").SetValue("cc1200")
 	}
-	modemType = cfg.Section("Modem").Key("Type").In("BAD", []string{"cc1200", "cc1200v2", "mmdvm", "dummy"})
+	modemType = cfg.Section("Modem").Key("Type").In("BAD", []string{"cc1200", "cc1200v2", "mmdvm", "dummy", "sx1255"})
 	if modemType == "BAD" {
 		modemTypeErr = fmt.Errorf("bad Modem Type: %s", cfg.Section("Modem").Key("Type").String())
 	}
@@ -253,6 +253,12 @@ func main() {
 			log.Fatalf("Error creating MMDVM modem: %v", err)
 		}
 		log.Printf("[INFO] Connected to MMDVM modem on %s", cfg.modemCfg.Key("Port").String())
+	case "sx1255":
+		modem, err = m17.NewSX1255Modem(cfg.rxFrequency, cfg.txFrequency, cfg.modemCfg)
+		if err != nil {
+			log.Fatalf("Error creating SX1255 modem: %v", err)
+		}
+		log.Printf("[INFO] Connected to SX1255 modem on %s", cfg.modemCfg.Key("SPIDevice").MustString("/dev/spidev0.0"))
 	case "dummy":
 		modem = &m17.DummyModem{
 			In:  cfg.symbolsIn,

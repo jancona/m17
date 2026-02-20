@@ -215,10 +215,6 @@ github.com/hashicorp/logutils v1.0.0/go.mod h1:QIAnNjmIWmVIIkWDTG1z5v++HQmx9WQRO
 github.com/hashicorp/mdns v1.0.0/go.mod h1:tL+uN++7HEJ6SQLQ2/p+z2pH24WQKWjBPkE0mNTz8vQ=
 github.com/hashicorp/memberlist v0.1.3/go.mod h1:ajVTdAv/9Im8oMAAj5G31PhhMCZJV2pPBoIllUwCN7I=
 github.com/hashicorp/serf v0.8.2/go.mod h1:6hOLApaqBFA1NXqRQAsxw9QxuDEvNxSQRwA/JwenrHc=
-github.com/hessu/go-aprs-fap v0.0.5 h1:Bsb//n+cVikaa+Q5ArDTe1ZNZe+O1RUBFuUV+WzkMXM=
-github.com/hessu/go-aprs-fap v0.0.5/go.mod h1:ijCZO2LBfaOgvcCjmV086Z3ku8dVh7lH40IXiARWmuM=
-github.com/hessu/go-aprs-fap v0.0.6 h1:EKK34a0m4Ao8iESPXPAukg6ooKg7z6OH3UwJAAryPu4=
-github.com/hessu/go-aprs-fap v0.0.6/go.mod h1:ijCZO2LBfaOgvcCjmV086Z3ku8dVh7lH40IXiARWmuM=
 github.com/hessu/go-aprs-fap v0.0.7 h1:xMducGNObNk7itPUAnhjT5I571gDbr4KZZ0S0IT+Oe8=
 github.com/hessu/go-aprs-fap v0.0.7/go.mod h1:ijCZO2LBfaOgvcCjmV086Z3ku8dVh7lH40IXiARWmuM=
 github.com/ianlancetaylor/demangle v0.0.0-20181102032728-5e5cf60278f6/go.mod h1:aSSvb/t6k1mPoxDqO4vJh6VOCGPwU4O0C2/Eqndh1Sc=
@@ -226,6 +222,8 @@ github.com/ianlancetaylor/demangle v0.0.0-20200824232613-28f6c0f3b639/go.mod h1:
 github.com/icza/gog v0.0.0-20241010132004-5da24f18211d h1:ZA56WhTKshNVDTPwit0Opb4FXRQUd5kcABgjAOa68ro=
 github.com/icza/gog v0.0.0-20241010132004-5da24f18211d/go.mod h1:xsNydfFX2ys7eKRjtg6cArkYGQ3GPKZn4GGwQ0cUk5E=
 github.com/inconshreveable/mousetrap v1.0.0/go.mod h1:PxqpIevigyE2G7u3NXJIT2ANytuPF1OarO4DADm73n8=
+github.com/jancona/alsa v0.0.0-20260220225142-89b52dc346b7 h1:GC0Yi+FIykINuIANOhDK3YfxV3b1yMYxjn1DB2xo0ks=
+github.com/jancona/alsa v0.0.0-20260220225142-89b52dc346b7/go.mod h1:552/irjJxsS8Re5H0RzDeTz0UcJdQ3tsVKYSZ9ImAx0=
 github.com/jeandeaual/go-locale v0.0.0-20241217141322-fcc2cadd6f08 h1:wMeVzrPO3mfHIWLZtDcSaGAe2I4PW9B/P5nMkRSwCAc=
 github.com/jeandeaual/go-locale v0.0.0-20241217141322-fcc2cadd6f08/go.mod h1:ZDXo8KHryOWSIqnsb/CiDq7hQUYryCgdVnxbj8tDG7o=
 github.com/json-iterator/go v1.1.11/go.mod h1:KdQUCv79m/52Kvf8AW2vK1V8akMuk1QjK/uOdHXbAo4=

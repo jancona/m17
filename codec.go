@@ -120,33 +120,38 @@ var (
 	EOTMarkerSymbols  = []float64{+3, +3, +3, +3, +3, +3, -3, +3} // 0x555D
 )
 
-// Calculate distance between recent samples and sync patterns
-func syncDistance(symbols []Symbol, offset int) (float32, uint16) {
+// Calculate distance between recent samples and sync patterns.
+// sps is the number of samples per symbol (5 for CC1200, 1 for SX1255).
+func syncDistance(symbols []Symbol, offset int, sps int) (float32, uint16) {
 	var lsf,
 		pkt, pkte, pkta, pktb,
 		str, stre, stra, strb,
 		eote, eot float64
 
-	for i, s := range symbols[offset : 16*5+offset] {
-		if i%5 == 0 {
-			v := float64(s)
-			lsf += (v - ExtLSFSyncSymbols[i/5]) * (v - ExtLSFSyncSymbols[i/5])
-			eot += (v - EOTMarkerSymbols[i/5%8]) * (v - EOTMarkerSymbols[i/5%8])
+	frameStride := SymbolsPerFrame * sps // distance between consecutive sync words
 
-			if i/5 > 7 {
-				stra += (v - StreamSyncSymbols[i/5-8]) * (v - StreamSyncSymbols[i/5-8])
-				pkta += (v - PacketSyncSymbols[i/5-8]) * (v - PacketSyncSymbols[i/5-8])
+	for i, s := range symbols[offset : 16*sps+offset] {
+		if i%sps == 0 {
+			v := float64(s)
+			sym := i / sps
+			lsf += (v - ExtLSFSyncSymbols[sym]) * (v - ExtLSFSyncSymbols[sym])
+			eot += (v - EOTMarkerSymbols[sym%8]) * (v - EOTMarkerSymbols[sym%8])
+
+			if sym > 7 {
+				stra += (v - StreamSyncSymbols[sym-8]) * (v - StreamSyncSymbols[sym-8])
+				pkta += (v - PacketSyncSymbols[sym-8]) * (v - PacketSyncSymbols[sym-8])
 			}
 		}
 	}
 
-	for i, s := range symbols[960+offset : 960+16*5+offset] {
-		if i%5 == 0 {
+	for i, s := range symbols[frameStride+offset : frameStride+16*sps+offset] {
+		if i%sps == 0 {
 			v := float64(s)
-			if i/5 > 7 {
-				strb += (v - StreamSyncSymbols[i/5-8]) * (v - StreamSyncSymbols[i/5-8])
-				eote += (v - EOTMarkerSymbols[i/5-8]) * (v - EOTMarkerSymbols[i/5-8])
-				pktb += (v - PacketSyncSymbols[i/5-8]) * (v - PacketSyncSymbols[i/5-8])
+			sym := i / sps
+			if sym > 7 {
+				strb += (v - StreamSyncSymbols[sym-8]) * (v - StreamSyncSymbols[sym-8])
+				eote += (v - EOTMarkerSymbols[sym-8]) * (v - EOTMarkerSymbols[sym-8])
+				pktb += (v - PacketSyncSymbols[sym-8]) * (v - PacketSyncSymbols[sym-8])
 			}
 		}
 	}

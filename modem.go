@@ -2,6 +2,8 @@ package m17
 
 import (
 	"fmt"
+	"log"
+	"time"
 )
 
 const (
@@ -17,10 +19,86 @@ type Modem interface {
 	TransmitVoiceStream(StreamDatagram) error
 }
 
-func extractPayload(dist float32, typ uint16, symbols []Symbol) ([]Symbol, []SoftBit, float32) {
+// processSymbolStream reads RRC-filtered symbols from rxSymbols, detects sync bursts,
+// extracts payloads, and delivers soft bits to frameSink. Used by both CC1200 and SX1255 modems.
+// sps is the number of samples per symbol (5 for CC1200, 1 for SX1255 after max-abs decimation).
+func processSymbolStream(rxSymbols <-chan float32, frameSink func(typ uint16, softBits []SoftBit), sps int) {
+	var symbols []Symbol
+
+	// Symbol buffer size: 8 preamble symbols, 8 for the syncword, and SymbolsPerFrame for the payload,
+	// times two for lookahead, floor(sps/2) extra for timing error correction, plus padding.
+	bufSize := 8*sps + 2*(8*sps+SymbolsPerFrame*sps) + sps/2 + 256
+
+	// Diagnostic: track minimum sync distance seen per interval
+	var minDist float32 = 999
+	var minDistType uint16
+	diagTicker := time.NewTicker(5 * time.Second)
+	defer diagTicker.Stop()
+
+	for {
+		// Refill symbol buffer
+		for range bufSize - len(symbols) {
+			symbols = append(symbols, Symbol(<-rxSymbols))
+		}
+
+		// Looking for a sync burst
+		// calculate euclidean norm
+		dist, typ := syncDistance(symbols, 0, sps)
+
+		// Track minimum distance for diagnostics
+		if dist < minDist {
+			minDist = dist
+			minDistType = typ
+		}
+		select {
+		case <-diagTicker.C:
+			typName := "?"
+			switch minDistType {
+			case LSFSync:
+				typName = "LSF"
+			case StreamSync:
+				typName = "Stream"
+			case PacketSync:
+				typName = "Packet"
+			case EOTMarker:
+				typName = "EOT"
+			}
+			log.Printf("[DEBUG] sync: minDist=%.2f type=%s (thresholds: LSF/EOT<4.5, Stream/Pkt<5.0)", minDist, typName)
+			minDist = 999
+		default:
+		}
+
+		switch {
+		case typ == LSFSync && dist < 4.5:
+			var pld []SoftBit
+			symbols, pld, _ = extractPayload(dist, typ, symbols, sps)
+			frameSink(typ, pld)
+
+		case typ == PacketSync && dist < 5.0:
+			var pld []SoftBit
+			symbols, pld, _ = extractPayload(dist, typ, symbols, sps)
+			frameSink(typ, pld)
+
+		case typ == StreamSync && dist < 5.0:
+			var pld []SoftBit
+			symbols, pld, _ = extractPayload(dist, typ, symbols, sps)
+			frameSink(typ, pld)
+
+		case typ == EOTMarker && dist < 4.5:
+			symbols = symbols[16*sps:]
+			frameSink(typ, nil)
+
+		default:
+			// No sync found, advance one symbol
+			symbols = symbols[1:]
+		}
+	}
+}
+
+func extractPayload(dist float32, typ uint16, symbols []Symbol, sps int) ([]Symbol, []SoftBit, float32) {
 	offset := 0
-	for i := range 2 {
-		d, t := syncDistance(symbols, i+1)
+	for i := range sps / 2 {
+		d, t := syncDistance(symbols, i+1, sps)
 		if t == typ && d < dist {
 			dist = d
 			offset = i + 1
@@ -29,15 +107,15 @@ func extractPayload(dist float32, typ uint16, symbols []Symbol) ([]Symbol, []Sof
 	// skip offset
 	symbols = symbols[offset:]
 	// skip past sync
-	symbols = symbols[16*5:]
+	symbols = symbols[16*sps:]
 	pld := make([]Symbol, SymbolsPerPayload)
 	for i := range pld {
-		pld[i] = symbols[i*5]
+		pld[i] = symbols[i*sps]
 	}
 	softBits := calcSoftbits(pld)
 	// skip by most, but not all of the payload
 	// if we skip everything we miss the next packet for some reason.
-	symbols = symbols[(SymbolsPerPayload-offset-16)*5:]
+	symbols = symbols[(SymbolsPerPayload-offset-16)*sps:]
 	return symbols, softBits, dist
 }
 
