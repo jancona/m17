@@ -145,20 +145,20 @@ func (m *SX1255Modem) sx1255Init() error {
 
 	// Write initialization registers (per libsx1255)
 	// Reg 0x0D: RX bandwidth filter config
-	err = m.spi.writeReg(sx1255RegRXBWFilter, (0x01<<5)|(0x05<<2)|0x03)
+	err = m.spi.writeReg(regRXBWFilterSX1255, (0x01<<5)|(0x05<<2)|0x03)
 	if err != nil {
 		return fmt.Errorf("SX1255 init reg 0x0D: %w", err)
 	}
 	// Reg 0x0B: TX DAC taps
-	err = m.spi.writeReg(sx1255RegTXDACTaps, 5)
+	err = m.spi.writeReg(regTXDACTapsSX1255, 5)
 	if err != nil {
 		return fmt.Errorf("SX1255 init reg 0x0B: %w", err)
 	}
 
 	// Verify chip version
 	ver := m.sx1255GetChipVersion()
-	if ver != sx1255ExpectedVersion {
-		return fmt.Errorf("SX1255 unexpected chip version: 0x%02X (expected 0x%02X)", ver, sx1255ExpectedVersion)
+	if ver != expectedVersionSX1255 {
+		return fmt.Errorf("SX1255 unexpected chip version: 0x%02X (expected 0x%02X)", ver, expectedVersionSX1255)
 	}
 	log.Printf("[DEBUG] SX1255 chip version: 0x%02X", ver)
 
@@ -186,31 +186,31 @@ func (m *SX1255Modem) sx1255Reset() error {
 // sx1255FreqToReg converts a frequency in Hz to the 24-bit PLL register value.
 // Formula: val = round(freq * 2^20 / f_xtal)
 func sx1255FreqToReg(hz uint32) uint32 {
-	return uint32(math.Round(float64(hz) * 1048576.0 / sx1255ClkFreq))
+	return uint32(math.Round(float64(hz) * 1048576.0 / clkFreqSX1255))
 }
 
 func (m *SX1255Modem) sx1255SetRXFreq(hz uint32) error {
 	val := sx1255FreqToReg(hz)
 	log.Printf("[DEBUG] SX1255 set RX freq: %d Hz (reg val: 0x%06X)", hz, val)
-	if err := m.spi.writeReg(sx1255RegRXFreqMSB, byte(val>>16)); err != nil {
+	if err := m.spi.writeReg(regRXFreqMSBSX1255, byte(val>>16)); err != nil {
 		return err
 	}
-	if err := m.spi.writeReg(sx1255RegRXFreqMid, byte(val>>8)); err != nil {
+	if err := m.spi.writeReg(regRXFreqMidSX1255, byte(val>>8)); err != nil {
 		return err
 	}
-	return m.spi.writeReg(sx1255RegRXFreqLSB, byte(val))
+	return m.spi.writeReg(regRXFreqLSBSX1255, byte(val))
 }
 
 func (m *SX1255Modem) sx1255SetTXFreq(hz uint32) error {
 	val := sx1255FreqToReg(hz)
 	log.Printf("[DEBUG] SX1255 set TX freq: %d Hz (reg val: 0x%06X)", hz, val)
-	if err := m.spi.writeReg(sx1255RegTXFreqMSB, byte(val>>16)); err != nil {
+	if err := m.spi.writeReg(regTXFreqMSBSX1255, byte(val>>16)); err != nil {
 		return err
 	}
-	if err := m.spi.writeReg(sx1255RegTXFreqMid, byte(val>>8)); err != nil {
+	if err := m.spi.writeReg(regTXFreqMidSX1255, byte(val>>8)); err != nil {
 		return err
 	}
-	return m.spi.writeReg(sx1255RegTXFreqLSB, byte(val))
+	return m.spi.writeReg(regTXFreqLSBSX1255, byte(val))
 }
 
 func (m *SX1255Modem) sx1255SetRate() error {
@@ -224,7 +224,7 @@ func (m *SX1255Modem) sx1255SetRate() error {
 	//   bit 2:   IISM_truncation  = 1  → MSB-aligned (LSB truncated)
 	//   Decimation factor R = 8 × 3^0 × 2^5 = 256
 	//   Sample rate = 32 MHz / 256 = 125 kSa/s
-	err := m.spi.writeReg(sx1255RegI2SRate1, 0x2C)
+	err := m.spi.writeReg(regI2SRate1SX1255, 0x2C)
 	if err != nil {
 		return fmt.Errorf("SX1255 set rate reg 0x13: %w", err)
 	}
@@ -233,16 +233,16 @@ func (m *SX1255Modem) sx1255SetRate() error {
 	//   bit 6:   iism_tx_disable  = 0  → TX I2S enabled
 	//   bit 5-4: iism_mode        = 2  → Mode B2 (standard I2S)
 	//   bit 3-0: iism_clk_div     = 2  → XTAL / 4 = 8 MHz CLK_OUT
-	err = m.spi.writeReg(sx1255RegI2SRate0, 0x22)
+	err = m.spi.writeReg(regI2SRate0SX1255, 0x22)
 	if err != nil {
 		return fmt.Errorf("SX1255 set rate reg 0x12: %w", err)
 	}
 	// Read back and verify
-	reg12, err := m.spi.readReg(sx1255RegI2SRate0)
+	reg12, err := m.spi.readReg(regI2SRate0SX1255)
 	if err != nil {
 		log.Printf("[WARN] SX1255 readback reg 0x12 failed: %v", err)
 	}
-	reg13, err := m.spi.readReg(sx1255RegI2SRate1)
+	reg13, err := m.spi.readReg(regI2SRate1SX1255)
 	if err != nil {
 		log.Printf("[WARN] SX1255 readback reg 0x13 failed: %v", err)
 	}
@@ -263,13 +263,13 @@ func (m *SX1255Modem) sx1255SetLNAGain(db uint8) error {
 	if step > 8 {
 		step = 8
 	}
-	reg, err := m.spi.readReg(sx1255RegRXLNAPGA)
+	reg, err := m.spi.readReg(regRXLNAPGASX1255)
 	if err != nil {
 		return err
 	}
 	reg = (reg & 0x1F) | (step << 5)
 	log.Printf("[DEBUG] SX1255 set LNA gain: %d dB (step %d)", step*6, step)
-	return m.spi.writeReg(sx1255RegRXLNAPGA, reg)
+	return m.spi.writeReg(regRXLNAPGASX1255, reg)
 }
 
 // sx1255SetPGAGain sets the RX PGA gain (0-30 dB in 2 dB steps).
@@ -279,13 +279,13 @@ func (m *SX1255Modem) sx1255SetPGAGain(db uint8) error {
 	if step > 15 {
 		step = 15
 	}
-	reg, err := m.spi.readReg(sx1255RegRXLNAPGA)
+	reg, err := m.spi.readReg(regRXLNAPGASX1255)
 	if err != nil {
 		return err
 	}
 	reg = (reg & 0xE1) | (step << 1)
 	log.Printf("[DEBUG] SX1255 set PGA gain: %d dB (step %d)", step*2, step)
-	return m.spi.writeReg(sx1255RegRXLNAPGA, reg)
+	return m.spi.writeReg(regRXLNAPGASX1255, reg)
 }
 
 // sx1255SetDACGain sets the TX DAC gain (0, -3, -6, or -9 dB).
@@ -302,13 +302,13 @@ func (m *SX1255Modem) sx1255SetDACGain(db int8) error {
 	default:
 		code = 3
 	}
-	reg, err := m.spi.readReg(sx1255RegTXDACGain)
+	reg, err := m.spi.readReg(regTXDACGainSX1255)
 	if err != nil {
 		return err
 	}
 	reg = (reg & 0xCF) | (code << 4)
 	log.Printf("[DEBUG] SX1255 set DAC gain: %d dB (code %d)", -int(code)*3, code)
-	return m.spi.writeReg(sx1255RegTXDACGain, reg)
+	return m.spi.writeReg(regTXDACGainSX1255, reg)
 }
 
 // sx1255SetMixerGain sets the TX mixer gain (-37.5 to -7.5 dB in 2 dB steps).
@@ -322,13 +322,13 @@ func (m *SX1255Modem) sx1255SetMixerGain(db float32) error {
 	if step > 15 {
 		step = 15
 	}
-	reg, err := m.spi.readReg(sx1255RegTXDACGain)
+	reg, err := m.spi.readReg(regTXDACGainSX1255)
 	if err != nil {
 		return err
 	}
 	reg = (reg & 0xF0) | byte(step)
 	log.Printf("[DEBUG] SX1255 set mixer gain: %.1f dB (step %d)", -37.5+float64(step)*2, step)
-	return m.spi.writeReg(sx1255RegTXDACGain, reg)
+	return m.spi.writeReg(regTXDACGainSX1255, reg)
 }
 
 // sx1255SetRXPLLBW sets the RX PLL bandwidth (75, 150, 225, or 300 kHz).
@@ -344,13 +344,13 @@ func (m *SX1255Modem) sx1255SetRXPLLBW(bwKHz uint16) error {
 	default:
 		code = 3
 	}
-	reg, err := m.spi.readReg(sx1255RegRXPLLBW)
+	reg, err := m.spi.readReg(regRXPLLBWSX1255)
 	if err != nil {
 		return err
 	}
 	reg = (reg & 0xF9) | (code << 1)
 	log.Printf("[DEBUG] SX1255 set RX PLL BW: %d kHz (code %d)", (uint16(code)+1)*75, code)
-	return m.spi.writeReg(sx1255RegRXPLLBW, reg)
+	return m.spi.writeReg(regRXPLLBWSX1255, reg)
 }
 
 // sx1255SetTXPLLBW sets the TX PLL bandwidth (75, 150, 225, or 300 kHz).
@@ -366,17 +366,17 @@ func (m *SX1255Modem) sx1255SetTXPLLBW(bwKHz uint16) error {
 	default:
 		code = 3
 	}
-	reg, err := m.spi.readReg(sx1255RegTXFilterBW)
+	reg, err := m.spi.readReg(regTXFilterBWSX1255)
 	if err != nil {
 		return err
 	}
 	reg = (reg & 0x9F) | (code << 5)
 	log.Printf("[DEBUG] SX1255 set TX PLL BW: %d kHz (code %d)", (uint16(code)+1)*75, code)
-	return m.spi.writeReg(sx1255RegTXFilterBW, reg)
+	return m.spi.writeReg(regTXFilterBWSX1255, reg)
 }
 
 func (m *SX1255Modem) sx1255EnableRX(enable bool) error {
-	reg, err := m.spi.readReg(sx1255RegControl)
+	reg, err := m.spi.readReg(regControlSX1255)
 	if err != nil {
 		return err
 	}
@@ -386,11 +386,11 @@ func (m *SX1255Modem) sx1255EnableRX(enable bool) error {
 		reg &= ^byte(0x02)
 	}
 	log.Printf("[DEBUG] SX1255 enable RX: %v", enable)
-	return m.spi.writeReg(sx1255RegControl, reg)
+	return m.spi.writeReg(regControlSX1255, reg)
 }
 
 func (m *SX1255Modem) sx1255EnableTX(enable bool) error {
-	reg, err := m.spi.readReg(sx1255RegControl)
+	reg, err := m.spi.readReg(regControlSX1255)
 	if err != nil {
 		return err
 	}
@@ -400,11 +400,11 @@ func (m *SX1255Modem) sx1255EnableTX(enable bool) error {
 		reg &= ^byte(0x0C)
 	}
 	log.Printf("[DEBUG] SX1255 enable TX: %v", enable)
-	return m.spi.writeReg(sx1255RegControl, reg)
+	return m.spi.writeReg(regControlSX1255, reg)
 }
 
 func (m *SX1255Modem) sx1255EnableRFLoopback(enable bool) error {
-	reg, err := m.spi.readReg(sx1255RegLoopback)
+	reg, err := m.spi.readReg(regLoopbackSX1255)
 	if err != nil {
 		return err
 	}
@@ -414,11 +414,11 @@ func (m *SX1255Modem) sx1255EnableRFLoopback(enable bool) error {
 		reg &= ^byte(0x04)
 	}
 	log.Printf("[DEBUG] SX1255 enable RF loopback: %v", enable)
-	return m.spi.writeReg(sx1255RegLoopback, reg)
+	return m.spi.writeReg(regLoopbackSX1255, reg)
 }
 
 func (m *SX1255Modem) sx1255GetPLLStatus() (txLocked, rxLocked bool) {
-	reg, err := m.spi.readReg(sx1255RegPLLStatus)
+	reg, err := m.spi.readReg(regPLLStatusSX1255)
 	if err != nil {
 		log.Printf("[ERROR] SX1255 read PLL status: %v", err)
 		return false, false
@@ -429,7 +429,7 @@ func (m *SX1255Modem) sx1255GetPLLStatus() (txLocked, rxLocked bool) {
 }
 
 func (m *SX1255Modem) sx1255GetChipVersion() byte {
-	ver, err := m.spi.readReg(sx1255RegVersion)
+	ver, err := m.spi.readReg(regVersionSX1255)
 	if err != nil {
 		log.Printf("[ERROR] SX1255 read chip version: %v", err)
 		return 0

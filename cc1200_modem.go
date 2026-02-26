@@ -18,41 +18,41 @@ import (
 
 // CC1200 V2 commands
 const (
-	cc1200V2CmdPing = iota
+	cc1200CmdPing = iota
 	//SET
-	cc1200V2CmdSetRXFreq
-	cc1200V2CmdSetTXFreq
-	cc1200V2CmdSetTXPower
-	cc1200V2CmdSetReserved
-	cc1200V2CmdSetFreqCorr
-	cc1200V2CmdSetAFC
-	cc1200V2CmdTXStart
-	cc1200V2CmdRXStart
-	cc1200V2CmdRXData
-	cc1200V2CmdTXData
-	cc1200V2CmdDbgEnable
-	cc1200V2CmdDbgTxt
+	cc1200CmdSetRXFreq
+	cc1200CmdSetTXFreq
+	cc1200CmdSetTXPower
+	cc1200CmdSetReserved
+	cc1200CmdSetFreqCorr
+	cc1200CmdSetAFC
+	cc1200CmdTXStart
+	cc1200CmdRXStart
+	cc1200CmdRXData
+	cc1200CmdTXData
+	cc1200CmdDbgEnable
+	cc1200CmdDbgTxt
 	//GET
-	cc1200V2CmdGetIdent = iota + 0x80
-	cc1200V2CmdGetCaps
-	cc1200V2CmdGetRXFreq
-	cc1200V2CmdGetTXFreq
-	cc1200V2CmdGetTXPower
-	cc1200V2CmdGetFreqCorr
-	cc1200V2CmdGetBSBBuff
-	cc1200V2CmdGetRSSI
+	cc1200CmdGetIdent = iota + 0x80
+	cc1200CmdGetCaps
+	cc1200CmdGetRXFreq
+	cc1200CmdGetTXFreq
+	cc1200CmdGetTXPower
+	cc1200CmdGetFreqCorr
+	cc1200CmdGetBSBBuff
+	cc1200CmdGetRSSI
 )
 
 const (
-	cc1200V2ErrOK         = iota //all good
-	cc1200V2ErrTrxPLL            //TRX PLL lock error
-	cc1200V2ErrTrxSPI            //TRX SPI comms error
-	cc1200V2ErrRange             //value out of range
-	cc1200V2ErrCmdMalform        //malformed command
-	cc1200V2ErrBusy              //busy!
-	cc1200V2ErrBuffFull          //buffer full
-	cc1200V2ErrNOP               //nothing to do
-	cc1200V2ErrOther
+	cc1200ErrOK         = iota //all good
+	cc1200ErrTrxPLL            //TRX PLL lock error
+	cc1200ErrTrxSPI            //TRX SPI comms error
+	cc1200ErrRange             //value out of range
+	cc1200ErrCmdMalform        //malformed command
+	cc1200ErrBusy              //busy!
+	cc1200ErrBuffFull          //buffer full
+	cc1200ErrNOP               //nothing to do
+	cc1200ErrOther
 )
 
 var errBadCmd = errors.New("bad command")
@@ -76,45 +76,45 @@ func newCommandV2FromBytes(buf []byte) (commandV2, error) {
 	// Heuristics to detect bad commands
 	switch {
 	// All commands the firmware sends as of Dec. 2025
-	case ret.cmd == cc1200V2CmdPing && ret.size == 7:
+	case ret.cmd == cc1200CmdPing && ret.size == 7:
 		fallthrough
-	case ret.cmd == cc1200V2CmdSetRXFreq && ret.size == 4:
+	case ret.cmd == cc1200CmdSetRXFreq && ret.size == 4:
 		fallthrough
-	case ret.cmd == cc1200V2CmdSetTXFreq && ret.size == 4:
+	case ret.cmd == cc1200CmdSetTXFreq && ret.size == 4:
 		fallthrough
-	case ret.cmd == cc1200V2CmdSetTXPower && ret.size == 4:
+	case ret.cmd == cc1200CmdSetTXPower && ret.size == 4:
 		fallthrough
-	case ret.cmd == cc1200V2CmdSetFreqCorr && ret.size == 4:
+	case ret.cmd == cc1200CmdSetFreqCorr && ret.size == 4:
 		fallthrough
-	case ret.cmd == cc1200V2CmdSetAFC && ret.size == 4:
+	case ret.cmd == cc1200CmdSetAFC && ret.size == 4:
 		fallthrough
-	case ret.cmd == cc1200V2CmdTXStart && ret.size == 4:
+	case ret.cmd == cc1200CmdTXStart && ret.size == 4:
 		fallthrough
-	case ret.cmd == cc1200V2CmdRXStart && ret.size == 4:
+	case ret.cmd == cc1200CmdRXStart && ret.size == 4:
 		fallthrough
-	case ret.cmd == cc1200V2CmdRXData && ret.size == 963:
+	case ret.cmd == cc1200CmdRXData && ret.size == 963:
 		fallthrough
-	case ret.cmd == cc1200V2CmdTXData && ret.size == 4:
+	case ret.cmd == cc1200CmdTXData && ret.size == 4:
 		fallthrough
-	// case ret.cmd == cc1200V2CmdDbgEnable && ret.size == 4:
+	// case ret.cmd == cc1200CmdDbgEnable && ret.size == 4:
 	// 	fallthrough
-	case ret.cmd == cc1200V2CmdDbgTxt && ret.size <= 131:
+	case ret.cmd == cc1200CmdDbgTxt && ret.size <= 131:
 		fallthrough
-	case ret.cmd == cc1200V2CmdGetIdent && ret.size <= 131:
+	case ret.cmd == cc1200CmdGetIdent && ret.size <= 131:
 		fallthrough
-	case ret.cmd == cc1200V2CmdGetCaps && ret.size <= 4:
+	case ret.cmd == cc1200CmdGetCaps && ret.size <= 4:
 		fallthrough
-	case ret.cmd == cc1200V2CmdGetRXFreq && ret.size <= 7:
+	case ret.cmd == cc1200CmdGetRXFreq && ret.size <= 7:
 		fallthrough
-	case ret.cmd == cc1200V2CmdGetTXFreq && ret.size <= 7:
+	case ret.cmd == cc1200CmdGetTXFreq && ret.size <= 7:
 		fallthrough
-	// case ret.cmd == cc1200V2CmdGetTXPower  && ret.size <= :
+	// case ret.cmd == cc1200CmdGetTXPower  && ret.size <= :
 	// 	fallthrough
-	// case ret.cmd == cc1200V2CmdGetFreqCorr  && ret.size <= :
+	// case ret.cmd == cc1200CmdGetFreqCorr  && ret.size <= :
 	// 	fallthrough
-	case ret.cmd == cc1200V2CmdGetBSBBuff && ret.size <= 4:
+	case ret.cmd == cc1200CmdGetBSBBuff && ret.size <= 4:
 		fallthrough
-	case ret.cmd == cc1200V2CmdGetRSSI && ret.size <= 4:
+	case ret.cmd == cc1200CmdGetRSSI && ret.size <= 4:
 		ret.data = make([]byte, ret.size-3)
 		copy(ret.data, buf[3:])
 		return ret, nil
@@ -146,8 +146,8 @@ func (c commandV2) String() string {
 }
 
 const (
-	txIdleV2 = iota
-	txTXV2
+	txIdleCC1200 = iota
+	txActiveCC1200
 )
 
 // txTimeout must be greater than this!
@@ -215,7 +215,7 @@ func NewCC1200Modem(
 	})
 	// Stop it until we transmit
 	ret.txTimer.Stop()
-	ret.txState = txIdleV2
+	ret.txState = txIdleCC1200
 
 	log.Printf("[DEBUG] Opening modem")
 	err = ret.gpioSetup(nRSTPin, boot0Pin)
@@ -257,7 +257,7 @@ func NewCC1200Modem(
 
 	go ret.processReceivedData(rxSource, zmqSource)
 	log.Printf("[DEBUG] ping()")
-	_, err = ret.commandWithResponse(newCommandV2(cc1200V2CmdPing, []byte{}))
+	_, err = ret.commandWithResponse(newCommandV2(cc1200CmdPing, []byte{}))
 	if err != nil {
 		return nil, fmt.Errorf("test PING: %w", err)
 	}
@@ -345,7 +345,7 @@ func (m *CC1200Modem) processReceivedData(rxSource chan int8, zmqSource chan byt
 		badBuf = nil
 		badCnt = 0
 		prevCmd = cmd
-		if cmd.cmd == cc1200V2CmdRXData {
+		if cmd.cmd == cc1200CmdRXData {
 			for _, b := range cmd.data {
 				select {
 				case rxSource <- int8(b):
@@ -535,7 +535,7 @@ func (m *CC1200Modem) TransmitVoiceStream(sd StreamDatagram) error {
 	var err error
 	// log.Printf("[DEBUG] TransmitVoiceStream id: %04x, fn: %04x, last: %v", sd.StreamID, sd.FrameNumber, sd.LastFrame)
 	m.mutex.Lock()
-	firstFrame := m.txState != txTXV2
+	firstFrame := m.txState != txActiveCC1200
 	m.mutex.Unlock()
 	if firstFrame {
 		// First frame
@@ -588,13 +588,13 @@ func (m *CC1200Modem) TransmitVoiceStream(sd StreamDatagram) error {
 
 func (m *CC1200Modem) startTX() error {
 	log.Printf("[DEBUG] startTX()")
-	err := m.commandWithErrResponse(newCommandV2(cc1200V2CmdTXStart, []byte{1}))
+	err := m.commandWithErrResponse(newCommandV2(cc1200CmdTXStart, []byte{1}))
 	if err != nil {
 		log.Printf("[ERROR] startTX(): %v", err)
 		return fmt.Errorf("start TX: %w", err)
 	}
 	m.mutex.Lock()
-	m.txState = txTXV2
+	m.txState = txActiveCC1200
 	m.mutex.Unlock()
 	// log.Printf("[DEBUG] startTX() txTimer.Reset")
 	m.txTimer.Reset(txTimeout)
@@ -605,15 +605,15 @@ func (m *CC1200Modem) stopTX() {
 	log.Print("[DEBUG] modem stopTX()")
 	m.mutex.Lock()
 	// Only stop if we've started
-	if m.txState == txTXV2 {
+	if m.txState == txActiveCC1200 {
 		m.mutex.Unlock()
 		// log.Print("[DEBUG] modem stopping TX")
-		err := m.commandWithErrResponse(newCommandV2(cc1200V2CmdTXStart, []byte{0}))
+		err := m.commandWithErrResponse(newCommandV2(cc1200CmdTXStart, []byte{0}))
 		if err != nil {
 			log.Printf("[ERROR] stopTX(): %v", err)
 		}
 		m.mutex.Lock()
-		m.txState = txIdleV2
+		m.txState = txIdleCC1200
 	}
 	m.mutex.Unlock()
 	// log.Printf("[DEBUG] stopTX() txTimer.Stop")
@@ -627,7 +627,7 @@ func (m *CC1200Modem) setTXFreq(freq uint32) error {
 		return fmt.Errorf("encode set TX freq: %w", err)
 	}
 
-	cmd := newCommandV2(cc1200V2CmdSetTXFreq, data)
+	cmd := newCommandV2(cc1200CmdSetTXFreq, data)
 	err = m.commandWithErrResponse(cmd)
 	if err != nil {
 		return fmt.Errorf("send set TX freq: %w", err)
@@ -636,7 +636,7 @@ func (m *CC1200Modem) setTXFreq(freq uint32) error {
 }
 func (m *CC1200Modem) setTXPower(dbm int8) error {
 	log.Printf("[DEBUG] setTXPower(%v)", dbm)
-	cmd := newCommandV2(cc1200V2CmdSetTXPower, []byte{byte(dbm)})
+	cmd := newCommandV2(cc1200CmdSetTXPower, []byte{byte(dbm)})
 	err := m.commandWithErrResponse(cmd)
 	if err != nil {
 		return fmt.Errorf("send set TX power: %w", err)
@@ -647,10 +647,10 @@ func (m *CC1200Modem) setTXPower(dbm int8) error {
 func (m *CC1200Modem) Start() error {
 	// log.Printf("[DEBUG] Start()")
 	m.mutex.Lock()
-	m.txState = txIdleV2
+	m.txState = txIdleCC1200
 	m.mutex.Unlock()
 	// log.Printf("[DEBUG] sending start cmd")
-	err := m.commandWithErrResponse(newCommandV2(cc1200V2CmdRXStart, []byte{1}))
+	err := m.commandWithErrResponse(newCommandV2(cc1200CmdRXStart, []byte{1}))
 	if err != nil {
 		log.Printf("[ERROR] Start(): %v", err)
 		return fmt.Errorf("send set RX start error: %w", err)
@@ -662,10 +662,10 @@ func (m *CC1200Modem) Start() error {
 func (m *CC1200Modem) stopRX() error {
 	m.mutex.Lock()
 	// Only stop if we've started
-	if m.txState == txIdleV2 {
+	if m.txState == txIdleCC1200 {
 		m.mutex.Unlock()
 		log.Printf("[DEBUG] stopRX()")
-		err := m.commandWithErrResponse(newCommandV2(cc1200V2CmdRXStart, []byte{0}))
+		err := m.commandWithErrResponse(newCommandV2(cc1200CmdRXStart, []byte{0}))
 		if err != nil {
 			log.Printf("[ERROR] stopRX(): %v", err)
 			return fmt.Errorf("send set RX stop: %w", err)
@@ -682,7 +682,7 @@ func (m *CC1200Modem) setRXFreq(freq uint32) error {
 		return fmt.Errorf("encode set RX freq: %w", err)
 	}
 
-	cmd := newCommandV2(cc1200V2CmdSetRXFreq, data)
+	cmd := newCommandV2(cc1200CmdSetRXFreq, data)
 	err = m.commandWithErrResponse(cmd)
 	if err != nil {
 		return fmt.Errorf("send set RX freq: %w", err)
@@ -696,7 +696,7 @@ func (m *CC1200Modem) setAFC(afc bool) error {
 	if afc {
 		a = 1
 	}
-	cmd := newCommandV2(cc1200V2CmdSetAFC, []byte{a})
+	cmd := newCommandV2(cc1200CmdSetAFC, []byte{a})
 	err = m.commandWithErrResponse(cmd)
 	if err != nil {
 		return fmt.Errorf("send set AFC: %w", err)
@@ -709,7 +709,7 @@ func (m *CC1200Modem) setFreqCorrection(corr int16) error {
 	if err != nil {
 		return fmt.Errorf("encode set RX freq: %w", err)
 	}
-	cmd := newCommandV2(cc1200V2CmdSetFreqCorr, data)
+	cmd := newCommandV2(cc1200CmdSetFreqCorr, data)
 	err = m.commandWithErrResponse(cmd)
 	if err != nil {
 		return fmt.Errorf("send set freq corr: %w", err)
@@ -729,9 +729,9 @@ func (m *CC1200Modem) writeSymbols(symbols []Symbol) error {
 		log.Printf("[DEBUG] Last TX data sent %v ago", since.Round(time.Millisecond))
 	}
 	m.lastTXData = time.Now()
-	cmd := newCommandV2(cc1200V2CmdTXData, buf)
-	resp := byte(cc1200V2ErrBuffFull)
-	for resp == cc1200V2ErrBuffFull {
+	cmd := newCommandV2(cc1200CmdTXData, buf)
+	resp := byte(cc1200ErrBuffFull)
+	for resp == cc1200ErrBuffFull {
 		rc, err := m.commandWithResponse(cmd)
 		if err != nil {
 			return fmt.Errorf("commandWithResponse error: %w", err)
@@ -739,13 +739,13 @@ func (m *CC1200Modem) writeSymbols(symbols []Symbol) error {
 		// log.Printf("[DEBUG] writeSymbols() txTimer.Reset")
 		m.txTimer.Reset(txTimeout)
 		resp = rc.data[0]
-		if resp == cc1200V2ErrBuffFull {
+		if resp == cc1200ErrBuffFull {
 			// log.Printf("[DEBUG] flow control")
 			// Wait a bit, then retry
 			time.Sleep(FrameTime)
 		}
 	}
-	if resp != cc1200V2ErrOK {
+	if resp != cc1200ErrOK {
 		return fmt.Errorf("writeSymbols response: %x", resp)
 	}
 	return nil

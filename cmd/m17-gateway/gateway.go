@@ -397,33 +397,54 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 }
 
 func (g *Gateway) TransmitPacket(p m17.Packet) error {
-	// log.Printf("[DEBUG] received packet from server: %#v", p)
-	if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
-		msg := string(p.Payload[0 : len(p.Payload)-1])
-		g.dashLog.LogFrame(p.LSF, "Internet", "Packet", "packetType", p.Type, "smsMessage", msg)
-	} else {
-		g.dashLog.LogFrame(p.LSF, "Internet", "Packet", "packetType", p.Type)
-	}
-	g.dashLog.LogGNSS(p.LSF, "Internet")
-
+	lsf := *p.LSF
 	// Replace META with Extended Callsign Data
 	// Don't swap Src for Packet
 	p.LSF.SetECD(&g.encodedCallsign, g.inetClient.EncodedName)
 	//	p.LSF.Src = g.encodedCallsign
-	return g.modem.TransmitPacket(p)
+	err := g.modem.TransmitPacket(p)
+	if err != nil {
+		log.Printf("[ERROR] Error transmitting packet: %v", err)
+		return err
+	}
+	// log.Printf("[DEBUG] received packet from server: %#v", p)
+	if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
+		msg := string(p.Payload[0 : len(p.Payload)-1])
+		g.dashLog.LogFrame(&lsf, "Internet", "Packet", "packetType", p.Type, "smsMessage", msg)
+	} else {
+		g.dashLog.LogFrame(&lsf, "Internet", "Packet", "packetType", p.Type)
+	}
+	g.dashLog.LogGNSS(&lsf, "Internet")
+
+	return nil
 }
 
 func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
+	// Make a copy
+	lsf := *sd.LSF
+	// log.Printf("[DEBUG] Handle StreamDatagram id: %04x, lastStreamID: %04x, fn: %04x, last: %v", sd.StreamID, g.lastStreamID, sd.FrameNumber, sd.LastFrame)
+	// Shouldn't need the next line with modern reflectors
+	// sd.LSF.Dst = *callsignAll
+	// Replace META with Extended Callsign Data
+	sd.LSF.SetECD(&sd.LSF.Src, g.inetClient.EncodedName)
+	sd.LSF.Src = g.encodedCallsign
+	sd.LSF.CalcCRC()
+	err := g.modem.TransmitVoiceStream(sd)
+	if err != nil {
+		log.Printf("[ERROR] Error transmitting voice stream: %v", err)
+		return err
+	}
+	if g.lastFrameTimer != nil {
+		g.lastFrameTimer.Reset(time.Second)
+	}
 	// log.Printf("[DEBUG] received voice stream data from server: %#v", sd)
 	if g.lastStreamID != sd.StreamID {
 		if g.lastFrameTimer != nil {
 			g.lastFrameTimer.Stop()
 		}
 		log.Printf("[DEBUG] Start Internet voice stream: %s", sd)
-		g.dashLog.LogFrame(sd.LSF, "Internet", "Voice Start")
+		g.dashLog.LogFrame(&lsf, "Internet", "Voice Start")
 		g.lastStreamID = sd.StreamID
-		// Make a copy
-		lsf := *sd.LSF
 		g.lastLSF = &lsf
 		// Provide a backstop if we don't receive a last frame packet
 		g.lastFrameTimer = time.AfterFunc(time.Second, func() {
@@ -437,7 +458,7 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 			}
 		})
 	}
-	g.dashLog.LogGNSS(sd.LSF, "Internet")
+	g.dashLog.LogGNSS(&lsf, "Internet")
 	if sd.LastFrame {
 		log.Printf("[DEBUG] End Internet voice stream: %s", sd)
 		g.dashLog.LogFrame(g.lastLSF, "Internet", "Voice End")
@@ -445,20 +466,6 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 		g.lastLSF = nil
 		g.lastFrameTimer.Stop()
 		g.lastFrameTimer = nil
-	}
-	// log.Printf("[DEBUG] Handle StreamDatagram id: %04x, lastStreamID: %04x, fn: %04x, last: %v", sd.StreamID, g.lastStreamID, sd.FrameNumber, sd.LastFrame)
-	// Shouldn't need the next line with modern reflectors
-	// sd.LSF.Dst = *callsignAll
-	// Replace META with Extended Callsign Data
-	sd.LSF.SetECD(&sd.LSF.Src, g.inetClient.EncodedName)
-	sd.LSF.Src = g.encodedCallsign
-	sd.LSF.CalcCRC()
-	err := g.modem.TransmitVoiceStream(sd)
-	if err != nil {
-		log.Printf("[ERROR] Error transmitting voice stream: %v", err)
-	}
-	if g.lastFrameTimer != nil {
-		g.lastFrameTimer.Reset(time.Second)
 	}
 	return err
 }

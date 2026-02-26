@@ -2,8 +2,6 @@ package m17
 
 import (
 	"fmt"
-	"log"
-	"time"
 )
 
 const (
@@ -30,10 +28,10 @@ func processSymbolStream(rxSymbols <-chan float32, frameSink func(typ uint16, so
 	bufSize := 8*sps + 2*(8*sps+SymbolsPerFrame*sps) + sps/2 + 256
 
 	// Diagnostic: track minimum sync distance seen per interval
-	var minDist float32 = 999
-	var minDistType uint16
-	diagTicker := time.NewTicker(5 * time.Second)
-	defer diagTicker.Stop()
+	// var minDist float32 = 999
+	// var minDistType uint16
+	// diagTicker := time.NewTicker(5 * time.Second)
+	// defer diagTicker.Stop()
 
 	for {
 		// Refill symbol buffer
@@ -45,28 +43,28 @@ func processSymbolStream(rxSymbols <-chan float32, frameSink func(typ uint16, so
 		// calculate euclidean norm
 		dist, typ := syncDistance(symbols, 0, sps)
 
-		// Track minimum distance for diagnostics
-		if dist < minDist {
-			minDist = dist
-			minDistType = typ
-		}
-		select {
-		case <-diagTicker.C:
-			typName := "?"
-			switch minDistType {
-			case LSFSync:
-				typName = "LSF"
-			case StreamSync:
-				typName = "Stream"
-			case PacketSync:
-				typName = "Packet"
-			case EOTMarker:
-				typName = "EOT"
-			}
-			log.Printf("[DEBUG] sync: minDist=%.2f type=%s (thresholds: LSF/EOT<4.5, Stream/Pkt<5.0)", minDist, typName)
-			minDist = 999
-		default:
-		}
+		// // Track minimum distance for diagnostics
+		// if dist < minDist {
+		// 	minDist = dist
+		// 	minDistType = typ
+		// }
+		// select {
+		// case <-diagTicker.C:
+		// 	typName := "?"
+		// 	switch minDistType {
+		// 	case LSFSync:
+		// 		typName = "LSF"
+		// 	case StreamSync:
+		// 		typName = "Stream"
+		// 	case PacketSync:
+		// 		typName = "Packet"
+		// 	case EOTMarker:
+		// 		typName = "EOT"
+		// 	}
+		// 	log.Printf("[DEBUG] sync: minDist=%.2f type=%s (thresholds: LSF/EOT<4.5, Stream/Pkt<5.0)", minDist, typName)
+		// 	minDist = 999
+		// default:
+		// }
 
 		switch {
 		case typ == LSFSync && dist < 4.5:

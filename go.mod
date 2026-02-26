@@ -61,4 +61,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/yobert/alsa => github.com/jancona/alsa v0.0.0-20260220225142-89b52dc346b7
+replace github.com/yobert/alsa => github.com/jancona/alsa v0.0.0-20260224125037-816157b04153

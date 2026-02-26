@@ -326,3 +326,204 @@ func designChannelFilter(channelBWHz, sampleRate float64, numTaps int) []float64
 	cutoffNorm := channelBWHz / sampleRate // channelBW/2 divided by Fs/2 = channelBW/Fs
 	return designLowpassFIR(numTaps, cutoffNorm, 1)
 }
+
+// ==========================================================================
+// Batch TX DSP blocks
+//
+// Unlike the RX pipeline which uses channel-connected streaming Transforms,
+// the TX pipeline processes symbols in batches (one frame at a time).
+// State persists across calls for waveform continuity between frames.
+// ==========================================================================
+
+// --- TX RRC Pulse Shaper ---
+
+// TXPulseShaper performs RRC pulse shaping on M17 symbols, producing
+// samplesPerSymbol output samples per input symbol. State persists across
+// calls so that consecutive invocations produce a continuous waveform.
+//
+// Algorithm: for each symbol, insert the symbol value followed by
+// (samplesPerSymbol-1) zeros into a delay line, then convolve with
+// the RRC FIR taps to produce each output sample.
+type TXPulseShaper struct {
+	rrcTaps          []float64
+	samplesPerSymbol int
+	delay            []float64 // circular delay line, length = len(rrcTaps)
+	delayIdx         int       // write position
+}
+
+// NewTXPulseShaper creates a new TX pulse shaper.
+// taps is the RRC filter (e.g., rrcTaps5), sps is samples per symbol (e.g., 5).
+func NewTXPulseShaper(taps []float64, sps int) *TXPulseShaper {
+	return &TXPulseShaper{
+		rrcTaps:          taps,
+		samplesPerSymbol: sps,
+		delay:            make([]float64, len(taps)),
+	}
+}
+
+// Reset clears the delay line for a new transmission.
+func (p *TXPulseShaper) Reset() {
+	for i := range p.delay {
+		p.delay[i] = 0
+	}
+	p.delayIdx = 0
+}
+
+// Process converts a batch of symbols to pulse-shaped baseband samples.
+// Output length = len(symbols) * samplesPerSymbol.
+func (p *TXPulseShaper) Process(symbols []Symbol) []float64 {
+	out := make([]float64, 0, len(symbols)*p.samplesPerSymbol)
+	for _, sym := range symbols {
+		for j := range p.samplesPerSymbol {
+			// Insert symbol at first sample, zeros for the rest (upsampling)
+			if j == 0 {
+				p.delay[p.delayIdx] = float64(sym)
+			} else {
+				p.delay[p.delayIdx] = 0
+			}
+			p.delayIdx = (p.delayIdx + 1) % len(p.delay)
+
+			// Convolve: walk the delay line backwards through the taps
+			var acc float64
+			idx := p.delayIdx
+			for t := range p.rrcTaps {
+				idx--
+				if idx < 0 {
+					idx = len(p.delay) - 1
+				}
+				acc += p.delay[idx] * p.rrcTaps[t]
+			}
+			out = append(out, acc)
+		}
+	}
+	return out
+}
+
+// --- Batch Rational Resampler ---
+
+// BatchResampler performs polyphase rational resampling on a batch of samples.
+// Output rate = input rate * interpFactor / decimFactor.
+// State persists across calls for waveform continuity.
+type BatchResampler struct {
+	interpFactor int
+	decimFactor  int
+	phases       [][]float64 // polyphase decomposition
+	buffer       []float64   // circular delay line
+	bufIdx       int
+	outPhase     int // current output phase counter
+}
+
+// NewBatchResampler creates a batch rational resampler.
+// For 24000 → 125000 Hz, use interp=125, decim=24.
+func NewBatchResampler(interpFactor, decimFactor int) *BatchResampler {
+	cutoffNorm := 1.0 / float64(max(interpFactor, decimFactor))
+	tapsPerPhase := 24
+	taps := designLowpassFIR(interpFactor*tapsPerPhase, cutoffNorm, interpFactor)
+
+	tapsPerPhase = len(taps) / interpFactor
+	phases := make([][]float64, interpFactor)
+	for p := range interpFactor {
+		phases[p] = make([]float64, tapsPerPhase)
+		for t := range tapsPerPhase {
+			phases[p][t] = taps[t*interpFactor+p]
+		}
+	}
+
+	return &BatchResampler{
+		interpFactor: interpFactor,
+		decimFactor:  decimFactor,
+		phases:       phases,
+		buffer:       make([]float64, tapsPerPhase),
+	}
+}
+
+// Reset clears the delay line for a new transmission.
+func (r *BatchResampler) Reset() {
+	for i := range r.buffer {
+		r.buffer[i] = 0
+	}
+	r.bufIdx = 0
+	r.outPhase = 0
+}
+
+// Process resamples a batch of input samples.
+// Output length ≈ len(input) * interpFactor / decimFactor.
+func (r *BatchResampler) Process(input []float64) []float64 {
+	// Estimate output size: ceil(len(input) * interp / decim) + margin
+	estOut := len(input)*r.interpFactor/r.decimFactor + r.interpFactor
+	out := make([]float64, 0, estOut)
+
+	for _, sample := range input {
+		r.buffer[r.bufIdx] = sample
+		r.bufIdx = (r.bufIdx + 1) % len(r.buffer)
+
+		for r.outPhase < r.interpFactor {
+			phase := r.outPhase
+			var acc float64
+			idx := r.bufIdx
+			for t := range len(r.buffer) {
+				idx--
+				if idx < 0 {
+					idx = len(r.buffer) - 1
+				}
+				acc += r.buffer[idx] * r.phases[phase][t]
+			}
+			out = append(out, acc)
+			r.outPhase += r.decimFactor
+		}
+		r.outPhase -= r.interpFactor
+	}
+
+	return out
+}
+
+// --- FM Modulator (batch) ---
+
+// BatchFMModulator converts a real-valued baseband signal (representing
+// frequency deviation) to complex IQ samples via FM modulation.
+// Phase accumulates continuously across calls for seamless multi-frame TX.
+//
+// The input signal is scaled such that a value of 1.0 corresponds to
+// deviationHz Hz of frequency deviation. For M17 4FSK:
+//
+//	symbol +1 → +800 Hz, symbol +3 → +2400 Hz
+//
+// So deviationHz should be 800.0, and the RRC output (which equals the
+// symbol values at optimal sample points) maps directly to the correct deviation.
+type BatchFMModulator struct {
+	phase      float64 // accumulated phase (radians)
+	sampleRate float64 // output sample rate (125000)
+}
+
+// NewBatchFMModulator creates an FM modulator for the given sample rate.
+func NewBatchFMModulator(sampleRate float64) *BatchFMModulator {
+	return &BatchFMModulator{
+		sampleRate: sampleRate,
+	}
+}
+
+// Reset clears the phase accumulator for a new transmission.
+func (fm *BatchFMModulator) Reset() {
+	fm.phase = 0
+}
+
+// Modulate converts baseband samples to complex IQ via FM modulation.
+// deviationHz is the deviation in Hz per unit of input (e.g., 800.0 for M17).
+// Output length = len(baseband).
+func (fm *BatchFMModulator) Modulate(baseband []float64, deviationHz float64) []complex128 {
+	out := make([]complex128, len(baseband))
+	phaseScale := 2.0 * math.Pi * deviationHz / fm.sampleRate
+
+	for i, sample := range baseband {
+		fm.phase += sample * phaseScale
+		// Keep phase in [-π, π] to avoid float64 precision loss
+		if fm.phase > math.Pi {
+			fm.phase -= 2 * math.Pi
+		} else if fm.phase < -math.Pi {
+			fm.phase += 2 * math.Pi
+		}
+		out[i] = complex(math.Cos(fm.phase), math.Sin(fm.phase))
+	}
+
+	return out
+}

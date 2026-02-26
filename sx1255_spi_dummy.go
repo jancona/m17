@@ -14,7 +14,7 @@ func openSPI(_ string) (*spiDevice, error) {
 
 func (s *spiDevice) writeReg(_, _ byte) error { return nil }
 func (s *spiDevice) readReg(_ byte) (byte, error) {
-	return sx1255ExpectedVersion, nil // return expected version so init doesn't fail
+	return expectedVersionSX1255, nil // return expected version so init doesn't fail
 }
 func (s *spiDevice) close() error { return nil }
 
@@ -33,5 +33,5 @@ func (m *SX1255Modem) sx1255EnableRX(_ bool) error  { return nil }
 func (m *SX1255Modem) sx1255EnableTX(_ bool) error  { return nil }
 func (m *SX1255Modem) sx1255EnableRFLoopback(_ bool) error { return nil }
 func (m *SX1255Modem) sx1255GetPLLStatus() (bool, bool) { return true, true }
-func (m *SX1255Modem) sx1255GetChipVersion() byte { return sx1255ExpectedVersion }
+func (m *SX1255Modem) sx1255GetChipVersion() byte { return expectedVersionSX1255 }
 func (m *SX1255Modem) gpioSetup(_ string, _ int) error { return nil }

@@ -1,5 +1,3 @@
-//go:build linux
-
 package m17
 
 import (
@@ -14,18 +12,15 @@ import (
 )
 
 const (
-	// sx1255SampleRate is the I2S sample rate from the SX1255 chip
-	sx1255SampleRate = 125000
+	// channelsSX1255 is stereo (I=left, Q=right)
+	channelsSX1255 = 2
 
-	// sx1255Channels is stereo (I=left, Q=right)
-	sx1255Channels = 2
-
-	// sx1255CaptureBufferSize is the ALSA buffer size in frames.
+	// captureBufferSizeSX1255 is the ALSA buffer size in frames.
 	// Power of two for BCM2835 compatibility.
-	sx1255CaptureBufferSize = 16384
+	captureBufferSizeSX1255 = 16384
 
-	// sx1255CapturePeriodSize is the ALSA period size in frames.
-	sx1255CapturePeriodSize = 4096
+	// capturePeriodSizeSX1255 is the ALSA period size in frames.
+	capturePeriodSizeSX1255 = 4096
 )
 
 // sx1255OpenCapture finds and opens an ALSA PCM capture device.
@@ -68,7 +63,7 @@ func sx1255OpenCapture(deviceHint string) (*alsa.Device, error) {
 		return nil, fmt.Errorf("ALSA open capture device %s: %w", captureDevice.Path, err)
 	}
 
-	_, err = captureDevice.NegotiateChannels(sx1255Channels)
+	_, err = captureDevice.NegotiateChannels(channelsSX1255)
 	if err != nil {
 		captureDevice.Close()
 		return nil, fmt.Errorf("ALSA negotiate channels: %w", err)
@@ -89,12 +84,12 @@ func sx1255OpenCapture(deviceHint string) (*alsa.Device, error) {
 		return nil, fmt.Errorf("ALSA negotiate format S32_LE: %w", err)
 	}
 
-	_, err = captureDevice.NegotiateBufferSize(sx1255CaptureBufferSize, 8192, 4096)
+	_, err = captureDevice.NegotiateBufferSize(captureBufferSizeSX1255, 8192, 4096)
 	if err != nil {
 		log.Printf("[DEBUG] ALSA: buffer size negotiation failed: %v, using default", err)
 	}
 
-	_, err = captureDevice.NegotiatePeriodSize(sx1255CapturePeriodSize, 2048, 1024)
+	_, err = captureDevice.NegotiatePeriodSize(capturePeriodSizeSX1255, 2048, 1024)
 	if err != nil {
 		log.Printf("[DEBUG] ALSA: period size negotiation failed: %v, using default", err)
 	}
@@ -106,7 +101,7 @@ func sx1255OpenCapture(deviceHint string) (*alsa.Device, error) {
 	}
 
 	log.Printf("[INFO] ALSA capture device opened: %s, rate=%d (I2S master), channels=%d, format=S32_LE",
-		captureDevice.Path, sx1255SampleRate, sx1255Channels)
+		captureDevice.Path, sampleRateSX1255, channelsSX1255)
 	return captureDevice, nil
 }
 
@@ -122,26 +117,7 @@ func (m *SX1255Modem) captureLoop(dev *alsa.Device, iqSamples chan<- complex128)
 
 	consecutiveErrors := 0
 
-	// Diagnostic counters
-	var readCount uint64
-	var totalFrames uint64
-	var droppedFrames uint64
-	var peakI, peakQ float64
-	diagTicker := time.NewTicker(5 * time.Second)
-	defer diagTicker.Stop()
-
 	for {
-		// Check if it's time for a diagnostic report
-		select {
-		case <-diagTicker.C:
-			log.Printf("[DEBUG] ALSA capture: reads=%d, frames=%d, dropped=%d, peakI=%.6f, peakQ=%.6f, chanLen=%d/%d",
-				readCount, totalFrames, droppedFrames, peakI, peakQ, len(iqSamples), cap(iqSamples))
-			peakI = 0
-			peakQ = 0
-			droppedFrames = 0
-		default:
-		}
-
 		err := dev.Read(buf.Data)
 		if err != nil {
 			consecutiveErrors++
@@ -149,24 +125,18 @@ func (m *SX1255Modem) captureLoop(dev *alsa.Device, iqSamples chan<- complex128)
 				log.Printf("[ERROR] ALSA capture read error (%d): %v", consecutiveErrors, err)
 			}
 			// Try to recover from xrun
-			dev.Prepare()
+			if perr := dev.Prepare(); perr != nil {
+				log.Printf("[ERROR] ALSA capture prepare recovery failed: %v", perr)
+			}
 			continue
 		}
 		if consecutiveErrors > 0 {
 			log.Printf("[INFO] ALSA capture recovered after %d errors", consecutiveErrors)
 		}
 		consecutiveErrors = 0
-		readCount++
 
 		// Parse stereo int32 pairs into complex128
 		numFrames := len(buf.Data) / bytesPerFrame
-		totalFrames += uint64(numFrames)
-
-		// Log raw bytes of the first frame on the very first read
-		if readCount == 1 && numFrames > 0 {
-			log.Printf("[DEBUG] ALSA first read: %d frames, first 8 bytes: %02x",
-				numFrames, buf.Data[:min(8, len(buf.Data))])
-		}
 
 		for i := range numFrames {
 			offset := i * bytesPerFrame
@@ -177,18 +147,9 @@ func (m *SX1255Modem) captureLoop(dev *alsa.Device, iqSamples chan<- complex128)
 			iFloat := float64(iSample) / 2147483648.0
 			qFloat := float64(qSample) / 2147483648.0
 
-			// Track peak amplitude for diagnostics
-			if abs := math.Abs(iFloat); abs > peakI {
-				peakI = abs
-			}
-			if abs := math.Abs(qFloat); abs > peakQ {
-				peakQ = abs
-			}
-
 			select {
 			case iqSamples <- complex(iFloat, qFloat):
 			default:
-				droppedFrames++
 				// Channel full — drop sample to prevent blocking the audio thread
 			}
 		}
@@ -213,71 +174,170 @@ func (m *SX1255Modem) openALSACapture() error {
 	return nil
 }
 
-// monitorFloat64Chan logs peak amplitude stats from a float64 channel for diagnostics.
-func monitorFloat64Chan(name string, in chan float64, interval time.Duration) chan float64 {
-	out := make(chan float64, cap(in))
-	go func() {
-		var count uint64
-		var peak, sum float64
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for s := range in {
-			count++
-			if abs := math.Abs(s); abs > peak {
-				peak = abs
-			}
-			sum += math.Abs(s)
-			select {
-			case <-ticker.C:
-				avg := float64(0)
-				if count > 0 {
-					avg = sum / float64(count)
-				}
-				log.Printf("[DEBUG] %s: count=%d, peak=%.6f, avg=%.6f", name, count, peak, avg)
-				peak = 0
-				sum = 0
-				count = 0
-			default:
-			}
-			out <- s
+// sx1255OpenPlayback finds and opens an ALSA PCM playback device.
+// deviceHint matches against the device Path or Title. If empty, the first
+// playback PCM device is used. The device is configured for S32_LE stereo
+// at the I2S master rate (125 kSa/s).
+func sx1255OpenPlayback(deviceHint string) (*alsa.Device, error) {
+	cards, err := alsa.OpenCards()
+	if err != nil {
+		return nil, fmt.Errorf("ALSA open cards: %w", err)
+	}
+	defer alsa.CloseCards(cards)
+
+	var playbackDevice *alsa.Device
+	for _, card := range cards {
+		devices, err := card.Devices()
+		if err != nil {
+			log.Printf("[DEBUG] ALSA: error listing devices on card %s: %v", card.Title, err)
+			continue
 		}
-		close(out)
-	}()
-	return out
+		for _, dev := range devices {
+			if dev.Type == alsa.PCM && dev.Play {
+				log.Printf("[DEBUG] ALSA: found playback device: %s (%s)", dev.Title, dev.Path)
+				if deviceHint == "" || dev.Path == deviceHint || dev.Title == deviceHint {
+					playbackDevice = dev
+					break
+				}
+			}
+		}
+		if playbackDevice != nil {
+			break
+		}
+	}
+
+	if playbackDevice == nil {
+		return nil, fmt.Errorf("ALSA: no playback device found (hint: %q)", deviceHint)
+	}
+
+	err = playbackDevice.Open()
+	if err != nil {
+		return nil, fmt.Errorf("ALSA open playback device %s: %w", playbackDevice.Path, err)
+	}
+
+	_, err = playbackDevice.NegotiateChannels(channelsSX1255)
+	if err != nil {
+		playbackDevice.Close()
+		return nil, fmt.Errorf("ALSA negotiate channels: %w", err)
+	}
+
+	// Skip NegotiateRate — see comment in sx1255OpenCapture.
+	// The SX1255 I2S master clock constrains the rate to 125 kSa/s.
+
+	_, err = playbackDevice.NegotiateFormat(alsa.S32_LE)
+	if err != nil {
+		playbackDevice.Close()
+		return nil, fmt.Errorf("ALSA negotiate format S32_LE: %w", err)
+	}
+
+	_, err = playbackDevice.NegotiateBufferSize(captureBufferSizeSX1255, 8192, 4096)
+	if err != nil {
+		log.Printf("[DEBUG] ALSA playback: buffer size negotiation failed: %v, using default", err)
+	}
+
+	_, err = playbackDevice.NegotiatePeriodSize(capturePeriodSizeSX1255, 2048, 1024)
+	if err != nil {
+		log.Printf("[DEBUG] ALSA playback: period size negotiation failed: %v, using default", err)
+	}
+
+	err = playbackDevice.Prepare()
+	if err != nil {
+		playbackDevice.Close()
+		return nil, fmt.Errorf("ALSA playback prepare: %w", err)
+	}
+
+	log.Printf("[INFO] ALSA playback device opened: %s, rate=%d (I2S master), channels=%d, format=S32_LE",
+		playbackDevice.Path, sampleRateSX1255, channelsSX1255)
+	return playbackDevice, nil
 }
 
-// monitorFloat32Chan logs peak amplitude stats from a float32 channel for diagnostics.
-func monitorFloat32Chan(name string, in chan float32, interval time.Duration) chan float32 {
-	out := make(chan float32, cap(in))
-	go func() {
-		var count uint64
-		var peak float64
-		var sum float64
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for s := range in {
-			count++
-			if abs := math.Abs(float64(s)); abs > peak {
-				peak = abs
-			}
-			sum += math.Abs(float64(s))
-			select {
-			case <-ticker.C:
-				avg := float64(0)
-				if count > 0 {
-					avg = sum / float64(count)
-				}
-				log.Printf("[DEBUG] %s: count=%d, peak=%.6f, avg=%.6f", name, count, peak, avg)
-				peak = 0
-				sum = 0
-				count = 0
-			default:
-			}
-			out <- s
+// openALSAPlayback opens the ALSA playback device for TX.
+func (m *SX1255Modem) openALSAPlayback() error {
+	dev, err := sx1255OpenPlayback(m.alsaDev)
+	if err != nil {
+		return err
+	}
+	m.playDev = dev
+	return nil
+}
+
+// sx1255WriteSymbols converts M17 symbols to IQ samples via the TX DSP
+// pipeline and writes them to the ALSA playback device.
+//
+// Pipeline: symbols → RRC pulse shaping → resample 24k→125k → FM mod → IQ → ALSA
+//
+// The DSP state (pulse shaper, resampler, FM modulator) persists on the modem
+// struct so that consecutive calls produce a continuous waveform.
+func (m *SX1255Modem) sx1255WriteSymbols(symbols []Symbol) error {
+	// 1. RRC pulse shaping: symbols → baseband at 24 kSa/s (5 sps)
+	baseband24k := m.txRRC.Process(symbols)
+
+	// Apply sqrt(sps) gain to match M17 TX deviation.
+	// The rrcTaps5 filter has sqrt(5) gain baked into the taps, but pulse
+	// shaping via zero-stuffing + convolution divides it out. We need to
+	// restore it so symbol ±3 produces ±2400 Hz deviation.
+	for i := range baseband24k {
+		baseband24k[i] *= math.Sqrt(5)
+	}
+
+	// 2. Rational resample: 24 kSa/s → 125 kSa/s (ratio 125/24)
+	baseband125k := m.txResampler.Process(baseband24k)
+
+	// 3. FM modulate: baseband → complex IQ at 125 kSa/s
+	// deviationHz=800: symbol +1 → +800 Hz, symbol +3 → +2400 Hz
+	const deviationHz = 800.0
+	iq := m.txFMMod.Modulate(baseband125k, deviationHz)
+
+	// 4. Pack complex IQ → stereo S32_LE bytes and write to ALSA
+	return m.sx1255WriteIQ(iq)
+}
+
+// sx1255WriteIQ packs complex128 IQ samples as stereo S32_LE and writes
+// them to the ALSA playback device.
+func (m *SX1255Modem) sx1255WriteIQ(iq []complex128) error {
+	const bytesPerFrame = 8 // 2 channels × 4 bytes (S32_LE)
+	buf := make([]byte, len(iq)*bytesPerFrame)
+
+	for i, sample := range iq {
+		// Scale float64 [-1.0, 1.0] → int32, with clamping
+		iVal := real(sample)
+		qVal := imag(sample)
+
+		// Clamp to prevent int32 overflow
+		if iVal > 1.0 {
+			iVal = 1.0
+		} else if iVal < -1.0 {
+			iVal = -1.0
 		}
-		close(out)
-	}()
-	return out
+		if qVal > 1.0 {
+			qVal = 1.0
+		} else if qVal < -1.0 {
+			qVal = -1.0
+		}
+
+		iSample := int32(iVal * 2147483647.0)
+		qSample := int32(qVal * 2147483647.0)
+
+		offset := i * bytesPerFrame
+		binary.LittleEndian.PutUint32(buf[offset:offset+4], uint32(iSample))
+		binary.LittleEndian.PutUint32(buf[offset+4:offset+8], uint32(qSample))
+	}
+
+	frames := len(iq)
+	err := m.playDev.Write(buf, frames)
+	if err != nil {
+		log.Printf("[WARN] ALSA playback write error, recovering: %v", err)
+		// Try to recover from underrun
+		if perr := m.playDev.Prepare(); perr != nil {
+			log.Printf("[ERROR] ALSA playback prepare recovery failed: %v", perr)
+			return fmt.Errorf("ALSA playback prepare recovery: %w", perr)
+		}
+		err = m.playDev.Write(buf, frames)
+		if err != nil {
+			return fmt.Errorf("ALSA playback write after recovery: %w", err)
+		}
+	}
+	return nil
 }
 
 // rxPipeline assembles the SX1255 RX DSP chain:
@@ -289,9 +349,7 @@ func monitorFloat32Chan(name string, in chan float32, interval time.Duration) ch
 //	→ Rational resampler (12.5k → 24k, ratio 48/25)
 //	→ RRC matched filter (5 sps at 24 kSa/s → symbols)
 func (m *SX1255Modem) rxPipeline(dev *alsa.Device) (chan float32, error) {
-	const diagInterval = 5 * time.Second
-
-	iqSamples := make(chan complex128, sx1255SampleRate/2) // ~500ms buffer
+	iqSamples := make(chan complex128, sampleRateSX1255/2) // ~500ms buffer
 
 	// Start ALSA capture goroutine
 	go m.captureLoop(dev, iqSamples)
@@ -301,18 +359,14 @@ func (m *SX1255Modem) rxPipeline(dev *alsa.Device) (chan float32, error) {
 
 	// Polyphase decimating FIR: 125 kSa/s → 12.5 kSa/s
 	// Channel filter: 12.5 kHz bandwidth at 125 kSa/s input
-	// (no monitor on this 125k/s path — the extra goroutine hop costs throughput)
-	channelTaps := designChannelFilter(12500, float64(sx1255SampleRate), 200)
+	channelTaps := designChannelFilter(12500, float64(sampleRateSX1255), 200)
 	decimator := NewPolyphaseDecimator(dcr.Source(), channelTaps, 10)
 
 	// FM demodulator: complex IQ → real instantaneous frequency (radians/sample)
 	fmDemod := NewFMDemodulator(decimator.Source())
 
-	// Monitor post-FM-demod
-	postFMDemod := monitorFloat64Chan("post-FMdemod", fmDemod.Source(), diagInterval)
-
 	// Rational resampler: 12.5 kSa/s → 24 kSa/s (ratio 48/25)
-	resampler := NewRationalResampler(postFMDemod, 48, 25)
+	resampler := NewRationalResampler(fmDemod.Source(), 48, 25)
 
 	// No IIR pre-emphasis filter — that's CC1200-specific. The FM demodulator
 	// output doesn't need the same compensation as the CC1200's baseband.
@@ -320,11 +374,8 @@ func (m *SX1255Modem) rxPipeline(dev *alsa.Device) (chan float32, error) {
 	// RRC matched filter → symbols
 	// Scaling coefficient tuned empirically against real hardware.
 	// With IIR bypassed, symbol avg was 3.73 when target is 3.0 → scale by 3.0/3.73.
-	const sx1255RXScalingCoeff = 1.54
-	s2s := NewSampleToSymbol(resampler.Source(), rrcTaps5, sx1255RXScalingCoeff)
+	const rxScalingCoeffSX1255 = 1.54
+	s2s := NewSampleToSymbol(resampler.Source(), rrcTaps5, rxScalingCoeffSX1255)
 
-	// Monitor final symbols (at 24k samples/sec, 5 sps)
-	postSymbols := monitorFloat32Chan("symbols", s2s.Source(), diagInterval)
-
-	return postSymbols, nil
+	return s2s.Source(), nil
 }
