@@ -17,9 +17,9 @@ It bridges to these systems:
 
 ### M17 Gateway
 
-[m17-gateway](./cmd/m17-gateway/) allows a computer and modem to act as a repeater/hotspot. It also connects RF clients to Internet services such as reflectors. It currently supports the [CC1200 Pi HAT](https://github.com/M17-Project/CC1200_HAT-hw) and MMDVM-compatible hotspots and modem. When run on a Raspberry Pi with a CC1200 HAT, it can forward M17 voice and packet traffic to and from a reflector, making the Pi/CC1200 HAT an M17 voice and packet hotspot. 
+[m17-gateway](./cmd/m17-gateway/) allows a computer and modem to act as a repeater/hotspot. It also connects RF clients to Internet services such as reflectors. It currently supports the [CC1200 Pi HAT](https://github.com/M17-Project/CC1200_HAT-hw), the [SX1255 Pi HAT](https://github.com/M17-Project/SX1255_HAT-hw) and MMDVM-compatible hotspots and modems. When run on a Raspberry Pi with a compatible HAT or modem, it can forward M17 voice and packet traffic to and from a reflector, making it an M17 voice and packet hotspot. When used with the SX1255 HAT or an MMDVM modem it can form the heart of an M17 repeater.
 
-The easiest way to get a working CC1200 hotspot, including `m17-gateway` and a [web dashboard](https://github.com/M17-Project/rpi-dashboard) is using DK1MI's [excellent installer script](https://github.com/DK1MI/cc1200-hotspot-installer). Highly recommended!
+The easiest way to get a working hotspot, including `m17-gateway` and a [web dashboard](https://github.com/M17-Project/rpi-dashboard) is using DK1MI's [excellent installer script](https://github.com/DK1MI/m17-hotspot-installer). Highly recommended!
 
 Another way to install just the gateway is using the APT package from a release on Github. To install it:
 

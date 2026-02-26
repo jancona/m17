@@ -25,8 +25,8 @@ Module=C
 Level=DEBUG
 
 [Modem]
-# Change Type to mmdvm for MMDVM modems/hotspots
-Type=cc1200v2
+# Change Type to mmdvm or sx1255 for MMDVM or SX1255 hardware
+Type=cc1200
 Port=/dev/ttyAMA0
 # 460800 for cc1200. Typically 115200 or 460800 for MMDVM.
 Speed=460800
@@ -46,3 +46,8 @@ RXLevel=50
 RXDCOffset=0
 TXLevel=50
 TXHang=5
+# SX1255-specific
+SPIDevice = /dev/spidev0.0
+GPIOChip = gpiochip0
+ResetPin = 22
+ALSADevice = hw:0,1
