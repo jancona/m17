@@ -80,14 +80,15 @@ type SX1255Modem struct {
 	txFMMod     *BatchFMModulator
 
 	// Configuration
-	spiPath   string
-	gpioChip  string
-	resetPinN int
-	alsaDev   string
-	lnaGain   uint8
-	pgaGain   uint8
-	dacGain   int8
-	mixerGain float32
+	spiPath      string
+	gpioChip     string
+	resetPinN    int
+	alsaCapture  string
+	alsaPlayback string
+	lnaGain      uint8
+	pgaGain      uint8
+	dacGain      int8
+	mixerGain    float32
 }
 
 // NewSX1255Modem creates and initializes an SX1255 modem from INI configuration.
@@ -99,25 +100,27 @@ func NewSX1255Modem(
 	spiPath := modemCfg.Key("SPIDevice").MustString("/dev/spidev0.0")
 	gpioChip := modemCfg.Key("GPIOChip").MustString("gpiochip0")
 	resetPin := modemCfg.Key("ResetPin").MustInt(22)
-	alsaDev := modemCfg.Key("ALSADevice").MustString("")
+	alsaCapture := modemCfg.Key("ALSACaptureDevice").MustString("")
+	alsaPlayback := modemCfg.Key("ALSAPlaybackDevice").MustString("")
 	lnaGain := modemCfg.Key("LNAGain").MustUint(24)
 	pgaGain := modemCfg.Key("PGAGain").MustUint(12)
 	dacGain := modemCfg.Key("DACGain").MustInt(0)
 	mixerGain := modemCfg.Key("MixerGain").MustFloat64(-12)
 
 	m := &SX1255Modem{
-		txState:   txIdleSX1255,
-		rxSymbols: make(chan float32, 1),
-		rxFreq:    rxFrequency,
-		txFreq:    txFrequency,
-		spiPath:   spiPath,
-		gpioChip:  gpioChip,
-		resetPinN: resetPin,
-		alsaDev:   alsaDev,
-		lnaGain:   uint8(lnaGain),
-		pgaGain:   uint8(pgaGain),
-		dacGain:   int8(dacGain),
-		mixerGain: float32(mixerGain),
+		txState:      txIdleSX1255,
+		rxSymbols:    make(chan float32, 1),
+		rxFreq:       rxFrequency,
+		txFreq:       txFrequency,
+		spiPath:      spiPath,
+		gpioChip:     gpioChip,
+		resetPinN:    resetPin,
+		alsaCapture:  alsaCapture,
+		alsaPlayback: alsaPlayback,
+		lnaGain:      uint8(lnaGain),
+		pgaGain:      uint8(pgaGain),
+		dacGain:      int8(dacGain),
+		mixerGain:    float32(mixerGain),
 	}
 	m.txCond = sync.NewCond(&m.txMutex)
 
@@ -242,7 +245,7 @@ func NewSX1255Modem(
 	})
 	m.txTimer.Stop() // don't start until we actually TX
 
-	log.Printf("[INFO] SX1255 modem initialized: RX=%d Hz, TX=%d Hz, ALSA=%s", rxFrequency, txFrequency, alsaDev)
+	log.Printf("[INFO] SX1255 modem initialized: RX=%d Hz, TX=%d Hz, ALSA Capture=%s, ALSA Playback=%s", rxFrequency, txFrequency, alsaCapture, alsaPlayback)
 	return m, nil
 }
 

@@ -158,7 +158,7 @@ func (m *SX1255Modem) captureLoop(dev *alsa.Device, iqSamples chan<- complex128)
 
 // openALSACapture opens the ALSA capture device and builds the RX DSP pipeline.
 func (m *SX1255Modem) openALSACapture() error {
-	dev, err := sx1255OpenCapture(m.alsaDev)
+	dev, err := sx1255OpenCapture(m.alsaCapture)
 	if err != nil {
 		return err
 	}
@@ -253,7 +253,7 @@ func sx1255OpenPlayback(deviceHint string) (*alsa.Device, error) {
 
 // openALSAPlayback opens the ALSA playback device for TX.
 func (m *SX1255Modem) openALSAPlayback() error {
-	dev, err := sx1255OpenPlayback(m.alsaDev)
+	dev, err := sx1255OpenPlayback(m.alsaPlayback)
 	if err != nil {
 		return err
 	}

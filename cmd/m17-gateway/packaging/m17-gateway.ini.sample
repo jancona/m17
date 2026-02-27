@@ -50,4 +50,6 @@ TXHang=5
 SPIDevice = /dev/spidev0.0
 GPIOChip = gpiochip0
 ResetPin = 22
-ALSADevice = hw:0,1
+# In most cases the ALSA devices may be left blank
+ALSACaptureDevice = 
+ALSAPlaybackDevice = 
