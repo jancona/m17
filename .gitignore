@@ -1,4 +1,5 @@
 /m17-gateway
+/m17-inet
 cmd/bridge/bridge
 cmd/bridge/bridge.ini
 cmd/m17-text-cli/m17-text-cli
@@ -6,6 +7,7 @@ cmd/m17-gateway/m17-gateway
 cmd/m17-gateway/m17-gateway.ini
 cmd/m17-gateway/M17Hosts.txt
 cmd/m17-gateway/build/
+cmd/m17-inet/m17-inet
 cmd/m17-message/m17-message
 cmd/m17-message/m17-message.app/
 cmd/m17-message/wasm/

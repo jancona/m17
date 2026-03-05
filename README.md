@@ -84,6 +84,32 @@ Usage of ./m17-text-cli:
     	Reflector server
 ```
 
+### Reflector Traffic Monitor
+
+[m17-inet](./cmd/m17-inet/) connects to an M17 reflector and monitors voice stream traffic, reporting per-stream packet rate and packet loss (detected by gaps in frame numbers).
+
+To build it just run `go build` in the `m17-inet` directory.
+
+Example: `./m17-inet -host m17.kansascitywide.com:17000 -module A`
+
+Sample output:
+```
+Connected to m17.kansascitywide.com:17000 module A, monitoring traffic...
+Stream 0x1A2B started: W1ABC > @ALL
+Stream 0x1A2B  W1ABC > @ALL  Duration: 12.3s  Frames (received/expected): 305/308  Rate: 24.8/s  Loss: 0.97%
+```
+
+Command line arguments:
+```
+Usage of ./m17-inet:
+  -host string
+    	Reflector address with port (e.g. 172.234.217.28:17000)
+  -module string
+    	Module to connect to (A-Z) (default "A")
+  -callsign string
+    	Callsign to identify to the reflector (default "N0CALL")
+```
+
 ### CC1200 Modem Emulator
 
 This program emulates the [CC1200 Modem firmware](https://github.com/M17-Project/CC1200_HAT-fw). It accepts samples from the gateway and echos them back. It was used for development of the gateway until I had a real CC1200 hat to test with.
