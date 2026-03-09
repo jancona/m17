@@ -229,6 +229,8 @@ func (l *LSF) SetECD(slot1, slot2 *EncodedCallsign) {
 	// slot2 is optional
 	if slot2 != nil {
 		copy(l.Meta[6:], slot2[:])
+	} else {
+		copy(l.Meta[6:], []byte{0, 0, 0, 0, 0, 0})
 	}
 	l.Meta[12] = 0
 	l.Meta[13] = 0

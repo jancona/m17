@@ -53,3 +53,11 @@ ResetPin = 22
 # In most cases the ALSA devices may be left blank
 ALSACaptureDevice = 
 ALSAPlaybackDevice = 
+# RX LNA gain (0, 6, 12, 18, 24, 30, 36, 42, or 48 dB)
+LNAGain = 0
+# RX PGA gain (0-30 dB in 2 dB steps).
+PGAGain = 0
+# TX DAC gain (0, -3, -6, or -9 dB)
+DACGain = 0
+# TX mixer gain (-37.5 to -7.5 dB in 2 dB steps)
+MixerGain = -12

@@ -65,8 +65,6 @@ type SX1255Modem struct {
 	playDev   *alsa.Device
 	rxSymbols chan float32
 	frameSink func(typ uint16, softBits []SoftBit)
-	rxFreq    uint32
-	txFreq    uint32
 
 	// TX state (full-duplex: RX never stops)
 	txMutex sync.Mutex
@@ -95,6 +93,7 @@ type SX1255Modem struct {
 func NewSX1255Modem(
 	rxFrequency uint32,
 	txFrequency uint32,
+	frequencyCorr int16,
 	modemCfg *ini.Section,
 ) (*SX1255Modem, error) {
 	spiPath := modemCfg.Key("SPIDevice").MustString("/dev/spidev0.0")
@@ -102,16 +101,14 @@ func NewSX1255Modem(
 	resetPin := modemCfg.Key("ResetPin").MustInt(22)
 	alsaCapture := modemCfg.Key("ALSACaptureDevice").MustString("")
 	alsaPlayback := modemCfg.Key("ALSAPlaybackDevice").MustString("")
-	lnaGain := modemCfg.Key("LNAGain").MustUint(24)
-	pgaGain := modemCfg.Key("PGAGain").MustUint(12)
+	lnaGain := modemCfg.Key("LNAGain").MustUint(0)
+	pgaGain := modemCfg.Key("PGAGain").MustUint(0)
 	dacGain := modemCfg.Key("DACGain").MustInt(0)
 	mixerGain := modemCfg.Key("MixerGain").MustFloat64(-12)
 
 	m := &SX1255Modem{
 		txState:      txIdleSX1255,
 		rxSymbols:    make(chan float32, 1),
-		rxFreq:       rxFrequency,
-		txFreq:       txFrequency,
 		spiPath:      spiPath,
 		gpioChip:     gpioChip,
 		resetPinN:    resetPin,
@@ -146,12 +143,12 @@ func NewSX1255Modem(
 	}
 
 	// Set frequencies
-	err = m.sx1255SetRXFreq(rxFrequency)
+	err = m.sx1255SetRXFreq(rxFrequency + uint32(frequencyCorr))
 	if err != nil {
 		m.spi.close()
 		return nil, fmt.Errorf("SX1255 set RX freq: %w", err)
 	}
-	err = m.sx1255SetTXFreq(txFrequency)
+	err = m.sx1255SetTXFreq(txFrequency + uint32(frequencyCorr))
 	if err != nil {
 		m.spi.close()
 		return nil, fmt.Errorf("SX1255 set TX freq: %w", err)
