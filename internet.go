@@ -50,11 +50,11 @@ func NewInetClient(name string, server string, port uint, module string, callsig
 	if err != nil {
 		return nil, fmt.Errorf("bad callsign %s: %w", callsign, err)
 	}
-	// n := NormalizeCallsignModule(name + " " + module)
-	// encodedName, err := EncodeCallsign(n)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("bad name/module %s: %w", n, err)
-	// }
+	n := NormalizeCallsignModule(name + " " + module)
+	encodedName, err := EncodeCallsign(n)
+	if err != nil {
+		return nil, fmt.Errorf("bad name/module %s: %w", n, err)
+	}
 	var m byte
 	switch {
 	case len(module) == 0:
@@ -66,11 +66,11 @@ func NewInetClient(name string, server string, port uint, module string, callsig
 	}
 	var r *InetClient
 	r = &InetClient{
-		Name:   name,
-		Server: server,
-		Port:   port,
-		Module: m,
-		// EncodedName:     encodedName,
+		Name:            name,
+		Server:          server,
+		Port:            port,
+		Module:          m,
+		EncodedName:     encodedName,
 		callsign:        callsign,
 		encodedCallsign: cs,
 		packetHandler:   packetHandler,
