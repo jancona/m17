@@ -53,6 +53,10 @@ if [ ! -f /etc/m17-gateway.ini ]; then
         echo "No callsign provided. Please edit /etc/m17-gateway.ini manually."
         echo "Change 'CALLSIGN_PLACEHOLDER' to your actual callsign."
     fi
+else
+    # Replace '#' comments with ';' in existing file
+    mv /etc/m17-gateway.ini /etc/m17-gateway.ini.old
+    sed 's/^#/;/' </etc/m17-gateway.ini.old >/etc/m17-gateway.ini
 fi
 
 # Set config file ownership and permissions (readable by service user, writable by service control group)

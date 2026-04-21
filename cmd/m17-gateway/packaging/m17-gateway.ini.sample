@@ -1,14 +1,14 @@
 [General]
-# Example: N1ADJ or N1ADJ G
+; Example: N1ADJ or N1ADJ G
 Callsign=CALLSIGN_PLACEHOLDER
 DashboardLog=/opt/m17/m17-gateway/dashboard.log
 AudioDir=audio/
 
 [Radio]
-# Hertz
+; Hertz
 RXFrequency=439000000
 TXFrequency=439000000
-# Power dbm
+; Power dbm
 Power=10
 AFC=true
 FrequencyCorr=0
@@ -21,20 +21,20 @@ Name=M17-M17
 Module=C
 
 [Log]
-# Logging levels: ERROR, INFO, DEBUG
+; Logging levels: ERROR, INFO, DEBUG
 Level=DEBUG
 
 [Modem]
-# Change Type to mmdvm or sx1255 for MMDVM or SX1255 hardware
+; Change Type to mmdvm or sx1255 for MMDVM or SX1255 hardware
 Type=cc1200
 Port=/dev/ttyAMA0
-# 460800 for cc1200. Typically 115200 or 460800 for MMDVM.
+; 460800 for cc1200. Typically 115200 or 460800 for MMDVM.
 Speed=460800
-# CC1200-specific
+; CC1200-specific
 NRSTPin=21
 Boot0Pin=20
 ZMQPort=0
-# MMDVM-specific
+; MMDVM-specific
 Protocol=uart
 RXInvert=false
 TXInvert=true
@@ -46,18 +46,18 @@ RXLevel=50
 RXDCOffset=0
 TXLevel=50
 TXHang=5
-# SX1255-specific
+; SX1255-specific
 SPIDevice = /dev/spidev0.0
 GPIOChip = gpiochip0
 ResetPin = 22
-# In most cases the ALSA devices may be left blank
+; In most cases the ALSA devices may be left blank
 ALSACaptureDevice = 
 ALSAPlaybackDevice = 
-# RX LNA gain (0, 6, 12, 18, 24, 30, 36, 42, or 48 dB)
+; RX LNA gain (0, 6, 12, 18, 24, 30, 36, 42, or 48 dB)
 LNAGain = 0
-# RX PGA gain (0-30 dB in 2 dB steps).
+; RX PGA gain (0-30 dB in 2 dB steps).
 PGAGain = 0
-# TX DAC gain (0, -3, -6, or -9 dB)
+; TX DAC gain (0, -3, -6, or -9 dB)
 DACGain = 0
-# TX mixer gain (-37.5 to -7.5 dB in 2 dB steps)
+; TX mixer gain (-37.5 to -7.5 dB in 2 dB steps)
 MixerGain = -12
