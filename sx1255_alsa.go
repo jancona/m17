@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/yobert/alsa"
@@ -25,7 +26,8 @@ const (
 
 // sx1255OpenCapture finds and opens an ALSA PCM capture device.
 // deviceHint matches against the device Path (e.g., "/dev/snd/pcmC0D1c")
-// or the device Title. If empty, the first recording PCM device is used.
+// or the device Title. If empty, a device whose title contains "i2s" is
+// preferred; falls back to first found.
 func sx1255OpenCapture(deviceHint string) (*alsa.Device, error) {
 	cards, err := alsa.OpenCards()
 	if err != nil {
@@ -34,6 +36,7 @@ func sx1255OpenCapture(deviceHint string) (*alsa.Device, error) {
 	defer alsa.CloseCards(cards)
 
 	var captureDevice *alsa.Device
+	var firstFound *alsa.Device
 	for _, card := range cards {
 		devices, err := card.Devices()
 		if err != nil {
@@ -43,15 +46,28 @@ func sx1255OpenCapture(deviceHint string) (*alsa.Device, error) {
 		for _, dev := range devices {
 			if dev.Type == alsa.PCM && dev.Record {
 				log.Printf("[DEBUG] ALSA: found capture device: %s (%s)", dev.Title, dev.Path)
-				if deviceHint == "" || dev.Path == deviceHint || dev.Title == deviceHint {
-					captureDevice = dev
-					break
+				if deviceHint != "" {
+					if dev.Path == deviceHint || dev.Title == deviceHint {
+						captureDevice = dev
+						break
+					}
+				} else {
+					if firstFound == nil {
+						firstFound = dev
+					}
+					if captureDevice == nil && strings.Contains(strings.ToLower(dev.Title), "i2s") {
+						captureDevice = dev
+					}
 				}
 			}
 		}
-		if captureDevice != nil {
+		if deviceHint != "" && captureDevice != nil {
 			break
 		}
+	}
+
+	if captureDevice == nil {
+		captureDevice = firstFound
 	}
 
 	if captureDevice == nil {
@@ -175,9 +191,10 @@ func (m *SX1255Modem) openALSACapture() error {
 }
 
 // sx1255OpenPlayback finds and opens an ALSA PCM playback device.
-// deviceHint matches against the device Path or Title. If empty, the first
-// playback PCM device is used. The device is configured for S32_LE stereo
-// at the I2S master rate (125 kSa/s).
+// deviceHint matches against the device Path or Title. If empty, a device
+// whose title contains "i2s" is preferred (to avoid selecting onboard audio
+// such as bcm2835 Headphones on Pi 3/4); falls back to first found.
+// The device is configured for S32_LE stereo at the I2S master rate (125 kSa/s).
 func sx1255OpenPlayback(deviceHint string) (*alsa.Device, error) {
 	cards, err := alsa.OpenCards()
 	if err != nil {
@@ -186,6 +203,7 @@ func sx1255OpenPlayback(deviceHint string) (*alsa.Device, error) {
 	defer alsa.CloseCards(cards)
 
 	var playbackDevice *alsa.Device
+	var firstFound *alsa.Device
 	for _, card := range cards {
 		devices, err := card.Devices()
 		if err != nil {
@@ -195,17 +213,29 @@ func sx1255OpenPlayback(deviceHint string) (*alsa.Device, error) {
 		for _, dev := range devices {
 			if dev.Type == alsa.PCM && dev.Play {
 				log.Printf("[DEBUG] ALSA: found playback device: %s (%s)", dev.Title, dev.Path)
-				if deviceHint == "" || dev.Path == deviceHint || dev.Title == deviceHint {
-					playbackDevice = dev
-					break
+				if deviceHint != "" {
+					if dev.Path == deviceHint || dev.Title == deviceHint {
+						playbackDevice = dev
+						break
+					}
+				} else {
+					if firstFound == nil {
+						firstFound = dev
+					}
+					if playbackDevice == nil && strings.Contains(strings.ToLower(dev.Title), "i2s") {
+						playbackDevice = dev
+					}
 				}
 			}
 		}
-		if playbackDevice != nil {
+		if deviceHint != "" && playbackDevice != nil {
 			break
 		}
 	}
 
+	if playbackDevice == nil {
+		playbackDevice = firstFound
+	}
 	if playbackDevice == nil {
 		return nil, fmt.Errorf("ALSA: no playback device found (hint: %q)", deviceHint)
 	}
