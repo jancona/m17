@@ -19,6 +19,7 @@ func NewHostfile(name string) (*Hostfile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to open hostfile %s: %v", name, err)
 	}
+	defer f.Close()
 	r := csv.NewReader(f)
 	r.Comma = ' '
 	r.Comment = '#'
@@ -28,6 +29,23 @@ func NewHostfile(name string) (*Hostfile, error) {
 	}
 	ret := &Hostfile{
 		Hosts: make(map[string]Host),
+	}
+	if len(recs) > 0 && len(recs[0]) == 1 {
+		// if the first record only has one field, we're using the wrong delimiter
+		// so try again
+		log.Print("[INFO] Detected wrong hostfile delimiter, trying tab instead of space")
+		f.Close()
+		f, err = os.Open(name)
+		if err != nil {
+			return nil, fmt.Errorf("unable to open hostfile %s: %v", name, err)
+		}
+		r = csv.NewReader(f)
+		r.Comma = '\t'
+		r.Comment = '#'
+		recs, err = r.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("unable to read hostfile %s: %v", name, err)
+		}
 	}
 	for _, rec := range recs {
 		server := rec[1]
