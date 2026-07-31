@@ -22,7 +22,60 @@ const (
 
 	// capturePeriodSizeSX1255 is the ALSA period size in frames.
 	capturePeriodSizeSX1255 = 4096
+
+	// captureReadFramesSX1255 is how many frames each capture read asks for:
+	// 20 ms at the SX1255's true sample rate.
+	captureReadFramesSX1255 = sampleRateSX1255 * 20 / 1000
+
+	// captureBackoffMinSX1255 and captureBackoffMaxSX1255 bound the retry delay
+	// after a failed capture recovery, so an unrecoverable device (for example a
+	// stopped I2S master clock) does not spin or flood the log.
+	captureBackoffMinSX1255 = 100 * time.Millisecond
+	captureBackoffMaxSX1255 = 2 * time.Second
+
+	// captureReopenAfterSX1255 is the number of consecutive failed recoveries
+	// after which the capture device is closed and reopened from scratch.
+	captureReopenAfterSX1255 = 5
 )
+
+// logALSADevice reports what a device actually negotiated.
+//
+// The rate is advisory. NegotiateRate is deliberately skipped (see
+// sx1255OpenCapture), so the driver resolves the open interval itself: a kernel
+// patched to accept 125000 pins it there, while a stock bcm2835-i2s settles on
+// its minimum. Either way the SX1255 is the I2S master and clocks the bus at
+// sampleRateSX1255, and every ALSA threshold is counted in frames rather than
+// seconds, so a rate the driver merely believes changes nothing — hence
+// "advisory" rather than a warning about a mismatch.
+//
+// Buffer and period size are worth logging because they set the underrun
+// margin: playback starts after one period and xruns after two buffers.
+func logALSADevice(kind string, dev *alsa.Device, bufSize, periodSize int) {
+	bf := dev.BufferFormat()
+	rateNote := "advisory"
+	if bf.Rate != sampleRateSX1255 {
+		rateNote = fmt.Sprintf("advisory, differs from the SX1255's %d Hz", sampleRateSX1255)
+	}
+	log.Printf("[INFO] ALSA %s device opened: %s, %d channels, %v, buffer=%d, period=%d frames; driver rate %d Hz (%s)",
+		kind, dev.Path, bf.Channels, bf.SampleFormat, bufSize, periodSize, bf.Rate, rateNote)
+}
+
+// recoverALSA returns a device to the PREPARED state after an xrun.
+//
+// Device.Prepare() issues SNDRV_PCM_IOCTL_HW_PARAMS first, and the kernel only
+// accepts that in the OPEN or SETUP state — from XRUN it fails with EBADFD
+// ("file descriptor in bad state"). Drop() moves the stream to SETUP from any
+// running or errored state, after which Prepare() is legal. Calling Prepare()
+// alone can therefore never recover a stream that has actually xrun.
+func recoverALSA(dev *alsa.Device) error {
+	if err := dev.Drop(); err != nil {
+		return fmt.Errorf("ALSA drop: %w", err)
+	}
+	if err := dev.Prepare(); err != nil {
+		return fmt.Errorf("ALSA prepare: %w", err)
+	}
+	return nil
+}
 
 // sx1255OpenCapture finds and opens an ALSA PCM capture device.
 // deviceHint matches against the device Path (e.g., "/dev/snd/pcmC0D1c")
@@ -100,14 +153,16 @@ func sx1255OpenCapture(deviceHint string) (*alsa.Device, error) {
 		return nil, fmt.Errorf("ALSA negotiate format S32_LE: %w", err)
 	}
 
-	_, err = captureDevice.NegotiateBufferSize(captureBufferSizeSX1255, 8192, 4096)
+	bufSize, err := captureDevice.NegotiateBufferSize(captureBufferSizeSX1255, 8192, 4096)
 	if err != nil {
 		log.Printf("[DEBUG] ALSA: buffer size negotiation failed: %v, using default", err)
+		bufSize = 0
 	}
 
-	_, err = captureDevice.NegotiatePeriodSize(capturePeriodSizeSX1255, 2048, 1024)
+	periodSize, err := captureDevice.NegotiatePeriodSize(capturePeriodSizeSX1255, 2048, 1024)
 	if err != nil {
 		log.Printf("[DEBUG] ALSA: period size negotiation failed: %v, using default", err)
+		periodSize = 0
 	}
 
 	err = captureDevice.Prepare()
@@ -116,8 +171,7 @@ func sx1255OpenCapture(deviceHint string) (*alsa.Device, error) {
 		return nil, fmt.Errorf("ALSA prepare: %w", err)
 	}
 
-	log.Printf("[INFO] ALSA capture device opened: %s, rate=%d (I2S master), channels=%d, format=S32_LE",
-		captureDevice.Path, sampleRateSX1255, channelsSX1255)
+	logALSADevice("capture", captureDevice, bufSize, periodSize)
 	return captureDevice, nil
 }
 
@@ -128,36 +182,63 @@ func (m *SX1255Modem) captureLoop(dev *alsa.Device, iqSamples chan<- complex128)
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	buf := dev.NewBufferDuration(20 * time.Millisecond)
 	bytesPerFrame := 8 // 2 channels × 4 bytes per sample (S32_LE)
+	// Deliberately not dev.NewBufferDuration(): that sizes from the rate the
+	// driver negotiated, which is only 125000 on a kernel patched to accept it.
+	// A stock bcm2835-i2s rejects 125000 and the kernel resolves the open
+	// interval to its minimum (8000), which would make each read a 15th of the
+	// audio we expect and multiply the syscall rate to match. Since the SX1255
+	// is the I2S master the true rate is sampleRateSX1255 either way, so size
+	// reads from that and ignore the driver's belief.
+	readBuf := make([]byte, captureReadFramesSX1255*bytesPerFrame)
 
 	consecutiveErrors := 0
+	backoff := captureBackoffMinSX1255
 
 	for {
-		err := dev.Read(buf.Data)
+		err := dev.Read(readBuf)
 		if err != nil {
 			consecutiveErrors++
-			if consecutiveErrors <= 3 {
+			// Log the first few, then only occasionally: a dead I2S clock
+			// produces one of these every read, indefinitely.
+			if consecutiveErrors <= 3 || consecutiveErrors%50 == 0 {
 				log.Printf("[ERROR] ALSA capture read error (%d): %v", consecutiveErrors, err)
 			}
-			// Try to recover from xrun
-			if perr := dev.Prepare(); perr != nil {
-				log.Printf("[ERROR] ALSA capture prepare recovery failed: %v", perr)
+			if rerr := recoverALSA(dev); rerr != nil {
+				if consecutiveErrors <= 3 || consecutiveErrors%50 == 0 {
+					log.Printf("[ERROR] ALSA capture recovery failed (%d): %v", consecutiveErrors, rerr)
+				}
+				// Recovery is not getting us anywhere — the device itself may
+				// be wedged. Close and reopen it from scratch.
+				if consecutiveErrors%captureReopenAfterSX1255 == 0 {
+					newDev, oerr := sx1255OpenCapture(m.alsaCapture)
+					if oerr != nil {
+						log.Printf("[ERROR] ALSA capture reopen failed: %v", oerr)
+					} else {
+						log.Printf("[WARN] ALSA capture device reopened after %d errors", consecutiveErrors)
+						dev.Close()
+						dev = newDev
+						m.setCaptureDevice(newDev)
+					}
+				}
 			}
+			time.Sleep(backoff)
+			backoff = min(backoff*2, captureBackoffMaxSX1255)
 			continue
 		}
 		if consecutiveErrors > 0 {
 			log.Printf("[INFO] ALSA capture recovered after %d errors", consecutiveErrors)
 		}
 		consecutiveErrors = 0
+		backoff = captureBackoffMinSX1255
 
 		// Parse stereo int32 pairs into complex128
-		numFrames := len(buf.Data) / bytesPerFrame
+		numFrames := len(readBuf) / bytesPerFrame
 
 		for i := range numFrames {
 			offset := i * bytesPerFrame
-			iSample := int32(binary.LittleEndian.Uint32(buf.Data[offset : offset+4]))
-			qSample := int32(binary.LittleEndian.Uint32(buf.Data[offset+4 : offset+8]))
+			iSample := int32(binary.LittleEndian.Uint32(readBuf[offset : offset+4]))
+			qSample := int32(binary.LittleEndian.Uint32(readBuf[offset+4 : offset+8]))
 
 			// Normalize int32 to float64 [-1.0, 1.0]
 			iFloat := float64(iSample) / 2147483648.0
@@ -178,16 +259,32 @@ func (m *SX1255Modem) openALSACapture() error {
 	if err != nil {
 		return err
 	}
-	m.captClose = dev.Close // store close func for platform-agnostic cleanup
+	m.setCaptureDevice(dev)
 
 	m.rxSymbols, err = m.rxPipeline(dev)
 	if err != nil {
 		dev.Close()
-		m.captClose = nil
+		m.setCaptureDevice(nil)
 		return fmt.Errorf("SX1255 RX pipeline: %w", err)
 	}
 
 	return nil
+}
+
+// setCaptureDevice records the live capture device. captureLoop may swap the
+// device out on reopen while Close() reads it from another goroutine, so the
+// handle is guarded.
+func (m *SX1255Modem) setCaptureDevice(dev *alsa.Device) {
+	m.captMutex.Lock()
+	defer m.captMutex.Unlock()
+	m.captDev = dev
+}
+
+// captureDevice returns the live capture device, or nil if it is not open.
+func (m *SX1255Modem) captureDevice() *alsa.Device {
+	m.captMutex.Lock()
+	defer m.captMutex.Unlock()
+	return m.captDev
 }
 
 // sx1255OpenPlayback finds and opens an ALSA PCM playback device.
@@ -260,14 +357,16 @@ func sx1255OpenPlayback(deviceHint string) (*alsa.Device, error) {
 		return nil, fmt.Errorf("ALSA negotiate format S32_LE: %w", err)
 	}
 
-	_, err = playbackDevice.NegotiateBufferSize(captureBufferSizeSX1255, 8192, 4096)
+	bufSize, err := playbackDevice.NegotiateBufferSize(captureBufferSizeSX1255, 8192, 4096)
 	if err != nil {
 		log.Printf("[DEBUG] ALSA playback: buffer size negotiation failed: %v, using default", err)
+		bufSize = 0
 	}
 
-	_, err = playbackDevice.NegotiatePeriodSize(capturePeriodSizeSX1255, 2048, 1024)
+	periodSize, err := playbackDevice.NegotiatePeriodSize(capturePeriodSizeSX1255, 2048, 1024)
 	if err != nil {
 		log.Printf("[DEBUG] ALSA playback: period size negotiation failed: %v, using default", err)
+		periodSize = 0
 	}
 
 	err = playbackDevice.Prepare()
@@ -276,8 +375,7 @@ func sx1255OpenPlayback(deviceHint string) (*alsa.Device, error) {
 		return nil, fmt.Errorf("ALSA playback prepare: %w", err)
 	}
 
-	log.Printf("[INFO] ALSA playback device opened: %s, rate=%d (I2S master), channels=%d, format=S32_LE",
-		playbackDevice.Path, sampleRateSX1255, channelsSX1255)
+	logALSADevice("playback", playbackDevice, bufSize, periodSize)
 	return playbackDevice, nil
 }
 
@@ -358,9 +456,9 @@ func (m *SX1255Modem) sx1255WriteIQ(iq []complex128) error {
 	if err != nil {
 		log.Printf("[WARN] ALSA playback write error, recovering: %v", err)
 		// Try to recover from underrun
-		if perr := m.playDev.Prepare(); perr != nil {
-			log.Printf("[ERROR] ALSA playback prepare recovery failed: %v", perr)
-			return fmt.Errorf("ALSA playback prepare recovery: %w", perr)
+		if perr := recoverALSA(m.playDev); perr != nil {
+			log.Printf("[ERROR] ALSA playback recovery failed: %v", perr)
+			return fmt.Errorf("ALSA playback recovery: %w", perr)
 		}
 		err = m.playDev.Write(buf, frames)
 		if err != nil {

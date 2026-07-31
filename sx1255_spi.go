@@ -375,32 +375,53 @@ func (m *SX1255Modem) sx1255SetTXPLLBW(bwKHz uint16) error {
 	return m.spi.writeReg(regTXFilterBWSX1255, reg)
 }
 
-func (m *SX1255Modem) sx1255EnableRX(enable bool) error {
+// sx1255SetMode updates the control register (0x00), setting the bits in set
+// and clearing those in clear.
+//
+// The reference oscillator bit is always forced on. Without it the chip locks
+// no PLL and drives no I2S clock, and since the SX1255 is the I2S bus master
+// the Pi then receives no BCLK/LRCLK and every ALSA transfer fails with EIO.
+// Leaving that bit to a read-modify-write of whatever the chip happens to
+// report after reset makes bring-up nondeterministic.
+//
+// The register is read back to confirm the write actually took effect.
+func (m *SX1255Modem) sx1255SetMode(set, clear byte) error {
 	reg, err := m.spi.readReg(regControlSX1255)
 	if err != nil {
 		return err
 	}
-	if enable {
-		reg |= 0x02 // bit 1
-	} else {
-		reg &= ^byte(0x02)
+	want := (reg &^ clear) | set | modeRefEnableSX1255
+	if err := m.spi.writeReg(regControlSX1255, want); err != nil {
+		return err
 	}
+	got, err := m.spi.readReg(regControlSX1255)
+	if err != nil {
+		return err
+	}
+	// Compare only the four mode bits. The upper bits of 0x00 are reserved and
+	// are not ours to assert anything about — verifying them would turn a
+	// harmless readback difference into a failure to start.
+	if (got^want)&modeMaskSX1255 != 0 {
+		return fmt.Errorf("SX1255 control reg 0x00 readback 0x%02X, wanted 0x%02X (mode bits differ)", got, want)
+	}
+	return nil
+}
+
+func (m *SX1255Modem) sx1255EnableRX(enable bool) error {
 	log.Printf("[DEBUG] SX1255 enable RX: %v", enable)
-	return m.spi.writeReg(regControlSX1255, reg)
+	if enable {
+		return m.sx1255SetMode(modeRXEnableSX1255, 0)
+	}
+	return m.sx1255SetMode(0, modeRXEnableSX1255)
 }
 
 func (m *SX1255Modem) sx1255EnableTX(enable bool) error {
-	reg, err := m.spi.readReg(regControlSX1255)
-	if err != nil {
-		return err
-	}
-	if enable {
-		reg |= 0x0C // bits 2 and 3 (TX frontend + PA)
-	} else {
-		reg &= ^byte(0x0C)
-	}
 	log.Printf("[DEBUG] SX1255 enable TX: %v", enable)
-	return m.spi.writeReg(regControlSX1255, reg)
+	txBits := byte(modeTXEnableSX1255 | modeDriverEnableSX1255)
+	if enable {
+		return m.sx1255SetMode(txBits, 0)
+	}
+	return m.sx1255SetMode(0, txBits)
 }
 
 func (m *SX1255Modem) sx1255EnableRFLoopback(enable bool) error {
