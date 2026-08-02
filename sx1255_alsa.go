@@ -27,6 +27,18 @@ const (
 	// 20 ms at the SX1255's true sample rate.
 	captureReadFramesSX1255 = sampleRateSX1255 * 20 / 1000
 
+	// rxScalingCoeffSX1255 scales the RRC matched-filter output so that symbols
+	// land on the ±1/±3 grid. It matters more than it looks: syncDistance
+	// compares symbols to ±3 in absolute terms against a fixed threshold, so a
+	// constellation that is a factor k off the grid carries a sync-distance
+	// floor of 12·|k−1| before any noise, against thresholds of 4.5 and 5.0.
+	//
+	// Tuned empirically against real hardware. Note the historical comment here
+	// read "symbol avg was 3.73 when target is 3.0 → scale by 3.0/3.73", which
+	// is 0.804, not this value — the derivation and the constant disagree, so
+	// treat the number as measured-by-experiment rather than derived.
+	rxScalingCoeffSX1255 = 1.54
+
 	// captureBackoffMinSX1255 and captureBackoffMaxSX1255 bound the retry delay
 	// after a failed capture recovery, so an unrecoverable device (for example a
 	// stopped I2S master clock) does not spin or flood the log.
@@ -253,7 +265,8 @@ func (m *SX1255Modem) captureLoop(dev *alsa.Device, iqSamples chan<- complex128)
 	}
 }
 
-// openALSACapture opens the ALSA capture device and builds the RX DSP pipeline.
+// openALSACapture opens the ALSA capture device, starts the capture goroutine,
+// and builds the RX DSP pipeline it feeds.
 func (m *SX1255Modem) openALSACapture() error {
 	dev, err := sx1255OpenCapture(m.alsaCapture)
 	if err != nil {
@@ -261,12 +274,9 @@ func (m *SX1255Modem) openALSACapture() error {
 	}
 	m.setCaptureDevice(dev)
 
-	m.rxSymbols, err = m.rxPipeline(dev)
-	if err != nil {
-		dev.Close()
-		m.setCaptureDevice(nil)
-		return fmt.Errorf("SX1255 RX pipeline: %w", err)
-	}
+	iqSamples := make(chan complex128, sampleRateSX1255/2) // ~500ms buffer
+	go m.captureLoop(dev, iqSamples)
+	m.rxSymbols = sx1255RXPipeline(iqSamples)
 
 	return nil
 }
@@ -468,20 +478,19 @@ func (m *SX1255Modem) sx1255WriteIQ(iq []complex128) error {
 	return nil
 }
 
-// rxPipeline assembles the SX1255 RX DSP chain:
+// sx1255RXPipeline assembles the SX1255 RX DSP chain:
 //
-//	ALSA 125 kSa/s stereo IQ
+//	125 kSa/s complex IQ
 //	→ DC removal
 //	→ Polyphase decimating FIR (125k → 12.5k, channel filter)
 //	→ FM demodulator (complex IQ → real instantaneous frequency)
 //	→ Rational resampler (12.5k → 24k, ratio 48/25)
 //	→ RRC matched filter (5 sps at 24 kSa/s → symbols)
-func (m *SX1255Modem) rxPipeline(dev *alsa.Device) (chan float32, error) {
-	iqSamples := make(chan complex128, sampleRateSX1255/2) // ~500ms buffer
-
-	// Start ALSA capture goroutine
-	go m.captureLoop(dev, iqSamples)
-
+//
+// It takes the IQ source as a channel rather than an ALSA device so the chain
+// can also be driven from a recorded capture — see sx1255_capture_test.go.
+// Closing iqSamples shuts the whole chain down and closes the returned channel.
+func sx1255RXPipeline(iqSamples chan complex128) chan float32 {
 	// DC removal (exponential moving average high-pass)
 	dcr := NewComplexDCRemoval(iqSamples, 0.9999)
 
@@ -500,10 +509,7 @@ func (m *SX1255Modem) rxPipeline(dev *alsa.Device) (chan float32, error) {
 	// output doesn't need the same compensation as the CC1200's baseband.
 
 	// RRC matched filter → symbols
-	// Scaling coefficient tuned empirically against real hardware.
-	// With IIR bypassed, symbol avg was 3.73 when target is 3.0 → scale by 3.0/3.73.
-	const rxScalingCoeffSX1255 = 1.54
 	s2s := NewSampleToSymbol(resampler.Source(), rrcTaps5, rxScalingCoeffSX1255)
 
-	return s2s.Source(), nil
+	return s2s.Source()
 }
