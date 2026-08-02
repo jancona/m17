@@ -2,6 +2,7 @@ package m17
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
 	"testing"
@@ -160,6 +161,80 @@ func TestSX1255Capture(t *testing.T) {
 		}
 		acc, bd := scanSyncs(fixed, sps)
 		t.Logf("  %-24s best distance %.2f, syncs accepted %d", c.name, bd, acc)
+	}
+}
+
+// TestSX1255CaptureSweep replays a capture through the pipeline repeatedly,
+// sweeping the software-AFC window and the symbol scaling coefficient, and
+// reports how many syncs the production detector accepts for each. Use it to
+// pick those two constants against real data rather than by eye.
+//
+// Same capture requirement as TestSX1255Capture.
+func TestSX1255CaptureSweep(t *testing.T) {
+	path := os.Getenv("M17_RX_CAPTURE")
+	if path == "" {
+		t.Skip("set M17_RX_CAPTURE to a raw S32_LE stereo 125 kSa/s capture to run this")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read capture: %v", err)
+	}
+	const sps = 5
+
+	runGain := func(dcAvgCnt int, coeff, gain float64) (int, float32) {
+		iq := make(chan complex128, sampleRateSX1255/2)
+		out := sx1255RXPipelineTuned(iq, dcAvgCnt, coeff)
+		go func() {
+			defer close(iq)
+			for off := 0; off+8 <= len(raw); off += 8 {
+				iS := int32(binary.LittleEndian.Uint32(raw[off : off+4]))
+				qS := int32(binary.LittleEndian.Uint32(raw[off+4 : off+8]))
+				iq <- complex(float64(iS)/2147483648.0*gain, float64(qS)/2147483648.0*gain)
+			}
+		}()
+		var syms []Symbol
+		for s := range out {
+			syms = append(syms, Symbol(s))
+		}
+		if skip := 24000 / 2; len(syms) > skip*2 {
+			syms = syms[skip:]
+		}
+		return scanSyncs(syms, sps)
+	}
+	run := func(dcAvgCnt int, coeff float64) (int, float32) {
+		return runGain(dcAvgCnt, coeff, 1.0)
+	}
+
+	// Does raw amplitude matter? An FM demodulator works on the angle, so
+	// scaling IQ should change nothing — if it does not, then raising the
+	// SX1255's LNA/PGA gain helps by improving the front-end noise figure, not
+	// by making the samples bigger, and no amount of software gain substitutes.
+	t.Logf("--- IQ amplitude sweep (does level alone matter?) ---")
+	t.Logf("%-12s %-8s %s", "gain", "syncs", "best dist")
+	for _, g := range []float64{0.25, 1, 4, 16, 64} {
+		acc, best := runGain(basebandDCAvgCntSX1255, rxScalingCoeffSX1255, g)
+		t.Logf("%-12.2f %-8d %.2f", g, acc, best)
+	}
+	t.Logf("")
+
+	// A count of 1 skips the filter entirely: the behaviour before software AFC.
+	t.Logf("--- software AFC window sweep (coefficient held at %.2f) ---", rxScalingCoeffSX1255)
+	t.Logf("%-12s %-10s %-8s %s", "avgCnt", "window", "syncs", "best dist")
+	for _, cnt := range []int{1, 125, 250, 500, 1000, 2000, 4000, 8000, 20000} {
+		acc, best := run(cnt, rxScalingCoeffSX1255)
+		label := fmt.Sprintf("%.0f ms", float64(cnt)/12500*1000)
+		if cnt <= 1 {
+			label = "off"
+		}
+		t.Logf("%-12d %-10s %-8d %.2f", cnt, label, acc, best)
+	}
+
+	t.Logf("")
+	t.Logf("--- scaling coefficient sweep (AFC window held at %d) ---", basebandDCAvgCntSX1255)
+	t.Logf("%-12s %-8s %s", "coeff", "syncs", "best dist")
+	for _, c := range []float64{0.9, 1.0, 1.1, 1.2, 1.3, 1.38, 1.45, 1.54, 1.7} {
+		acc, best := run(basebandDCAvgCntSX1255, c)
+		t.Logf("%-12.2f %-8d %.2f", c, acc, best)
 	}
 }
 
