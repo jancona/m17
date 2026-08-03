@@ -238,6 +238,78 @@ func TestSX1255CaptureSweep(t *testing.T) {
 	}
 }
 
+// TestSX1255CaptureDecode replays a capture through the full receive path —
+// DSP, sync detection, and the real Decoder — and reports what the decoder
+// makes of it: LSFs, stream frames, and end-of-stream events.
+//
+// It is the end-to-end counterpart to TestSX1255Capture, and the only way to
+// exercise the decoder's stream-termination logic against real off-air data.
+//
+// Same capture requirement as TestSX1255Capture.
+func TestSX1255CaptureDecode(t *testing.T) {
+	path := os.Getenv("M17_RX_CAPTURE")
+	if path == "" {
+		t.Skip("set M17_RX_CAPTURE to a raw S32_LE stereo 125 kSa/s capture to run this")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read capture: %v", err)
+	}
+
+	var lsfs, frames, eots, lichs int
+	dec := NewDecoder(
+		func(lsf LSF, ber float64) error { lsfs++; return nil },
+		func(lsf LSF, payload []byte, sid, fn uint16, ber float64) error { frames++; return nil },
+		func(lsf LSF, ber float64) error { lichs++; return nil },
+		func(lsf LSF, sid, fn uint16, ber float64) error {
+			eots++
+			t.Logf("  end of stream %04x at frame %04x (ber %.2f%%)", sid, fn, ber)
+			return nil
+		},
+		func(lsf LSF, payload []byte, ber float64) error { return nil },
+	)
+
+	iq := make(chan complex128, sampleRateSX1255/2)
+	symbols := sx1255RXPipeline(iq)
+	go func() {
+		defer close(iq)
+		for off := 0; off+8 <= len(raw); off += 8 {
+			iS := int32(binary.LittleEndian.Uint32(raw[off : off+4]))
+			qS := int32(binary.LittleEndian.Uint32(raw[off+4 : off+8]))
+			iq <- complex(float64(iS)/2147483648.0, float64(qS)/2147483648.0)
+		}
+	}()
+
+	// processSymbolStream blocks forever waiting to refill its buffer, so drive
+	// the sync search here rather than reusing it.
+	const sps = 5
+	var syms []Symbol
+	for s := range symbols {
+		syms = append(syms, Symbol(s))
+	}
+	need := 2*(SymbolsPerFrame*sps) + 16*sps
+	for off := 0; off+need < len(syms); {
+		dist, typ := syncDistance(syms, off, sps)
+		thr := float32(5.0)
+		if typ == LSFSync || typ == EOTMarker {
+			thr = 4.5
+		}
+		if dist >= thr {
+			off += sps // no sync here, advance one symbol
+			continue
+		}
+		rest, pld, _ := extractPayload(dist, typ, syms[off:], sps)
+		dec.DecodeFrame(typ, pld)
+		off += len(syms[off:]) - len(rest)
+	}
+
+	t.Logf("decoded: %d LSF, %d stream frames, %d LICH reassemblies, %d end-of-stream events",
+		lsfs, frames, lichs, eots)
+	dur := float64(len(raw)/8) / float64(sampleRateSX1255)
+	t.Logf("capture is %.1f s; a single continuous over would be ~%.0f frames and 1 end-of-stream",
+		dur, dur/0.04)
+}
+
 // scanSyncs runs the production sync detector across a symbol stream and
 // returns how many syncs pass their threshold, plus the best distance seen.
 func scanSyncs(syms []Symbol, sps int) (accepted int, best float32) {

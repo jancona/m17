@@ -524,6 +524,18 @@ func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uin
 	return err
 }
 func (g *Gateway) receivedRFStreamLICH(lsf m17.LSF, ber float64) error {
+	if g.getState() == Idle {
+		// A LICH-reconstructed LSF is the same LSF arriving by a different
+		// route, and the decoder has already verified its CRC before calling
+		// here. Treating it exactly like an LSF frame lets an over that was cut
+		// short — by a corrupted last-frame bit, say — resume within one LICH
+		// cycle, instead of staying deaf until the operator re-keys.
+		//
+		// This cannot resume after a genuine end of transmission: the decoder
+		// resets on EOT, clearing the LICH state, so no further calls arrive
+		// unless frames really are still being received.
+		return g.receivedRFLSF(lsf, ber)
+	}
 	if g.getState() == RFStreamRX {
 		g.dashLog.LogGNSS(&lsf, "RF")
 	}

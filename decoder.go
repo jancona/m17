@@ -171,7 +171,18 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 				}
 			}
 			// log.Printf("[DEBUG] Received stream frame: FN:%04X, LICH_CNT:%d, e: %d, BER: %1.1f", fn, lichCnt, e, float64(e)/2.72)
-			lastFrame := fn&0x8000 == 0x8000
+			// The last-frame flag is a single bit inside the convolutionally
+			// coded payload, so a Viterbi failure can set it and end the over
+			// early — after which the decoder resets and the gateway stops
+			// forwarding until the operator re-keys. Honour it only on a
+			// plausibly sequential frame: a burst large enough to flip bit 15
+			// will usually disturb its neighbours too, and so fail this check.
+			//
+			// Rejecting a genuine last frame here is cheap: the transmitter
+			// sends an EOT marker immediately afterwards, and that path (below)
+			// terminates the stream. This only gives up the fast path, not the
+			// reliable one.
+			lastFrame := fn&0x8000 == 0x8000 && fn&0x7fff == (d.lastStreamFN+1)&0x7fff
 			if d.gotLSF {
 				d.streamFN = fn
 				d.receivedRFStream(*d.lsf, d.frameData, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
