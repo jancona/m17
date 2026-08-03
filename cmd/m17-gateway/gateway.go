@@ -554,6 +554,11 @@ func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) 
 		log.Printf("[DEBUG] receivedRFStreamEOT() setState(Idle)")
 		g.setState(Idle)
 	}
+	// Aggregate bit error rate over the whole stream. Logged here as well as to
+	// the dashboard because it is the one number to compare when tuning receive
+	// gain: lower is better, and it is objective in a way that "sounds better"
+	// is not.
+	log.Printf("[DEBUG] RF voice stream %04x ended at frame %04x, BER %.2f%%", sid, fn&0x7fff, ber)
 	g.dashLog.LogFrame(&lsf, "RF", "Voice End", "mer", json.Number(fmt.Sprintf("%f", ber)))
 	return nil
 }

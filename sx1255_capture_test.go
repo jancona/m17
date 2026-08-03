@@ -119,7 +119,9 @@ func TestSX1255Capture(t *testing.T) {
 	need := 2*(SymbolsPerFrame*sps) + 16*sps
 	hist := map[uint16]int{}
 	var best float32 = math.MaxFloat32
-	for off := 0; off+need < len(syms); off += sps {
+	// Advance one sample at a time, as processSymbolStream does: the symbol
+	// phase is unknown, and stepping by sps would only ever test phase 0.
+	for off := 0; off+need < len(syms); off++ {
 		dist, typ := syncDistance(syms, off, sps)
 		if dist < best {
 			best = dist
@@ -295,7 +297,7 @@ func TestSX1255CaptureDecode(t *testing.T) {
 			thr = 4.5
 		}
 		if dist >= thr {
-			off += sps // no sync here, advance one symbol
+			off++ // no sync here; advance one sample, as production does
 			continue
 		}
 		rest, pld, _ := extractPayload(dist, typ, syms[off:], sps)
@@ -315,7 +317,9 @@ func TestSX1255CaptureDecode(t *testing.T) {
 func scanSyncs(syms []Symbol, sps int) (accepted int, best float32) {
 	best = math.MaxFloat32
 	need := 2*(SymbolsPerFrame*sps) + 16*sps
-	for off := 0; off+need < len(syms); off += sps {
+	// One sample at a time, matching processSymbolStream: stepping by sps would
+	// only ever sample symbol phase 0 and miss every other alignment.
+	for off := 0; off+need < len(syms); off++ {
 		dist, typ := syncDistance(syms, off, sps)
 		if dist < best {
 			best = dist

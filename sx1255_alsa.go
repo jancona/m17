@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -207,6 +208,33 @@ func (m *SX1255Modem) captureLoop(dev *alsa.Device, iqSamples chan<- complex128)
 	defer runtime.UnlockOSThread()
 
 	bytesPerFrame := 8 // 2 channels × 4 bytes per sample (S32_LE)
+
+	// Optional raw IQ capture, for off-line analysis with the tools in
+	// sx1255_capture_test.go. ALSA hw devices are exclusive, so arecord cannot
+	// read the SX1255 while the gateway holds it — this is the only way to get a
+	// capture that reflects the register configuration the gateway actually
+	// applied. Opened here so it stays local to this goroutine: nothing else
+	// touches it, so there is no shared state to guard.
+	//
+	// Bounded by duration: at 125 kSa/s stereo S32_LE this writes 1 MB/s, which
+	// would fill a Pi's card in short order if left running.
+	var rawIQ *os.File
+	rawIQLeft := m.rawIQSeconds * sampleRateSX1255 * bytesPerFrame
+	if m.rawIQPath != "" {
+		f, err := os.Create(m.rawIQPath)
+		if err != nil {
+			log.Printf("[ERROR] Cannot open raw IQ capture %s: %v", m.rawIQPath, err)
+		} else {
+			rawIQ = f
+			log.Printf("[INFO] Writing %d s of raw IQ to %s (S32_LE stereo, %d Sa/s)",
+				m.rawIQSeconds, m.rawIQPath, sampleRateSX1255)
+		}
+	}
+	defer func() {
+		if rawIQ != nil {
+			rawIQ.Close()
+		}
+	}()
 	// Deliberately not dev.NewBufferDuration(): that sizes from the rate the
 	// driver negotiated, which is only 125000 on a kernel patched to accept it.
 	// A stock bcm2835-i2s rejects 125000 and the kernel resolves the open
@@ -255,6 +283,19 @@ func (m *SX1255Modem) captureLoop(dev *alsa.Device, iqSamples chan<- complex128)
 		}
 		consecutiveErrors = 0
 		backoff = captureBackoffMinSX1255
+
+		if rawIQ != nil {
+			n := min(len(readBuf), rawIQLeft)
+			if _, werr := rawIQ.Write(readBuf[:n]); werr != nil {
+				log.Printf("[ERROR] Raw IQ capture write failed: %v", werr)
+				rawIQ.Close()
+				rawIQ = nil
+			} else if rawIQLeft -= n; rawIQLeft <= 0 {
+				log.Printf("[INFO] Raw IQ capture complete: %s", m.rawIQPath)
+				rawIQ.Close()
+				rawIQ = nil
+			}
+		}
 
 		// Parse stereo int32 pairs into complex128
 		numFrames := len(readBuf) / bytesPerFrame

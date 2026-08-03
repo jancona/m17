@@ -61,3 +61,10 @@ PGAGain = 0
 DACGain = 0
 ; TX mixer gain (-37.5 to -7.5 dB in 2 dB steps)
 MixerGain = -12
+; Diagnostics: dump raw received IQ to a file for off-line analysis, then stop.
+; ALSA hw devices are exclusive, so arecord cannot read the SX1255 while the
+; gateway is running -- this is the way to capture what the gateway itself sees.
+; The format is raw interleaved stereo S32_LE at 125000 Sa/s (left=I, right=Q).
+; Leave blank to disable. Writes ~1 MB/s, so mind the card space.
+RawIQCapture =
+RawIQSeconds = 20

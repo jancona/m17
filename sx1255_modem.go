@@ -110,6 +110,8 @@ type SX1255Modem struct {
 	resetPinN    int
 	alsaCapture  string
 	alsaPlayback string
+	rawIQPath    string // if set, captureLoop dumps raw IQ here for off-line analysis
+	rawIQSeconds int
 	lnaGain      uint8
 	pgaGain      uint8
 	dacGain      int8
@@ -132,6 +134,10 @@ func NewSX1255Modem(
 	pgaGain := modemCfg.Key("PGAGain").MustUint(0)
 	dacGain := modemCfg.Key("DACGain").MustInt(0)
 	mixerGain := modemCfg.Key("MixerGain").MustFloat64(-12)
+	// Diagnostics: dump raw IQ for off-line analysis. ALSA hw devices are
+	// exclusive, so arecord cannot read the SX1255 while the gateway holds it.
+	rawIQPath := modemCfg.Key("RawIQCapture").MustString("")
+	rawIQSeconds := modemCfg.Key("RawIQSeconds").MustInt(20)
 
 	m := &SX1255Modem{
 		txState:      txIdleSX1255,
@@ -141,6 +147,8 @@ func NewSX1255Modem(
 		resetPinN:    resetPin,
 		alsaCapture:  alsaCapture,
 		alsaPlayback: alsaPlayback,
+		rawIQPath:    rawIQPath,
+		rawIQSeconds: rawIQSeconds,
 		lnaGain:      uint8(lnaGain),
 		pgaGain:      uint8(pgaGain),
 		dacGain:      int8(dacGain),
