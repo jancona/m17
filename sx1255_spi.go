@@ -255,63 +255,71 @@ func (m *SX1255Modem) sx1255SetRate() error {
 	return nil
 }
 
-// sx1255SetLNAGain sets the RX LNA gain (0, 6, 12, 18, 24, 30, 36, 42, or 48 dB).
-// Values are rounded down to the nearest valid step.
-func (m *SX1255Modem) sx1255SetLNAGain(db uint8) error {
-	// LNA gain is in reg 0x0C bits [7:5], 6 dB per step, 0-48 dB
-	step := db / 6
-	if step > 8 {
-		step = 8
-	}
-	reg, err := m.spi.readReg(regRXLNAPGASX1255)
+// sx1255SetLNAGain sets the RX LNA gain, snapping to the nearest gain the chip
+// actually supports.
+// sx1255UpdateReg performs a masked read-modify-write and confirms the masked
+// bits read back as written.
+//
+// Gain settings used to be written blind, which meant a write that silently
+// failed to take effect was indistinguishable from a setting that genuinely has
+// no effect — and on a strong signal, front-end gain legitimately has none. That
+// ambiguity cost real time to unpick, so these writes now verify themselves.
+// Only the masked bits are compared: the rest of the register belongs to other
+// fields, and some bits are reserved.
+func (m *SX1255Modem) sx1255UpdateReg(addr, mask, value byte) error {
+	reg, err := m.spi.readReg(addr)
 	if err != nil {
 		return err
 	}
-	reg = (reg & 0x1F) | (step << 5)
-	log.Printf("[DEBUG] SX1255 set LNA gain: %d dB (step %d)", step*6, step)
-	return m.spi.writeReg(regRXLNAPGASX1255, reg)
+	want := (reg &^ mask) | (value & mask)
+	if err := m.spi.writeReg(addr, want); err != nil {
+		return err
+	}
+	got, err := m.spi.readReg(addr)
+	if err != nil {
+		return err
+	}
+	if (got^want)&mask != 0 {
+		return fmt.Errorf("SX1255 reg 0x%02X readback 0x%02X, wanted 0x%02X (bits 0x%02X did not take)",
+			addr, got, want, (got^want)&mask)
+	}
+	return nil
 }
 
-// sx1255SetPGAGain sets the RX PGA gain (0-30 dB in 2 dB steps).
+func (m *SX1255Modem) sx1255SetLNAGain(db uint8) error {
+	code, actual := sx1255LNACode(db)
+	if actual == db {
+		log.Printf("[DEBUG] SX1255 set LNA gain: %d dB (code %d)", actual, code)
+	} else {
+		log.Printf("[WARN] SX1255 LNA gain %d dB is not supported; using nearest, %d dB (code %d). Supported: 0, 12, 24, 36, 42, 48",
+			db, actual, code)
+	}
+	return m.sx1255UpdateReg(regRXLNAPGASX1255, 0xE0, code<<5)
+}
+
 func (m *SX1255Modem) sx1255SetPGAGain(db uint8) error {
 	// PGA gain is in reg 0x0C bits [4:1], 2 dB per step, 0-30 dB
 	step := db / 2
 	if step > 15 {
 		step = 15
 	}
-	reg, err := m.spi.readReg(regRXLNAPGASX1255)
-	if err != nil {
-		return err
-	}
-	reg = (reg & 0xE1) | (step << 1)
 	log.Printf("[DEBUG] SX1255 set PGA gain: %d dB (step %d)", step*2, step)
-	return m.spi.writeReg(regRXLNAPGASX1255, reg)
+	return m.sx1255UpdateReg(regRXLNAPGASX1255, 0x1E, step<<1)
 }
 
-// sx1255SetDACGain sets the TX DAC gain (0, -3, -6, or -9 dB).
 func (m *SX1255Modem) sx1255SetDACGain(db int8) error {
-	// DAC gain is in reg 0x08 bits [5:4]
-	var code uint8
-	switch {
-	case db >= 0:
-		code = 0
-	case db >= -3:
-		code = 1
-	case db >= -6:
-		code = 2
-	default:
-		code = 3
+	code, actual := sx1255DACCode(db)
+	if actual == db {
+		log.Printf("[DEBUG] SX1255 set DAC gain: %d dB (code %d)", actual, code)
+	} else {
+		log.Printf("[WARN] SX1255 DAC gain %d dB is not supported; using nearest, %d dB (code %d). Supported: 0, -3, -6, -9",
+			db, actual, code)
 	}
-	reg, err := m.spi.readReg(regTXDACGainSX1255)
-	if err != nil {
-		return err
-	}
-	reg = (reg & 0xCF) | (code << 4)
-	log.Printf("[DEBUG] SX1255 set DAC gain: %d dB (code %d)", -int(code)*3, code)
-	return m.spi.writeReg(regTXDACGainSX1255, reg)
+	// Mask all three bits [6:4]: leaving bit 6 as found risks selecting one of
+	// the test-Vref modes the datasheet says not to use.
+	return m.sx1255UpdateReg(regTXDACGainSX1255, 0x70, code<<4)
 }
 
-// sx1255SetMixerGain sets the TX mixer gain (-37.5 to -7.5 dB in 2 dB steps).
 func (m *SX1255Modem) sx1255SetMixerGain(db float32) error {
 	// Mixer gain is in reg 0x08 bits [3:0]
 	// Code 0 = -37.5 dB, code 15 = -7.5 dB, 2 dB per step
@@ -322,13 +330,8 @@ func (m *SX1255Modem) sx1255SetMixerGain(db float32) error {
 	if step > 15 {
 		step = 15
 	}
-	reg, err := m.spi.readReg(regTXDACGainSX1255)
-	if err != nil {
-		return err
-	}
-	reg = (reg & 0xF0) | byte(step)
 	log.Printf("[DEBUG] SX1255 set mixer gain: %.1f dB (step %d)", -37.5+float64(step)*2, step)
-	return m.spi.writeReg(regTXDACGainSX1255, reg)
+	return m.sx1255UpdateReg(regTXDACGainSX1255, 0x0F, byte(step))
 }
 
 // sx1255SetRXPLLBW sets the RX PLL bandwidth (75, 150, 225, or 300 kHz).

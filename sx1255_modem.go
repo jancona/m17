@@ -130,9 +130,9 @@ func NewSX1255Modem(
 	resetPin := modemCfg.Key("ResetPin").MustInt(22)
 	alsaCapture := modemCfg.Key("ALSACaptureDevice").MustString("")
 	alsaPlayback := modemCfg.Key("ALSAPlaybackDevice").MustString("")
-	lnaGain := modemCfg.Key("LNAGain").MustUint(0)
+	lnaGain := modemCfg.Key("LNAGain").MustUint(24)
 	pgaGain := modemCfg.Key("PGAGain").MustUint(0)
-	dacGain := modemCfg.Key("DACGain").MustInt(0)
+	dacGain := modemCfg.Key("DACGain").MustInt(-3)
 	mixerGain := modemCfg.Key("MixerGain").MustFloat64(-12)
 	// Diagnostics: dump raw IQ for off-line analysis. ALSA hw devices are
 	// exclusive, so arecord cannot read the SX1255 while the gateway holds it.

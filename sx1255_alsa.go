@@ -34,11 +34,19 @@ const (
 	// constellation that is a factor k off the grid carries a sync-distance
 	// floor of 12·|k−1| before any noise, against thresholds of 4.5 and 5.0.
 	//
-	// Tuned empirically against real hardware. Note the historical comment here
-	// read "symbol avg was 3.73 when target is 3.0 → scale by 3.0/3.73", which
-	// is 0.804, not this value — the derivation and the constant disagree, so
-	// treat the number as measured-by-experiment rather than derived.
-	rxScalingCoeffSX1255 = 1.54
+	// Derived from TestSX1255Loopback, which feeds a signal built by this repo's
+	// own TX DSP at the nominal ±2400 Hz through the receive chain. Because the
+	// symbols going in are known exactly, the recovered constellation gives the
+	// coefficient directly, with no channel, noise or unknown transmitter in the
+	// path. The sweeps in TestSX1255CaptureSweep agree, favouring 1.10-1.24 on
+	// both the synthetic reference and an off-air capture.
+	//
+	// The previous value of 1.54 put the constellation 24% high, spending ~2.9
+	// of the sync-distance budget before a signal arrived — which strong signals
+	// survive and marginal ones do not. That error was receive-side: the
+	// transmitter was separately confirmed on air to be within ~2% of a
+	// commercial radio, measured through the same receiver.
+	rxScalingCoeffSX1255 = 1.24
 
 	// basebandDCAvgCntSX1255 is the averaging window of the software AFC, in
 	// samples at the post-decimation rate (12.5 kSa/s). 2000 samples = 160 ms,

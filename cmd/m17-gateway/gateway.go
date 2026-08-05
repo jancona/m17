@@ -554,11 +554,19 @@ func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) 
 		log.Printf("[DEBUG] receivedRFStreamEOT() setState(Idle)")
 		g.setState(Idle)
 	}
-	// Aggregate bit error rate over the whole stream. Logged here as well as to
+	// Aggregate decode quality over the whole stream. Logged here as well as to
 	// the dashboard because it is the one number to compare when tuning receive
 	// gain: lower is better, and it is objective in a way that "sounds better"
 	// is not.
-	log.Printf("[DEBUG] RF voice stream %04x ended at frame %04x, BER %.2f%%", sid, fn&0x7fff, ber)
+	//
+	// Despite the parameter name this is not a bit error rate. DecodePunctured
+	// returns the Viterbi accumulated path metric, which decodeStreamFrame
+	// offsets and the decoder divides by the bit count — a normalised measure of
+	// how far the received soft bits sat from the decoded path. Good for ranking
+	// settings against each other; the absolute value is not a fraction of bits
+	// in error.
+	log.Printf("[DEBUG] RF voice stream %04x ended at frame %04x, decode metric %.2f%% (Viterbi path cost, lower is better)",
+		sid, fn&0x7fff, ber)
 	g.dashLog.LogFrame(&lsf, "RF", "Voice End", "mer", json.Number(fmt.Sprintf("%f", ber)))
 	return nil
 }

@@ -53,12 +53,25 @@ ResetPin = 22
 ; In most cases the ALSA devices may be left blank
 ALSACaptureDevice = 
 ALSAPlaybackDevice = 
-; RX LNA gain (0, 6, 12, 18, 24, 30, 36, 42, or 48 dB)
-LNAGain = 0
+; RX LNA gain. The SX1255 supports only these six settings, in uneven steps:
+; 0, 12, 24, 36, 42 or 48 dB. Anything else is snapped to the nearest and logged.
+;
+; This is a compromise, not a "more is better" setting, because there is no AGC.
+; Too little and weak signals are lost in the receiver's own noise; too much and
+; strong ones overload the front end. Both show up as a rising bit error rate,
+; which m17-gateway logs at the end of every received stream.
+;
+; 24 dB suits a typical hotspot: a handheld at 1 W a few metres away has been
+; measured to overload at 36 dB and above, while a weaker or more distant signal
+; needs more than 0 dB to be heard at all. Tune by watching the BER figures.
+LNAGain = 24
 ; RX PGA gain (0-30 dB in 2 dB steps).
 PGAGain = 0
-; TX DAC gain (0, -3, -6, or -9 dB)
-DACGain = 0
+; TX DAC gain (0, -3, -6, or -9 dB), where 0 is full scale.
+; NOTE: releases before this one had this setting inverted, so a configured 0
+; produced -9 dB and -9 produced 0 dB. If you tuned DACGain against an older
+; build, negate it to keep the same transmit level.
+DACGain = -3
 ; TX mixer gain (-37.5 to -7.5 dB in 2 dB steps)
 MixerGain = -12
 ; Diagnostics: dump raw received IQ to a file for off-line analysis, then stop.
