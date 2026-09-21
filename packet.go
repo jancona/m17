@@ -99,7 +99,7 @@ func (p *Packet) Encode() ([]Symbol, error) {
 	encodedBits := NewPayloadBits(b)
 	// encodedBits[0:len(b)] = b[:]
 	//fill preamble
-	outPacket = AppendPreamble(outPacket, lsfPreamble)
+	outPacket = AppendPreamble(outPacket, LSFPreamble)
 
 	//send LSF syncword
 	outPacket = AppendSyncwordSymbols(outPacket, LSFSync)

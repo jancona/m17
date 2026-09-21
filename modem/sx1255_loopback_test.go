@@ -1,10 +1,12 @@
-package m17
+package modem
 
 import (
 	"encoding/binary"
 	"math"
 	"os"
 	"testing"
+
+	"github.com/jancona/m17"
 )
 
 // TestSX1255Loopback feeds a synthetic, spec-perfect M17 signal through the
@@ -22,18 +24,18 @@ import (
 // RRC-shaped 4FSK, and this quantifies that bias.
 func TestSX1255Loopback(t *testing.T) {
 	// --- transmit: symbols -> RRC -> resample 24k->125k -> FM -> IQ ---
-	lsf, err := NewLSF("@ALL", "N0CALL", LSFTypeStream, LSFDataTypeVoice, 0)
+	lsf, err := m17.NewLSF("@ALL", "N0CALL", m17.LSFTypeStream, m17.LSFDataTypeVoice, 0)
 	if err != nil {
 		t.Fatalf("NewLSF: %v", err)
 	}
-	syms := AppendPreamble(nil, lsfPreamble)
+	syms := m17.AppendPreamble(nil, m17.LSFPreamble)
 	lsfSyms, err := generateLSFSymbols(&lsf)
 	if err != nil {
 		t.Fatalf("generateLSFSymbols: %v", err)
 	}
 	syms = append(syms, lsfSyms...)
 	for fn := range uint16(40) {
-		sd := NewStreamDatagram(0x1234, fn, &lsf, make([]byte, 16))
+		sd := m17.NewStreamDatagram(0x1234, fn, &lsf, make([]byte, 16))
 		s, err := generateStreamSymbols(sd)
 		if err != nil {
 			t.Fatalf("generateStreamSymbols: %v", err)
@@ -134,9 +136,9 @@ func TestSX1255Loopback(t *testing.T) {
 			in <- s
 		}
 	}()
-	var got []Symbol
+	var got []m17.Symbol
 	for s := range out {
-		got = append(got, Symbol(s))
+		got = append(got, m17.Symbol(s))
 	}
 	if len(got) == 0 {
 		t.Fatal("pipeline produced no symbols")
@@ -191,9 +193,9 @@ func TestSX1255Loopback(t *testing.T) {
 				in2 <- s
 			}
 		}()
-		var g2 []Symbol
+		var g2 []m17.Symbol
 		for s := range out2 {
-			g2 = append(g2, Symbol(s))
+			g2 = append(g2, m17.Symbol(s))
 		}
 		if skip := 24000 / 4; len(g2) > skip*2 {
 			g2 = g2[skip:]

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jancona/m17/inet"
+
 	"github.com/ergochat/irc-go/ircevent"
 	"github.com/ergochat/irc-go/ircmsg"
 
@@ -14,7 +16,7 @@ import (
 
 type IRCModule struct {
 	name           byte
-	server         *InetServer
+	server         *inet.Server
 	serverName     string
 	port           uint
 	useTLS         bool
@@ -26,7 +28,7 @@ type ircUser struct {
 	lastGet time.Time
 }
 
-func NewIRCModule(name byte, server *InetServer, serverName string, port uint, useTLS bool, serverPassword string) (*IRCModule, error) {
+func NewIRCModule(name byte, server *inet.Server, serverName string, port uint, useTLS bool, serverPassword string) (*IRCModule, error) {
 	log.Printf("[DEBUG] NewIRCModule(%s, %s, %d, %v)", string(name), serverName, port, useTLS)
 	m := IRCModule{
 		name:           name,
@@ -96,10 +98,7 @@ func (m *IRCModule) getIRCUser(callsign string) *ircUser {
 				log.Printf("[INFO] Error building packet: %v", err)
 				return
 			}
-			clients := m.server.lookupClientsByModule(m.Name())
-			for _, c := range clients {
-				m.server.SendPacket(p, c.addr)
-			}
+			m.server.SendPacketToModule(m.Name(), p)
 		})
 		err := u.conn.Connect()
 		if err != nil {

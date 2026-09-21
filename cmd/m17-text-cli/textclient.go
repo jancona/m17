@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jancona/m17/inet"
+
 	"github.com/jancona/m17"
 )
 
@@ -37,7 +39,7 @@ func main() {
 	}
 
 	// TODO: Add name argument and hostfile lookup
-	r, err := m17.NewInetClient(*serverArg, *serverArg, *portArg, *moduleArg, *callsignArg, nil, handleM17, nil)
+	r, err := inet.NewClient(*serverArg, *serverArg, *portArg, *moduleArg, *callsignArg, nil, handleM17, nil)
 	if err != nil {
 		fmt.Printf("Error creating client: %v", err)
 		os.Exit(1)
@@ -75,7 +77,7 @@ func handleM17(p m17.Packet) error {
 
 // keep watching for console input
 // send the "message" command to the chat server when we have some
-func handleConsoleInput(c *m17.InetClient) {
+func handleConsoleInput(c *inet.Client) {
 	var done bool
 
 	reader := bufio.NewReader(os.Stdin)

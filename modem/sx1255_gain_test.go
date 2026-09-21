@@ -1,6 +1,8 @@
-package m17
+package modem
 
-import "testing"
+import (
+	"testing"
+)
 
 // TestSX1255GainTables pins the LNA and TX DAC gain mappings to the SX1255
 // datasheet.

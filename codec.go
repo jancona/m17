@@ -31,9 +31,9 @@ const (
 )
 
 const (
-	softTrue  = 0xFFFF
-	softMaybe = softTrue / 2
-	softFalse = 0
+	SoftTrue  = 0xFFFF
+	SoftMaybe = SoftTrue / 2
+	SoftFalse = 0
 )
 
 type Symbol float32
@@ -60,15 +60,15 @@ var (
 	// costTable0 = []Symbol{0, 0, 0, 0, 1, 1, 1, 1}
 	// costTable1 = []Symbol{0, 1, 1, 0, 0, 1, 1, 0}
 
-	costTable0 = []SoftBit{softFalse, softFalse, softFalse, softFalse, softTrue, softTrue, softTrue, softTrue}
-	costTable1 = []SoftBit{softFalse, softTrue, softTrue, softFalse, softFalse, softTrue, softTrue, softFalse}
+	costTable0 = []SoftBit{SoftFalse, SoftFalse, SoftFalse, SoftFalse, SoftTrue, SoftTrue, SoftTrue, SoftTrue}
+	costTable1 = []SoftBit{SoftFalse, SoftTrue, SoftTrue, SoftFalse, SoftFalse, SoftTrue, SoftTrue, SoftFalse}
 )
 
 // Preamble type (0 for LSF, 1 for BERT).
 type Preamble byte
 
 const (
-	lsfPreamble Preamble = iota
+	LSFPreamble Preamble = iota
 	bertPreamble
 )
 
@@ -122,7 +122,7 @@ var (
 
 // Calculate distance between recent samples and sync patterns.
 // sps is the number of samples per symbol (5 for CC1200, 1 for SX1255).
-func syncDistance(symbols []Symbol, offset int, sps int) (float32, uint16) {
+func SyncDistance(symbols []Symbol, offset int, sps int) (float32, uint16) {
 	var lsf,
 		pkt, pkte, pkta, pktb,
 		str, stre, stra, strb,
@@ -272,7 +272,7 @@ func RandomizeBits(bits *PayloadBits) *PayloadBits {
 func DerandomizeSoftBits(softBits []SoftBit) []SoftBit {
 	for i := 0; i < len(softBits); i++ {
 		if (randomizeSeq[i/8]>>(7-(i%8)))&1 != 0 { //soft XOR. flip soft bit if "1"
-			softBits[i] = softTrue - softBits[i]
+			softBits[i] = SoftTrue - softBits[i]
 		}
 	}
 	return softBits
@@ -397,7 +397,7 @@ func (v *ViterbiDecoder) DecodePunctured(puncturedSoftBits []SoftBit, puncturePa
 			softBits[u] = puncturedSoftBits[i]
 			i++
 		} else {
-			softBits[u] = softMaybe
+			softBits[u] = SoftMaybe
 		}
 		u++
 		p++
@@ -494,7 +494,7 @@ func (v *ViterbiDecoder) chainback(pos, l int) ([]byte, int) {
 		}
 	}
 
-	cost := int(slices.Min(v.prevMetrics) / softMaybe / 2)
+	cost := int(slices.Min(v.prevMetrics) / SoftMaybe / 2)
 	// log.Printf("[DEBUG] chainback(%d, %d) cost: %d", pos, l, cost)
 
 	return out, cost

@@ -1,4 +1,4 @@
-package m17
+package inet
 
 import (
 	"encoding/csv"

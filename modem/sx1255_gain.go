@@ -1,4 +1,4 @@
-package m17
+package modem
 
 // SX1255 analog gain register tables.
 //

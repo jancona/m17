@@ -1,4 +1,4 @@
-package m17
+package modem
 
 import (
 	"encoding/binary"
@@ -6,6 +6,8 @@ import (
 	"math"
 	"os"
 	"testing"
+
+	"github.com/jancona/m17"
 )
 
 // TestSX1255Capture replays a recorded SX1255 IQ capture through the real RX
@@ -53,9 +55,9 @@ func TestSX1255Capture(t *testing.T) {
 		}
 	}()
 
-	var syms []Symbol
+	var syms []m17.Symbol
 	for s := range symbols {
-		syms = append(syms, Symbol(s))
+		syms = append(syms, m17.Symbol(s))
 	}
 	if len(syms) == 0 {
 		t.Fatal("pipeline produced no symbols")
@@ -115,19 +117,19 @@ func TestSX1255Capture(t *testing.T) {
 		100*(k-1), 12*math.Abs(k-1))
 
 	// --- what the real sync detector makes of it ---
-	// syncDistance needs 2 frame strides of lookahead.
-	need := 2*(SymbolsPerFrame*sps) + 16*sps
+	// m17.SyncDistance needs 2 frame strides of lookahead.
+	need := 2*(m17.SymbolsPerFrame*sps) + 16*sps
 	hist := map[uint16]int{}
 	var best float32 = math.MaxFloat32
 	// Advance one sample at a time, as processSymbolStream does: the symbol
 	// phase is unknown, and stepping by sps would only ever test phase 0.
 	for off := 0; off+need < len(syms); off++ {
-		dist, typ := syncDistance(syms, off, sps)
+		dist, typ := m17.SyncDistance(syms, off, sps)
 		if dist < best {
 			best = dist
 		}
 		thr := float32(5.0)
-		if typ == LSFSync || typ == EOTMarker {
+		if typ == m17.LSFSync || typ == m17.EOTMarker {
 			thr = 4.5
 		}
 		if dist < thr {
@@ -136,7 +138,7 @@ func TestSX1255Capture(t *testing.T) {
 	}
 	t.Logf("best sync distance seen: %.3f (thresholds: LSF/EOT 4.5, Stream/Packet 5.0)", best)
 	t.Logf("syncs accepted: LSF=%d Stream=%d Packet=%d EOT=%d",
-		hist[LSFSync], hist[StreamSync], hist[PacketSync], hist[EOTMarker])
+		hist[m17.LSFSync], hist[m17.StreamSync], hist[m17.PacketSync], hist[m17.EOTMarker])
 
 	expFrames := float64(nFrames) / float64(sampleRateSX1255) / 0.04
 	t.Logf("~%.0f M17 frames expected in this capture if it were continuous", expFrames)
@@ -145,7 +147,7 @@ func TestSX1255Capture(t *testing.T) {
 	// Re-run the real detector over symbols with the carrier offset removed
 	// and/or the scale corrected, to attribute the failure between the two.
 	t.Logf("")
-	t.Logf("--- attribution: rerunning syncDistance on corrected symbols ---")
+	t.Logf("--- attribution: rerunning SyncDistance on corrected symbols ---")
 	scaleFix := 2.0 / meanAbs
 	for _, c := range []struct {
 		name  string
@@ -157,9 +159,9 @@ func TestSX1255Capture(t *testing.T) {
 		{"scale corrected", 0, scaleFix},
 		{"both", bestDC, scaleFix},
 	} {
-		fixed := make([]Symbol, len(syms))
+		fixed := make([]m17.Symbol, len(syms))
 		for i, s := range syms {
-			fixed[i] = Symbol((float64(s) - c.dc) * c.scale)
+			fixed[i] = m17.Symbol((float64(s) - c.dc) * c.scale)
 		}
 		acc, bd := scanSyncs(fixed, sps)
 		t.Logf("  %-24s best distance %.2f, syncs accepted %d", c.name, bd, acc)
@@ -194,9 +196,9 @@ func TestSX1255CaptureSweep(t *testing.T) {
 				iq <- complex(float64(iS)/2147483648.0*gain, float64(qS)/2147483648.0*gain)
 			}
 		}()
-		var syms []Symbol
+		var syms []m17.Symbol
 		for s := range out {
-			syms = append(syms, Symbol(s))
+			syms = append(syms, m17.Symbol(s))
 		}
 		if skip := 24000 / 2; len(syms) > skip*2 {
 			syms = syms[skip:]
@@ -259,16 +261,16 @@ func TestSX1255CaptureDecode(t *testing.T) {
 	}
 
 	var lsfs, frames, eots, lichs int
-	dec := NewDecoder(
-		func(lsf LSF, ber float64) error { lsfs++; return nil },
-		func(lsf LSF, payload []byte, sid, fn uint16, ber float64) error { frames++; return nil },
-		func(lsf LSF, ber float64) error { lichs++; return nil },
-		func(lsf LSF, sid, fn uint16, ber float64) error {
+	dec := m17.NewDecoder(
+		func(lsf m17.LSF, ber float64) error { lsfs++; return nil },
+		func(lsf m17.LSF, payload []byte, sid, fn uint16, ber float64) error { frames++; return nil },
+		func(lsf m17.LSF, ber float64) error { lichs++; return nil },
+		func(lsf m17.LSF, sid, fn uint16, ber float64) error {
 			eots++
 			t.Logf("  end of stream %04x at frame %04x (ber %.2f%%)", sid, fn, ber)
 			return nil
 		},
-		func(lsf LSF, payload []byte, ber float64) error { return nil },
+		func(lsf m17.LSF, payload []byte, ber float64) error { return nil },
 	)
 
 	iq := make(chan complex128, sampleRateSX1255/2)
@@ -285,15 +287,15 @@ func TestSX1255CaptureDecode(t *testing.T) {
 	// processSymbolStream blocks forever waiting to refill its buffer, so drive
 	// the sync search here rather than reusing it.
 	const sps = 5
-	var syms []Symbol
+	var syms []m17.Symbol
 	for s := range symbols {
-		syms = append(syms, Symbol(s))
+		syms = append(syms, m17.Symbol(s))
 	}
-	need := 2*(SymbolsPerFrame*sps) + 16*sps
+	need := 2*(m17.SymbolsPerFrame*sps) + 16*sps
 	for off := 0; off+need < len(syms); {
-		dist, typ := syncDistance(syms, off, sps)
+		dist, typ := m17.SyncDistance(syms, off, sps)
 		thr := float32(5.0)
-		if typ == LSFSync || typ == EOTMarker {
+		if typ == m17.LSFSync || typ == m17.EOTMarker {
 			thr = 4.5
 		}
 		if dist >= thr {
@@ -314,18 +316,18 @@ func TestSX1255CaptureDecode(t *testing.T) {
 
 // scanSyncs runs the production sync detector across a symbol stream and
 // returns how many syncs pass their threshold, plus the best distance seen.
-func scanSyncs(syms []Symbol, sps int) (accepted int, best float32) {
+func scanSyncs(syms []m17.Symbol, sps int) (accepted int, best float32) {
 	best = math.MaxFloat32
-	need := 2*(SymbolsPerFrame*sps) + 16*sps
+	need := 2*(m17.SymbolsPerFrame*sps) + 16*sps
 	// One sample at a time, matching processSymbolStream: stepping by sps would
 	// only ever sample symbol phase 0 and miss every other alignment.
 	for off := 0; off+need < len(syms); off++ {
-		dist, typ := syncDistance(syms, off, sps)
+		dist, typ := m17.SyncDistance(syms, off, sps)
 		if dist < best {
 			best = dist
 		}
 		thr := float32(5.0)
-		if typ == LSFSync || typ == EOTMarker {
+		if typ == m17.LSFSync || typ == m17.EOTMarker {
 			thr = 4.5
 		}
 		if dist < thr {
@@ -337,7 +339,7 @@ func scanSyncs(syms []Symbol, sps int) (accepted int, best float32) {
 
 // symbolMean returns the mean symbol value at the given phase — the carrier
 // offset, in symbol units, as the decoder sees it.
-func symbolMean(syms []Symbol, phase, sps int) float64 {
+func symbolMean(syms []m17.Symbol, phase, sps int) float64 {
 	var sum float64
 	n := 0
 	for i := phase; i < len(syms); i += sps {
@@ -352,7 +354,7 @@ func symbolMean(syms []Symbol, phase, sps int) float64 {
 
 // gridFit returns the RMS distance of symbols at the given phase to the nearest
 // ideal level, and the scale factor that would minimise it, after removing dc.
-func gridFit(syms []Symbol, phase, sps int, dc float64) (rms, scale float64) {
+func gridFit(syms []m17.Symbol, phase, sps int, dc float64) (rms, scale float64) {
 	levels := []float64{-3, -1, 1, 3}
 	bestRMS, bestScale := math.MaxFloat64, 1.0
 	for s := 0.05; s <= 3.00; s += 0.005 {

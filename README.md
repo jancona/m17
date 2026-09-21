@@ -116,4 +116,14 @@ This program emulates the [CC1200 Modem firmware](https://github.com/M17-Project
 
 ## Library
 
-The root directory of the project contains the Go library (`github.com/jancona/m17`) used to implement the M17 protocol parts of the tools. It's pretty rough right now, but I hope to improve it and make it more general and useful over time.
+The library is split so that the protocol can be imported without pulling in device drivers:
+
+| Package | What it holds | Depends on |
+|---|---|---|
+| `github.com/jancona/m17` | The M17 protocol: callsign encoding, LSF, packets, stream datagrams, CRC, and channel coding (convolutional code, Golay, interleaving, randomization, frame decoder). | standard library only |
+| `github.com/jancona/m17/inet` | The M17_inet reflector protocol: `Client` for linking to a reflector, `Server` for being one, and the hosts file reader. | `m17` |
+| `github.com/jancona/m17/modem` | Modem drivers (CC1200, MMDVM, SX1255, and a dummy), GPIO and SPI access, and the DSP chain. | `m17`, device libraries |
+| `github.com/jancona/m17/dashboard` | The JSON dashboard logger used by the gateway. | `m17` |
+| `github.com/jancona/m17/server` | Bridge modules (APRS, Discord, IRC) for `m17-bridge`. | `m17`, `inet`, their services |
+
+It's pretty rough right now, but I hope to improve it and make it more general and useful over time. See `docs/core-split.md` for the reasoning behind the layout.

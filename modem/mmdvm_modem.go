@@ -1,4 +1,4 @@
-package m17
+package modem
 
 import (
 	"encoding/binary"
@@ -9,6 +9,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/jancona/m17"
 
 	"go.bug.st/serial"
 	"gopkg.in/ini.v1"
@@ -120,8 +122,8 @@ type MMDVMConfig struct {
 	m17TXHang  byte
 }
 
-type MMDVMModem struct {
-	frameSink func(typ uint16, softBits []SoftBit)
+type MMDVM struct {
+	frameSink func(typ uint16, softBits []m17.SoftBit)
 	config    MMDVMConfig
 
 	port     io.ReadWriteCloser
@@ -140,14 +142,14 @@ type MMDVMModem struct {
 	protocolVersion byte
 }
 
-func NewMMDVMModem(
+func NewMMDVM(
 	rxFrequency uint32,
 	txFrequency uint32,
 	power float32,
 	frequencyCorr int16,
 	afc bool,
 	modemCfg *ini.Section,
-	duplex bool) (*MMDVMModem, error) {
+	duplex bool) (*MMDVM, error) {
 	var protocolErr, portErr error
 	protocol := modemCfg.Key("Protocol").In("BAD", []string{"uart"})
 	if protocol == "BAD" {
@@ -183,7 +185,7 @@ func NewMMDVMModem(
 		return nil, err
 	}
 
-	m := &MMDVMModem{
+	m := &MMDVM{
 		sendCmds:   make(chan []byte, 100), // 4 seconds
 		lastTXData: time.Now(),
 		config: MMDVMConfig{
@@ -233,17 +235,17 @@ func NewMMDVMModem(
 	return m, nil
 }
 
-func (m *MMDVMModem) isExit() bool {
+func (m *MMDVM) isExit() bool {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	return m.exit
 }
-func (m *MMDVMModem) setExit(exit bool) {
+func (m *MMDVM) setExit(exit bool) {
 	m.mutex.Lock()
 	m.exit = exit
 	m.mutex.Unlock()
 }
-func (m *MMDVMModem) modemReceive() {
+func (m *MMDVM) modemReceive() {
 	log.Printf("[DEBUG] modemReceive starting")
 	for !m.isExit() {
 		m.checkStatus()
@@ -258,19 +260,19 @@ func (m *MMDVMModem) modemReceive() {
 			case mmdvmM17LinkSetup:
 				log.Printf("[DEBUG] Received M17 LSF: [% 02x]", buf)
 				sb := bytesToSoftBits(buf[3 : 46+3])
-				m.frameSink(LSFSync, sb)
+				m.frameSink(m17.LSFSync, sb)
 			case mmdvmM17Stream:
 				log.Printf("[DEBUG] Received M17 Stream frame: [% 02x]", buf)
 				sb := bytesToSoftBits(buf[3 : 46+3])
-				m.frameSink(StreamSync, sb)
+				m.frameSink(m17.StreamSync, sb)
 			case mmdvmM17Packet:
 				log.Printf("[DEBUG] Received M17 Packet frame: [% 02x]", buf)
 				sb := bytesToSoftBits(buf[3 : 46+3])
-				m.frameSink(PacketSync, sb)
+				m.frameSink(m17.PacketSync, sb)
 			case mmdvmM17EOT:
 				log.Printf("[DEBUG] Received M17 EOT: [% 02x]", buf)
 				sb := bytesToSoftBits(buf[3 : 46+3])
-				m.frameSink(EOTMarker, sb)
+				m.frameSink(m17.EOTMarker, sb)
 			case mmdvmM17Lost:
 				// log.Printf("[DEBUG] Received M17 Lost: [% 02x]", buf)
 			case mmdvmGetStatus:
@@ -362,7 +364,7 @@ func (m *MMDVMModem) modemReceive() {
 	log.Printf("[DEBUG] modemReceive stopping")
 }
 
-func (m *MMDVMModem) modemSend() {
+func (m *MMDVM) modemSend() {
 	log.Printf("[DEBUG] modemSend starting")
 	for !m.isExit() {
 		if m.getSpace() > 1 {
@@ -386,14 +388,14 @@ func decodeValue(buf []byte) int16 {
 	return val
 }
 
-func bytesToSoftBits(buf []byte) []SoftBit {
-	var ret []SoftBit
+func bytesToSoftBits(buf []byte) []m17.SoftBit {
+	var ret []m17.SoftBit
 	for _, b := range buf {
 		for range 8 {
 			if b&0x80 == 0x80 {
-				ret = append(ret, softTrue)
+				ret = append(ret, m17.SoftTrue)
 			} else {
-				ret = append(ret, softFalse)
+				ret = append(ret, m17.SoftFalse)
 			}
 			b <<= 1
 		}
@@ -401,7 +403,7 @@ func bytesToSoftBits(buf []byte) []SoftBit {
 	return ret
 }
 
-func (m *MMDVMModem) checkStatus() error {
+func (m *MMDVM) checkStatus() error {
 	m.mutex.Lock()
 	checkStatus := time.Since(m.lastStatusCheck) > 250*time.Millisecond
 	m.mutex.Unlock()
@@ -419,7 +421,7 @@ func (m *MMDVMModem) checkStatus() error {
 	return nil
 }
 
-func (m *MMDVMModem) readVersion() error {
+func (m *MMDVM) readVersion() error {
 	time.Sleep(2 * time.Second)
 	cmd := []byte{mmdvmFrameStart, 3, mmdvmGetVersion}
 	log.Printf("[DEBUG] Trying GetVersion")
@@ -520,7 +522,7 @@ retry:
 	return nil
 }
 
-func (m *MMDVMModem) setFrequency(rxFreq, txFreq uint32, power float32) error {
+func (m *MMDVM) setFrequency(rxFreq, txFreq uint32, power float32) error {
 	log.Printf("[DEBUG] setFrequency(%d, %d, %f)", rxFreq, txFreq, power)
 
 	cmd := make([]byte, 12)
@@ -548,7 +550,7 @@ func (m *MMDVMModem) setFrequency(rxFreq, txFreq uint32, power float32) error {
 	return err
 }
 
-func (m *MMDVMModem) writeConfig() error {
+func (m *MMDVM) writeConfig() error {
 	switch m.protocolVersion {
 	case 1:
 		return m.setProtocol1Config()
@@ -559,7 +561,7 @@ func (m *MMDVMModem) writeConfig() error {
 	}
 }
 
-func (m *MMDVMModem) setProtocol1Config() error {
+func (m *MMDVM) setProtocol1Config() error {
 	cmd := make([]byte, 30)
 
 	cmd[0] = mmdvmFrameStart
@@ -663,7 +665,7 @@ func (m *MMDVMModem) setProtocol1Config() error {
 	return err
 }
 
-func (m *MMDVMModem) setProtocol2Config() error {
+func (m *MMDVM) setProtocol2Config() error {
 	// log.Printf("[DEBUG] setProtocol2Config()")
 	cmd := make([]byte, 40)
 
@@ -777,14 +779,14 @@ func (m *MMDVMModem) setProtocol2Config() error {
 	return err
 }
 
-func (m *MMDVMModem) setMode(mode byte) error {
+func (m *MMDVM) setMode(mode byte) error {
 	log.Printf("[DEBUG] setMode(%02x)", mode)
 	cmd := []byte{mmdvmFrameStart, 4, mmdvmSetMode, mode}
 	_, err := m.port.Write(cmd)
 	return err
 }
 
-func (m *MMDVMModem) getEmptyResponse() error {
+func (m *MMDVM) getEmptyResponse() error {
 	var responseType byte
 	var buf []byte
 	var err error
@@ -805,7 +807,7 @@ func (m *MMDVMModem) getEmptyResponse() error {
 	return err
 }
 
-func (m *MMDVMModem) getResponse() (byte, []byte, error) {
+func (m *MMDVM) getResponse() (byte, []byte, error) {
 	var n int
 	var err error
 	var state byte
@@ -906,27 +908,27 @@ func (m *MMDVMModem) getResponse() (byte, []byte, error) {
 	return responseType, buffer, err
 }
 
-func (m *MMDVMModem) StartDecoding(sink func(typ uint16, softBits []SoftBit)) {
+func (m *MMDVM) StartDecoding(sink func(typ uint16, softBits []m17.SoftBit)) {
 	m.frameSink = sink
 }
 
 // Reset the modem
-func (m *MMDVMModem) Reset() error {
+func (m *MMDVM) Reset() error {
 	log.Print("[DEBUG] modem Reset()")
 	return nil
 }
 
 // Close the modem
-func (m *MMDVMModem) Close() error {
+func (m *MMDVM) Close() error {
 	log.Print("[DEBUG] modem Close()")
 	m.setExit(true)
 	close(m.sendCmds)
 	return m.port.Close()
 }
 
-func (m *MMDVMModem) TransmitPacket(p Packet) error {
+func (m *MMDVM) TransmitPacket(p m17.Packet) error {
 	log.Printf("[DEBUG] TransmitPacket: %v", p)
-	var bits []Bit
+	var bits []m17.Bit
 
 	err := m.transmitLSF(*p.LSF)
 	if err != nil {
@@ -936,7 +938,7 @@ func (m *MMDVMModem) TransmitPacket(p Packet) error {
 	chunkCnt := 0
 	packetData := p.PayloadBytes()
 	for bytesLeft := len(packetData); bytesLeft > 0; bytesLeft -= 25 {
-		bits = unpackBits(PacketSyncBytes)
+		bits = unpackBits(m17.PacketSyncBytes)
 		chunk := make([]byte, 25+1) // 25 bytes from the packet plus 6 bits of metadata
 		if bytesLeft > 25 {
 			// not the last chunk
@@ -953,13 +955,13 @@ func (m *MMDVMModem) TransmitPacket(p Packet) error {
 			}
 		}
 		//encode the packet chunk
-		b, err := ConvolutionalEncode(chunk, PacketPuncturePattern, PacketModeFinalBit)
+		b, err := m17.ConvolutionalEncode(chunk, m17.PacketPuncturePattern, m17.PacketModeFinalBit)
 		if err != nil {
 			return fmt.Errorf("unable to encode packet: %w", err)
 		}
-		encodedBits := NewPayloadBits(b)
-		rfBits := InterleaveBits(encodedBits)
-		rfBits = RandomizeBits(rfBits)
+		encodedBits := m17.NewPayloadBits(b)
+		rfBits := m17.InterleaveBits(encodedBits)
+		rfBits = m17.RandomizeBits(rfBits)
 		// Append chunk to the output
 		bits = append(bits, rfBits[:]...)
 		m.writeBits(mmdvmM17Packet, bits)
@@ -969,7 +971,7 @@ func (m *MMDVMModem) TransmitPacket(p Packet) error {
 	return nil
 }
 
-func (m *MMDVMModem) transmitLSF(lsf LSF) error {
+func (m *MMDVM) transmitLSF(lsf m17.LSF) error {
 	// log.Printf("[DEBUG] transmitLSF: %s", lsf)
 	bits, err := generateLSFBits(lsf)
 	if err != nil {
@@ -979,12 +981,12 @@ func (m *MMDVMModem) transmitLSF(lsf LSF) error {
 	return nil
 }
 
-func (m *MMDVMModem) TransmitVoiceStream(sd StreamDatagram) error {
+func (m *MMDVM) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	log.Printf("[DEBUG] TransmitVoiceStream id: %04x, fn: %04x, last: %v", sd.StreamID, sd.FrameNumber, sd.LastFrame)
-	var bits []Bit
+	var bits []m17.Bit
 	var err error
 	if sd.FrameNumber == 0 && sd.LSF != nil { // first frame
-		time.Sleep(time.Until(m.lastTXData.Add(FrameTime)))
+		time.Sleep(time.Until(m.lastTXData.Add(m17.FrameTime)))
 		err = m.transmitLSF(*sd.LSF)
 		if err != nil {
 			return fmt.Errorf("failed to send stream LSF: %w", err)
@@ -994,18 +996,18 @@ func (m *MMDVMModem) TransmitVoiceStream(sd StreamDatagram) error {
 	if err != nil {
 		return fmt.Errorf("failed to generate stream bits: %w", err)
 	}
-	time.Sleep(time.Until(m.lastTXData.Add(FrameTime)))
+	time.Sleep(time.Until(m.lastTXData.Add(m17.FrameTime)))
 
 	m.writeBits(mmdvmM17Stream, bits)
 	if sd.LastFrame {
 		// send EOT
-		time.Sleep(time.Until(m.lastTXData.Add(FrameTime)))
+		time.Sleep(time.Until(m.lastTXData.Add(m17.FrameTime)))
 		m.writeEOT()
 	}
 	return nil
 }
 
-func (m *MMDVMModem) writeBits(typ byte, bits []Bit) {
+func (m *MMDVM) writeBits(typ byte, bits []m17.Bit) {
 	buf := packBits(bits)
 	// log.Printf("[DEBUG] writeBits type: %02x, len: %d, buf: % 02x", typ, len(buf), buf)
 	cmd := []byte{mmdvmFrameStart, byte(4 + len(buf)), typ, 0}
@@ -1013,18 +1015,18 @@ func (m *MMDVMModem) writeBits(typ byte, bits []Bit) {
 	m.sendToModem(cmd)
 }
 
-func (m *MMDVMModem) writeEOT() {
+func (m *MMDVM) writeEOT() {
 	// log.Printf("[DEBUG] writeEOT")
 	var buf []byte
-	for i := 0; i < BytesPerFrame/len(EOTMarkerBytes); i++ {
-		buf = append(buf, EOTMarkerBytes...)
+	for i := 0; i < m17.BytesPerFrame/len(m17.EOTMarkerBytes); i++ {
+		buf = append(buf, m17.EOTMarkerBytes...)
 	}
 	cmd := []byte{mmdvmFrameStart, byte(4 + len(buf)), mmdvmM17EOT, 0}
 	cmd = append(cmd, buf...)
 	m.sendToModem(cmd)
 }
 
-func (m *MMDVMModem) sendToModem(cmd []byte) {
+func (m *MMDVM) sendToModem(cmd []byte) {
 	select {
 	case m.sendCmds <- cmd:
 		// okay
@@ -1038,26 +1040,26 @@ func (m *MMDVMModem) sendToModem(cmd []byte) {
 	m.lastTXData = time.Now()
 }
 
-func (m *MMDVMModem) getSpace() int {
+func (m *MMDVM) getSpace() int {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	return m.space
 }
 
-func (m *MMDVMModem) setSpace(space byte) {
+func (m *MMDVM) setSpace(space byte) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.space = int(space)
 }
 
-func (m *MMDVMModem) decrementSpace() int {
+func (m *MMDVM) decrementSpace() int {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.space--
 	return m.space
 }
 
-func (m *MMDVMModem) Start() error {
+func (m *MMDVM) Start() error {
 	log.Printf("[DEBUG] Start()")
 	return nil
 }

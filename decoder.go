@@ -299,7 +299,7 @@ func (d *Decoder) decodePacketFrame(softBit []SoftBit) ([]byte, int) {
 	return pkt[1:], e
 }
 
-func calcSoftbits(pld []Symbol) []SoftBit {
+func CalcSoftbits(pld []Symbol) []SoftBit {
 	if len(pld) > SymbolsPerPayload {
 		panic(fmt.Sprintf("pld contains %d symbols (>%d)", len(pld), SymbolsPerPayload))
 	}
@@ -308,24 +308,24 @@ func calcSoftbits(pld []Symbol) []SoftBit {
 	for i, sym := range pld {
 		//bit 0
 		if sym >= SymbolList[3] {
-			softBit[i*2+1] = softTrue
+			softBit[i*2+1] = SoftTrue
 		} else if sym >= SymbolList[2] {
-			softBit[i*2+1] = SoftBit(-softTrue/((SymbolList[3]-SymbolList[2])*SymbolList[2]) + sym*softTrue/(SymbolList[3]-SymbolList[2]))
+			softBit[i*2+1] = SoftBit(-SoftTrue/((SymbolList[3]-SymbolList[2])*SymbolList[2]) + sym*SoftTrue/(SymbolList[3]-SymbolList[2]))
 		} else if sym >= SymbolList[1] {
-			softBit[i*2+1] = softFalse
+			softBit[i*2+1] = SoftFalse
 		} else if sym >= SymbolList[0] {
-			softBit[i*2+1] = SoftBit(softTrue/((SymbolList[1]-SymbolList[0])*SymbolList[1]) - sym*softTrue/(SymbolList[1]-SymbolList[0]))
+			softBit[i*2+1] = SoftBit(SoftTrue/((SymbolList[1]-SymbolList[0])*SymbolList[1]) - sym*SoftTrue/(SymbolList[1]-SymbolList[0]))
 		} else {
-			softBit[i*2+1] = softTrue
+			softBit[i*2+1] = SoftTrue
 		}
 
 		//bit 1
 		if sym >= SymbolList[2] {
-			softBit[i*2] = softFalse
+			softBit[i*2] = SoftFalse
 		} else if sym >= SymbolList[1] {
-			softBit[i*2] = SoftBit(softMaybe - (sym * softTrue / (SymbolList[2] - SymbolList[1])))
+			softBit[i*2] = SoftBit(SoftMaybe - (sym * SoftTrue / (SymbolList[2] - SymbolList[1])))
 		} else {
-			softBit[i*2] = softTrue
+			softBit[i*2] = SoftTrue
 		}
 	}
 	return softBit

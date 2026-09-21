@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jancona/m17/inet"
+
 	"github.com/jancona/m17"
 )
 
@@ -61,7 +63,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	client, err := m17.NewInetClient(server, server, uint(port), *moduleArg, *callsignArg, nil, nil, handleStream)
+	client, err := inet.NewClient(server, server, uint(port), *moduleArg, *callsignArg, nil, nil, handleStream)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating client: %v\n", err)
 		os.Exit(1)

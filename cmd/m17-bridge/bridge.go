@@ -8,6 +8,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/jancona/m17/inet"
+
 	"github.com/hashicorp/logutils"
 	"github.com/jancona/m17/server"
 	"gopkg.in/ini.v1"
@@ -121,14 +123,14 @@ func setupLogging(c *config) {
 }
 
 type Bridge struct {
-	server *server.InetServer
+	server *inet.Server
 }
 
 func NewBridge(cfg *config) (*Bridge, error) {
 	var err error
 	ret := Bridge{}
-	modules := map[byte]server.Module{}
-	ret.server = server.NewInetServer(cfg.name, cfg.listenAddress+":"+cfg.listenPort, modules)
+	modules := map[byte]inet.Module{}
+	ret.server = inet.NewServer(cfg.name, cfg.listenAddress+":"+cfg.listenPort, modules)
 	for k, m := range cfg.modules {
 		switch m.Key("Type").String() {
 		case "Discord":

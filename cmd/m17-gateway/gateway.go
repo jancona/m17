@@ -14,8 +14,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jancona/m17/dashboard"
+	"github.com/jancona/m17/inet"
+
 	"github.com/hashicorp/logutils"
 	"github.com/jancona/m17"
+	"github.com/jancona/m17/modem"
 	"gopkg.in/ini.v1"
 	// _ "net/http/pprof"
 )
@@ -44,8 +48,8 @@ type config struct {
 	// boot0Pin         int
 	symbolsIn        *os.File
 	symbolsOut       *os.File
-	hostfile         *m17.Hostfile
-	overrideHostfile *m17.Hostfile
+	hostfile         *inet.Hostfile
+	overrideHostfile *inet.Hostfile
 	audioDir         string
 }
 
@@ -110,13 +114,13 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		}
 	}
 
-	var reflectorHostfile, reflectorOverrideHostfile *m17.Hostfile
+	var reflectorHostfile, reflectorOverrideHostfile *inet.Hostfile
 	var reflectorHostfileErr, reflectorOverrideHostfileErr error
 	if hostFile != "" {
-		reflectorHostfile, reflectorHostfileErr = m17.NewHostfile(hostFile)
+		reflectorHostfile, reflectorHostfileErr = inet.NewHostfile(hostFile)
 	}
 	if overrideHostFile != "" {
-		reflectorOverrideHostfile, reflectorOverrideHostfileErr = m17.NewHostfile(overrideHostFile)
+		reflectorOverrideHostfile, reflectorOverrideHostfileErr = inet.NewHostfile(overrideHostFile)
 	}
 	var reflectorModuleErr error
 	if len(reflectorModule) > 1 {
@@ -237,30 +241,30 @@ func main() {
 	// }()
 
 	var g *Gateway
-	var modem m17.Modem
+	var mdm modem.Modem
 	switch cfg.modemType {
 	case "cc1200":
 		fallthrough
 	case "cc1200v2":
-		modem, err = m17.NewCC1200Modem(cfg.rxFrequency, cfg.txFrequency, int8(cfg.power), cfg.frequencyCorr, cfg.afc, cfg.modemCfg)
+		mdm, err = modem.NewCC1200(cfg.rxFrequency, cfg.txFrequency, int8(cfg.power), cfg.frequencyCorr, cfg.afc, cfg.modemCfg)
 		if err != nil {
 			log.Fatalf("Error creating CC1200 modem: %v", err)
 		}
 		log.Printf("[INFO] Connected to CC1200 modem on %s", cfg.modemCfg.Key("Port").String())
 	case "mmdvm":
-		modem, err = m17.NewMMDVMModem(cfg.rxFrequency, cfg.txFrequency, cfg.power, cfg.frequencyCorr, cfg.afc, cfg.modemCfg, cfg.duplex)
+		mdm, err = modem.NewMMDVM(cfg.rxFrequency, cfg.txFrequency, cfg.power, cfg.frequencyCorr, cfg.afc, cfg.modemCfg, cfg.duplex)
 		if err != nil {
 			log.Fatalf("Error creating MMDVM modem: %v", err)
 		}
 		log.Printf("[INFO] Connected to MMDVM modem on %s", cfg.modemCfg.Key("Port").String())
 	case "sx1255":
-		modem, err = m17.NewSX1255Modem(cfg.rxFrequency, cfg.txFrequency, cfg.frequencyCorr, cfg.modemCfg)
+		mdm, err = modem.NewSX1255(cfg.rxFrequency, cfg.txFrequency, cfg.frequencyCorr, cfg.modemCfg)
 		if err != nil {
 			log.Fatalf("Error creating SX1255 modem: %v", err)
 		}
 		log.Printf("[INFO] Connected to SX1255 modem on %s", cfg.modemCfg.Key("SPIDevice").MustString("/dev/spidev0.0"))
 	case "dummy":
-		modem = &m17.DummyModem{
+		mdm = &modem.Dummy{
 			In:  cfg.symbolsIn,
 			Out: cfg.symbolsOut,
 		}
@@ -268,15 +272,15 @@ func main() {
 
 	if *reset {
 		log.Print("[INFO] Resetting modem")
-		err = modem.Reset()
+		err = mdm.Reset()
 		if err != nil {
 			log.Printf("[ERROR] Error resetting modem: %v", err)
 			os.Exit(1)
 		}
 		os.Exit(0)
 	}
-	log.Printf("[DEBUG] Creating gateway cfg: %#v, modem %#v", cfg, modem)
-	g, err = NewGateway(cfg, modem)
+	log.Printf("[DEBUG] Creating gateway cfg: %#v, modem %#v", cfg, mdm)
+	g, err = NewGateway(cfg, mdm)
 	if err != nil {
 		log.Fatalf("Error creating Gateway: %v", err)
 	}
@@ -327,15 +331,15 @@ type Gateway struct {
 	Port   uint
 	Module string
 
-	modem            m17.Modem
+	modem            modem.Modem
 	in               *os.File
 	out              *os.File
-	inetClient       *m17.InetClient
+	inetClient       *inet.Client
 	duplex           bool
 	done             bool
-	dashLog          *m17.DashboardLogger
-	hostfile         *m17.Hostfile
-	overrideHostfile *m17.Hostfile
+	dashLog          *dashboard.Logger
+	hostfile         *inet.Hostfile
+	overrideHostfile *inet.Hostfile
 	encodedCallsign  m17.EncodedCallsign
 	callsign         string
 	stateMutex       sync.Mutex
@@ -348,7 +352,7 @@ type Gateway struct {
 	audioClips     map[string][]byte
 }
 
-func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
+func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 	var err error
 	cs, err := m17.EncodeCallsign(cfg.callsign)
 	if err != nil {
@@ -360,7 +364,7 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 		Module:           cfg.defaultModule,
 		modem:            modem,
 		duplex:           cfg.duplex,
-		dashLog:          m17.NewDashboardLogger(cfg.dashboardLogger),
+		dashLog:          dashboard.New(cfg.dashboardLogger),
 		hostfile:         cfg.hostfile,
 		overrideHostfile: cfg.overrideHostfile,
 		encodedCallsign:  *cs,
@@ -382,7 +386,9 @@ func NewGateway(cfg config, modem m17.Modem) (*Gateway, error) {
 	g.Server = h.Server
 	g.Port = h.Port
 	log.Printf("[DEBUG] Connecting to %s, %s:%d, module %s", g.Name, g.Server, g.Port, g.Module)
-	g.inetClient, err = m17.NewInetClient(g.Name, g.Server, g.Port, g.Module, cfg.callsign, m17.NewDashboardLogger(cfg.dashboardLogger), g.TransmitPacket, g.TransmitVoiceStream)
+	g.inetClient, err = inet.NewClient(g.Name, g.Server, g.Port, g.Module, cfg.callsign, func(event, name string, module byte) {
+		g.dashLog.Log("Reflector", event, "name", name, "module", string(module))
+	}, g.TransmitPacket, g.TransmitVoiceStream)
 	if err != nil {
 		return nil, fmt.Errorf("error creating client: %v", err)
 	}

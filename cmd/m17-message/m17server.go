@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jancona/m17/inet"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/data/validation"
 	"fyne.io/fyne/v2/widget"
@@ -43,7 +45,7 @@ type m17Server struct {
 	host       string
 	port       uint
 	module     string
-	inetClient *m17.InetClient
+	inetClient *inet.Client
 }
 
 func initM17Server(a fyne.App) service {
@@ -242,7 +244,7 @@ func (s *m17Server) login(prefix string, u *ui) {
 func (s *m17Server) doConnect(name string, server string, port uint, module string, u *ui) {
 	var err error
 	log.Printf("Connecting to %s, %s:%d %s, callsign %s", name, server, port, module, s.callsign)
-	s.inetClient, err = m17.NewInetClient(name, server, port, module, s.callsign, nil, s.handleM17, nil)
+	s.inetClient, err = inet.NewClient(name, server, port, module, s.callsign, nil, s.handleM17, nil)
 	if err != nil {
 		log.Printf("fail to connect create client: %v", err)
 	}

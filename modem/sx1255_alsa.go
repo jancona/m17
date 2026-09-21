@@ -1,4 +1,4 @@
-package m17
+package modem
 
 import (
 	"encoding/binary"
@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/jancona/m17"
 
 	"github.com/yobert/alsa"
 )
@@ -29,7 +31,7 @@ const (
 	captureReadFramesSX1255 = sampleRateSX1255 * 20 / 1000
 
 	// rxScalingCoeffSX1255 scales the RRC matched-filter output so that symbols
-	// land on the ±1/±3 grid. It matters more than it looks: syncDistance
+	// land on the ±1/±3 grid. It matters more than it looks: m17.SyncDistance
 	// compares symbols to ±3 in absolute terms against a fixed threshold, so a
 	// constellation that is a factor k off the grid carries a sync-distance
 	// floor of 12·|k−1| before any noise, against thresholds of 4.5 and 5.0.
@@ -57,7 +59,7 @@ const (
 	// so the exact window matters little. The choice is a trade-off between
 	// averaging over enough frames not to track the data (M17 is only roughly
 	// DC-balanced over a frame) and converging early enough in an over to catch
-	// the LSF. 160 ms converges in about four frames.
+	// the m17.LSF. 160 ms converges in about four frames.
 	basebandDCAvgCntSX1255 = 2000
 
 	// captureBackoffMinSX1255 and captureBackoffMaxSX1255 bound the retry delay
@@ -210,7 +212,7 @@ func sx1255OpenCapture(deviceHint string) (*alsa.Device, error) {
 
 // captureLoop reads IQ samples from ALSA and sends them as complex128 to the channel.
 // Stereo S32_LE: left=I, right=Q. The SX1255 data is MSB-aligned within 32-bit frames.
-func (m *SX1255Modem) captureLoop(dev *alsa.Device, iqSamples chan<- complex128) {
+func (m *SX1255) captureLoop(dev *alsa.Device, iqSamples chan<- complex128) {
 	// Pin this goroutine to an OS thread for real-time audio performance
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -328,7 +330,7 @@ func (m *SX1255Modem) captureLoop(dev *alsa.Device, iqSamples chan<- complex128)
 
 // openALSACapture opens the ALSA capture device, starts the capture goroutine,
 // and builds the RX DSP pipeline it feeds.
-func (m *SX1255Modem) openALSACapture() error {
+func (m *SX1255) openALSACapture() error {
 	dev, err := sx1255OpenCapture(m.alsaCapture)
 	if err != nil {
 		return err
@@ -345,14 +347,14 @@ func (m *SX1255Modem) openALSACapture() error {
 // setCaptureDevice records the live capture device. captureLoop may swap the
 // device out on reopen while Close() reads it from another goroutine, so the
 // handle is guarded.
-func (m *SX1255Modem) setCaptureDevice(dev *alsa.Device) {
+func (m *SX1255) setCaptureDevice(dev *alsa.Device) {
 	m.captMutex.Lock()
 	defer m.captMutex.Unlock()
 	m.captDev = dev
 }
 
 // captureDevice returns the live capture device, or nil if it is not open.
-func (m *SX1255Modem) captureDevice() *alsa.Device {
+func (m *SX1255) captureDevice() *alsa.Device {
 	m.captMutex.Lock()
 	defer m.captMutex.Unlock()
 	return m.captDev
@@ -451,7 +453,7 @@ func sx1255OpenPlayback(deviceHint string) (*alsa.Device, error) {
 }
 
 // openALSAPlayback opens the ALSA playback device for TX.
-func (m *SX1255Modem) openALSAPlayback() error {
+func (m *SX1255) openALSAPlayback() error {
 	dev, err := sx1255OpenPlayback(m.alsaPlayback)
 	if err != nil {
 		return err
@@ -467,7 +469,7 @@ func (m *SX1255Modem) openALSAPlayback() error {
 //
 // The DSP state (pulse shaper, resampler, FM modulator) persists on the modem
 // struct so that consecutive calls produce a continuous waveform.
-func (m *SX1255Modem) sx1255WriteSymbols(symbols []Symbol) error {
+func (m *SX1255) sx1255WriteSymbols(symbols []m17.Symbol) error {
 	// 1. RRC pulse shaping: symbols → baseband at 24 kSa/s (5 sps)
 	baseband24k := m.txRRC.Process(symbols)
 
@@ -493,7 +495,7 @@ func (m *SX1255Modem) sx1255WriteSymbols(symbols []Symbol) error {
 
 // sx1255WriteIQ packs complex128 IQ samples as stereo S32_LE and writes
 // them to the ALSA playback device.
-func (m *SX1255Modem) sx1255WriteIQ(iq []complex128) error {
+func (m *SX1255) sx1255WriteIQ(iq []complex128) error {
 	const bytesPerFrame = 8 // 2 channels × 4 bytes (S32_LE)
 	buf := make([]byte, len(iq)*bytesPerFrame)
 
@@ -578,7 +580,7 @@ func sx1255RXPipelineTuned(iqSamples chan complex128, basebandDCAvgCnt int, scal
 	// (on CC1200 and MMDVM this is a firmware feature), which left this path
 	// with no offset correction at all.
 	//
-	// It matters because syncDistance compares symbols to ±3 in absolute terms:
+	// It matters because m17.SyncDistance compares symbols to ±3 in absolute terms:
 	// a bias of b symbol units adds 4·|b| to every sync distance, against
 	// thresholds of 4.5 and 5.0. A capture from issue #6 showed −0.87 units
 	// (≈ −700 Hz, only ~1.6 ppm at 431 MHz — ordinary crystal tolerance), which

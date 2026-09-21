@@ -1,8 +1,10 @@
-package m17
+package modem
 
 import (
 	"math"
 	"math/cmplx"
+
+	"github.com/jancona/m17"
 )
 
 // --- Complex DC Removal ---
@@ -273,7 +275,7 @@ func designLowpassFIR(numTaps int, cutoffNorm float64, interpFactor int) []float
 	return taps
 }
 
-// --- Max-Abs Symbol Decimator ---
+// --- Max-Abs m17.Symbol Decimator ---
 
 // MaxAbsDecimator reduces the sample rate by picking the sample with the
 // largest absolute value from each group of N input samples. This performs
@@ -371,7 +373,7 @@ func (p *TXPulseShaper) Reset() {
 
 // Process converts a batch of symbols to pulse-shaped baseband samples.
 // Output length = len(symbols) * samplesPerSymbol.
-func (p *TXPulseShaper) Process(symbols []Symbol) []float64 {
+func (p *TXPulseShaper) Process(symbols []m17.Symbol) []float64 {
 	out := make([]float64, 0, len(symbols)*p.samplesPerSymbol)
 	for _, sym := range symbols {
 		for j := range p.samplesPerSymbol {

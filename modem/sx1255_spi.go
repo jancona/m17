@@ -1,6 +1,6 @@
 //go:build linux
 
-package m17
+package modem
 
 import (
 	"fmt"
@@ -136,7 +136,7 @@ func (s *spiDevice) close() error {
 
 // --- SX1255 high-level control functions ---
 
-func (m *SX1255Modem) sx1255Init() error {
+func (m *SX1255) sx1255Init() error {
 	// Hardware reset
 	err := m.sx1255Reset()
 	if err != nil {
@@ -165,7 +165,7 @@ func (m *SX1255Modem) sx1255Init() error {
 	return nil
 }
 
-func (m *SX1255Modem) sx1255Reset() error {
+func (m *SX1255) sx1255Reset() error {
 	if m.resetPin == nil {
 		return nil // no GPIO configured (e.g., emulation)
 	}
@@ -189,7 +189,7 @@ func sx1255FreqToReg(hz uint32) uint32 {
 	return uint32(math.Round(float64(hz) * 1048576.0 / clkFreqSX1255))
 }
 
-func (m *SX1255Modem) sx1255SetRXFreq(hz uint32) error {
+func (m *SX1255) sx1255SetRXFreq(hz uint32) error {
 	val := sx1255FreqToReg(hz)
 	log.Printf("[DEBUG] SX1255 set RX freq: %d Hz (reg val: 0x%06X)", hz, val)
 	if err := m.spi.writeReg(regRXFreqMSBSX1255, byte(val>>16)); err != nil {
@@ -201,7 +201,7 @@ func (m *SX1255Modem) sx1255SetRXFreq(hz uint32) error {
 	return m.spi.writeReg(regRXFreqLSBSX1255, byte(val))
 }
 
-func (m *SX1255Modem) sx1255SetTXFreq(hz uint32) error {
+func (m *SX1255) sx1255SetTXFreq(hz uint32) error {
 	val := sx1255FreqToReg(hz)
 	log.Printf("[DEBUG] SX1255 set TX freq: %d Hz (reg val: 0x%06X)", hz, val)
 	if err := m.spi.writeReg(regTXFreqMSBSX1255, byte(val>>16)); err != nil {
@@ -213,7 +213,7 @@ func (m *SX1255Modem) sx1255SetTXFreq(hz uint32) error {
 	return m.spi.writeReg(regTXFreqLSBSX1255, byte(val))
 }
 
-func (m *SX1255Modem) sx1255SetRate() error {
+func (m *SX1255) sx1255SetRate() error {
 	// Configure I2S for 125 kSa/s in Mode B2 (standard I2S with muxed I/Q).
 	// Must write reg 0x13 before 0x12 (per libsx1255 init order).
 	//
@@ -266,7 +266,7 @@ func (m *SX1255Modem) sx1255SetRate() error {
 // ambiguity cost real time to unpick, so these writes now verify themselves.
 // Only the masked bits are compared: the rest of the register belongs to other
 // fields, and some bits are reserved.
-func (m *SX1255Modem) sx1255UpdateReg(addr, mask, value byte) error {
+func (m *SX1255) sx1255UpdateReg(addr, mask, value byte) error {
 	reg, err := m.spi.readReg(addr)
 	if err != nil {
 		return err
@@ -286,7 +286,7 @@ func (m *SX1255Modem) sx1255UpdateReg(addr, mask, value byte) error {
 	return nil
 }
 
-func (m *SX1255Modem) sx1255SetLNAGain(db uint8) error {
+func (m *SX1255) sx1255SetLNAGain(db uint8) error {
 	code, actual := sx1255LNACode(db)
 	if actual == db {
 		log.Printf("[DEBUG] SX1255 set LNA gain: %d dB (code %d)", actual, code)
@@ -297,7 +297,7 @@ func (m *SX1255Modem) sx1255SetLNAGain(db uint8) error {
 	return m.sx1255UpdateReg(regRXLNAPGASX1255, 0xE0, code<<5)
 }
 
-func (m *SX1255Modem) sx1255SetPGAGain(db uint8) error {
+func (m *SX1255) sx1255SetPGAGain(db uint8) error {
 	// PGA gain is in reg 0x0C bits [4:1], 2 dB per step, 0-30 dB
 	step := db / 2
 	if step > 15 {
@@ -307,7 +307,7 @@ func (m *SX1255Modem) sx1255SetPGAGain(db uint8) error {
 	return m.sx1255UpdateReg(regRXLNAPGASX1255, 0x1E, step<<1)
 }
 
-func (m *SX1255Modem) sx1255SetDACGain(db int8) error {
+func (m *SX1255) sx1255SetDACGain(db int8) error {
 	code, actual := sx1255DACCode(db)
 	if actual == db {
 		log.Printf("[DEBUG] SX1255 set DAC gain: %d dB (code %d)", actual, code)
@@ -320,7 +320,7 @@ func (m *SX1255Modem) sx1255SetDACGain(db int8) error {
 	return m.sx1255UpdateReg(regTXDACGainSX1255, 0x70, code<<4)
 }
 
-func (m *SX1255Modem) sx1255SetMixerGain(db float32) error {
+func (m *SX1255) sx1255SetMixerGain(db float32) error {
 	// Mixer gain is in reg 0x08 bits [3:0]
 	// Code 0 = -37.5 dB, code 15 = -7.5 dB, 2 dB per step
 	step := int(math.Round(float64(db+37.5) / 2.0))
@@ -335,7 +335,7 @@ func (m *SX1255Modem) sx1255SetMixerGain(db float32) error {
 }
 
 // sx1255SetRXPLLBW sets the RX PLL bandwidth (75, 150, 225, or 300 kHz).
-func (m *SX1255Modem) sx1255SetRXPLLBW(bwKHz uint16) error {
+func (m *SX1255) sx1255SetRXPLLBW(bwKHz uint16) error {
 	var code uint8
 	switch {
 	case bwKHz <= 75:
@@ -357,7 +357,7 @@ func (m *SX1255Modem) sx1255SetRXPLLBW(bwKHz uint16) error {
 }
 
 // sx1255SetTXPLLBW sets the TX PLL bandwidth (75, 150, 225, or 300 kHz).
-func (m *SX1255Modem) sx1255SetTXPLLBW(bwKHz uint16) error {
+func (m *SX1255) sx1255SetTXPLLBW(bwKHz uint16) error {
 	var code uint8
 	switch {
 	case bwKHz <= 75:
@@ -388,7 +388,7 @@ func (m *SX1255Modem) sx1255SetTXPLLBW(bwKHz uint16) error {
 // report after reset makes bring-up nondeterministic.
 //
 // The register is read back to confirm the write actually took effect.
-func (m *SX1255Modem) sx1255SetMode(set, clear byte) error {
+func (m *SX1255) sx1255SetMode(set, clear byte) error {
 	reg, err := m.spi.readReg(regControlSX1255)
 	if err != nil {
 		return err
@@ -410,7 +410,7 @@ func (m *SX1255Modem) sx1255SetMode(set, clear byte) error {
 	return nil
 }
 
-func (m *SX1255Modem) sx1255EnableRX(enable bool) error {
+func (m *SX1255) sx1255EnableRX(enable bool) error {
 	log.Printf("[DEBUG] SX1255 enable RX: %v", enable)
 	if enable {
 		return m.sx1255SetMode(modeRXEnableSX1255, 0)
@@ -418,7 +418,7 @@ func (m *SX1255Modem) sx1255EnableRX(enable bool) error {
 	return m.sx1255SetMode(0, modeRXEnableSX1255)
 }
 
-func (m *SX1255Modem) sx1255EnableTX(enable bool) error {
+func (m *SX1255) sx1255EnableTX(enable bool) error {
 	log.Printf("[DEBUG] SX1255 enable TX: %v", enable)
 	txBits := byte(modeTXEnableSX1255 | modeDriverEnableSX1255)
 	if enable {
@@ -427,7 +427,7 @@ func (m *SX1255Modem) sx1255EnableTX(enable bool) error {
 	return m.sx1255SetMode(0, txBits)
 }
 
-func (m *SX1255Modem) sx1255EnableRFLoopback(enable bool) error {
+func (m *SX1255) sx1255EnableRFLoopback(enable bool) error {
 	reg, err := m.spi.readReg(regLoopbackSX1255)
 	if err != nil {
 		return err
@@ -441,7 +441,7 @@ func (m *SX1255Modem) sx1255EnableRFLoopback(enable bool) error {
 	return m.spi.writeReg(regLoopbackSX1255, reg)
 }
 
-func (m *SX1255Modem) sx1255GetPLLStatus() (txLocked, rxLocked bool) {
+func (m *SX1255) sx1255GetPLLStatus() (txLocked, rxLocked bool) {
 	reg, err := m.spi.readReg(regPLLStatusSX1255)
 	if err != nil {
 		log.Printf("[ERROR] SX1255 read PLL status: %v", err)
@@ -452,7 +452,7 @@ func (m *SX1255Modem) sx1255GetPLLStatus() (txLocked, rxLocked bool) {
 	return
 }
 
-func (m *SX1255Modem) sx1255GetChipVersion() byte {
+func (m *SX1255) sx1255GetChipVersion() byte {
 	ver, err := m.spi.readReg(regVersionSX1255)
 	if err != nil {
 		log.Printf("[ERROR] SX1255 read chip version: %v", err)
@@ -462,7 +462,7 @@ func (m *SX1255Modem) sx1255GetChipVersion() byte {
 }
 
 // gpioSetup configures the GPIO reset pin for the SX1255 HAT.
-func (m *SX1255Modem) gpioSetup(gpioChip string, resetPin int) error {
+func (m *SX1255) gpioSetup(gpioChip string, resetPin int) error {
 	var err error
 	log.Printf("[DEBUG] SX1255 GPIO setup: chip=%s, resetPin=%d", gpioChip, resetPin)
 	m.resetPin, err = gpiocdev.RequestLine(gpioChip, resetPin, gpiocdev.AsOutput(0))

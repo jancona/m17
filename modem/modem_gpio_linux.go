@@ -1,6 +1,6 @@
 //go:build linux
 
-package m17
+package modem
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 	"github.com/warthog618/go-gpiocdev"
 )
 
-func (m *CC1200Modem) gpioSetup(nRSTPin, boot0Pin int) error {
+func (m *CC1200) gpioSetup(nRSTPin, boot0Pin int) error {
 	var err error
 	log.Print("[DEBUG] Setting up GPIO")
 	m.nRST, err = gpiocdev.RequestLine("gpiochip0", nRSTPin, gpiocdev.AsOutput(1))

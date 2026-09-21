@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jancona/m17/inet"
+
 	fap "github.com/hessu/go-aprs-fap"
 
 	"github.com/jancona/m17"
@@ -22,7 +24,7 @@ const (
 
 type APRSModule struct {
 	name         byte
-	server       *InetServer
+	server       *inet.Server
 	serverName   string
 	callsign     string
 	passcode     string
@@ -40,7 +42,7 @@ type aprsUser struct {
 	lastHeard          time.Time
 }
 
-func NewAPRSModule(name byte, server *InetServer, serverName string, callsign string, aprsSymbol string, staleTimeout time.Duration) (*APRSModule, error) {
+func NewAPRSModule(name byte, server *inet.Server, serverName string, callsign string, aprsSymbol string, staleTimeout time.Duration) (*APRSModule, error) {
 	log.Printf("[DEBUG] NewAPRSModule(%s, %s, %s)", string(name), serverName, callsign)
 	if len(aprsSymbol) != 2 {
 		return nil, fmt.Errorf("Bad APRS symbol '%s'", aprsSymbol)
@@ -212,10 +214,7 @@ func (m *APRSModule) handleAPRSMessage(pkt *fap.Packet) {
 		log.Printf("[INFO] Error building packet: %v", err)
 		return
 	}
-	clients := m.server.lookupClientsByModule(m.Name())
-	for _, c := range clients {
-		m.server.SendPacket(p, c.addr)
-	}
+	m.server.SendPacketToModule(m.Name(), p)
 }
 
 // getOrAddUser returns the aprsUser for the given M17 callsign,

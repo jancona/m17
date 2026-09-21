@@ -4,8 +4,6 @@ go 1.26
 
 require github.com/hashicorp/logutils v1.0.0
 
-require github.com/sigurn/crc16 v0.0.0-20240131213347-83fcde1e29d1
-
 require (
 	fyne.io/fyne/v2 v2.5.5
 	github.com/StalkR/discordgo-bridge v1.0.10
@@ -17,7 +15,6 @@ require (
 	github.com/warthog618/go-gpiocdev v0.9.1
 	github.com/yobert/alsa v0.0.0-20230126204319-85bb7ee02e5b
 	go.bug.st/serial v1.6.2
-	golang.org/x/exp v0.0.0-20250228200357-dead58393ab7
 	golang.org/x/sys v0.40.0
 	gopkg.in/ini.v1 v1.67.0
 )

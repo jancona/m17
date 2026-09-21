@@ -1,11 +1,11 @@
-package m17
+package modem
 
 import (
 	"container/ring"
 	"fmt"
 	"math"
 
-	"golang.org/x/exp/constraints"
+	"github.com/jancona/m17"
 )
 
 const (
@@ -159,7 +159,7 @@ var rrcTaps5 = []float64{
 }
 
 type Number interface {
-	constraints.Integer | constraints.Float
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr | ~float32 | ~float64
 }
 
 // Generic transformation
@@ -317,7 +317,7 @@ func NewSymbolToSample(rrcTaps []float64, scalingCoeff float32, phaseInvert bool
 	return ret
 }
 
-func (t *SymbolToSample) Transform(symbols []Symbol) []byte {
+func (t *SymbolToSample) Transform(symbols []m17.Symbol) []byte {
 	ret := make([]byte, len(symbols)*t.samplesPerSymbol)
 	for i, symbol := range symbols {
 		for j := 0; j < t.samplesPerSymbol; j++ {

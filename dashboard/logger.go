@@ -1,4 +1,4 @@
-package m17
+package dashboard
 
 import (
 	"encoding/json"
@@ -6,17 +6,19 @@ import (
 	"log"
 	"log/slog"
 	"time"
+
+	"github.com/jancona/m17"
 )
 
-type DashboardLogger struct {
+type Logger struct {
 	*slog.Logger
 	lastLogTime time.Time
 }
 
-func NewDashboardLogger(l *slog.Logger) *DashboardLogger {
-	return &DashboardLogger{l, time.Now()}
+func New(l *slog.Logger) *Logger {
+	return &Logger{l, time.Now()}
 }
-func (l *DashboardLogger) Log(logType string, logSubtype string, addlArgs ...any) {
+func (l *Logger) Log(logType string, logSubtype string, addlArgs ...any) {
 	if l == nil {
 		return
 	}
@@ -24,12 +26,12 @@ func (l *DashboardLogger) Log(logType string, logSubtype string, addlArgs ...any
 	args = append(args, addlArgs...)
 	l.Info("", args...)
 }
-func (l *DashboardLogger) LogFrame(lsf *LSF, logType string, logSubtype string, addlArgs ...any) {
+func (l *Logger) LogFrame(lsf *m17.LSF, logType string, logSubtype string, addlArgs ...any) {
 	args := []any{"src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN()}
 	args = append(args, addlArgs...)
 	l.Log(logType, logSubtype, args...)
 }
-func (l *DashboardLogger) LogGNSS(lsf *LSF, logType string) {
+func (l *Logger) LogGNSS(lsf *m17.LSF, logType string) {
 	if lsf.GNSS() != nil && lsf.GNSS().ValidLatLon && time.Since(l.lastLogTime) > 15*time.Second {
 		log.Printf("[DEBUG] Writing GNSS data to dashboard.log: %s", lsf.GNSS().String())
 		l.lastLogTime = time.Now()

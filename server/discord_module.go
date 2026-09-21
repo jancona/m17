@@ -5,26 +5,22 @@ import (
 	"log"
 	"strings"
 
+	"github.com/jancona/m17/inet"
+
 	bridge "github.com/StalkR/discordgo-bridge"
 	"github.com/bwmarrin/discordgo"
 	"github.com/jancona/m17"
 )
 
-type Module interface {
-	Name() byte
-	HandlePacket(m17.Packet) error
-	HandleStreamDatagram(m17.StreamDatagram) error
-}
-
 type DiscordModule struct {
 	name    byte
-	server  *InetServer
+	server  *inet.Server
 	channel *bridge.Channel
 	bot     *bridge.Bot
 	session *discordgo.Session
 }
 
-func NewDiscordModule(name byte, server *InetServer, channelName string, webhookURL string, botToken string) (*DiscordModule, error) {
+func NewDiscordModule(name byte, server *inet.Server, channelName string, webhookURL string, botToken string) (*DiscordModule, error) {
 	log.Printf("[DEBUG] NewDiscordModule(%s, %s, %s, %s)", string(name), channelName, webhookURL, botToken)
 	m := DiscordModule{
 		name:   name,
@@ -90,8 +86,5 @@ func (m *DiscordModule) recvMessage(nick string, text string) {
 		log.Printf("[INFO] Error building packet: %v", err)
 		return
 	}
-	clients := m.server.lookupClientsByModule(m.Name())
-	for _, c := range clients {
-		m.server.SendPacket(p, c.addr)
-	}
+	m.server.SendPacketToModule(m.Name(), p)
 }

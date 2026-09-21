@@ -1,4 +1,4 @@
-package m17
+package modem
 
 import (
 	"errors"
@@ -6,6 +6,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/jancona/m17"
 
 	"github.com/yobert/alsa"
 	"gopkg.in/ini.v1"
@@ -20,7 +22,7 @@ const (
 
 // txTimeoutSX1255 is the safety timeout — auto-disable TX PA if no data
 // sent within this duration. Must be longer than the Drain + TX tail time.
-const txTimeoutSX1255 = endTXWait + 2*FrameTime
+const txTimeoutSX1255 = endTXWait + 2*m17.FrameTime
 
 // SX1255 register addresses
 const (
@@ -75,12 +77,12 @@ const sampleRateSX1255 = 125000
 // Expected chip version
 const expectedVersionSX1255 = 0x11
 
-// SX1255Modem implements the Modem interface for the SX1255 RF transceiver HAT.
+// SX1255 implements the Modem interface for the SX1255 RF transceiver HAT.
 // Unlike MMDVM and CC1200 modems which have on-board microcontrollers, the SX1255
 // is a raw IQ analog front-end — all baseband DSP is performed in software.
 //
 // The SX1255 supports full-duplex operation: RX runs continuously even during TX.
-type SX1255Modem struct {
+type SX1255 struct {
 	spi      *spiDevice
 	resetPin gpioLine
 
@@ -91,7 +93,7 @@ type SX1255Modem struct {
 
 	playDev   *alsa.Device
 	rxSymbols chan float32
-	frameSink func(typ uint16, softBits []SoftBit)
+	frameSink func(typ uint16, softBits []m17.SoftBit)
 
 	// TX state (full-duplex: RX never stops)
 	txMutex sync.Mutex
@@ -118,13 +120,13 @@ type SX1255Modem struct {
 	mixerGain    float32
 }
 
-// NewSX1255Modem creates and initializes an SX1255 modem from INI configuration.
-func NewSX1255Modem(
+// NewSX1255 creates and initializes an SX1255 modem from INI configuration.
+func NewSX1255(
 	rxFrequency uint32,
 	txFrequency uint32,
 	frequencyCorr int16,
 	modemCfg *ini.Section,
-) (*SX1255Modem, error) {
+) (*SX1255, error) {
 	spiPath := modemCfg.Key("SPIDevice").MustString("/dev/spidev0.0")
 	gpioChip := modemCfg.Key("GPIOChip").MustString("gpiochip0")
 	resetPin := modemCfg.Key("ResetPin").MustInt(22)
@@ -139,7 +141,7 @@ func NewSX1255Modem(
 	rawIQPath := modemCfg.Key("RawIQCapture").MustString("")
 	rawIQSeconds := modemCfg.Key("RawIQSeconds").MustInt(20)
 
-	m := &SX1255Modem{
+	m := &SX1255{
 		txState:      txIdleSX1255,
 		rxSymbols:    make(chan float32, 1),
 		spiPath:      spiPath,
@@ -236,7 +238,7 @@ func NewSX1255Modem(
 // configure resets the SX1255 and applies the full register configuration:
 // frequencies, I2S sample rate, gains, and RX on / TX off. It is safe to call
 // repeatedly — bring-up retries it if the RX PLL does not lock the first time.
-func (m *SX1255Modem) configure(rxFreq, txFreq uint32) error {
+func (m *SX1255) configure(rxFreq, txFreq uint32) error {
 	if err := m.sx1255Init(); err != nil {
 		return fmt.Errorf("SX1255 init: %w", err)
 	}
@@ -285,7 +287,7 @@ func (m *SX1255Modem) configure(rxFreq, txFreq uint32) error {
 // sx1255WaitPLLLock polls the PLL status register until the requested PLL
 // reports lock or timeout expires. readReg already paces itself at ~10 ms per
 // access, so this polls at roughly that rate.
-func (m *SX1255Modem) sx1255WaitPLLLock(tx bool, timeout time.Duration) bool {
+func (m *SX1255) sx1255WaitPLLLock(tx bool, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for {
 		txLocked, rxLocked := m.sx1255GetPLLStatus()
@@ -300,13 +302,13 @@ func (m *SX1255Modem) sx1255WaitPLLLock(tx bool, timeout time.Duration) bool {
 }
 
 // StartDecoding registers the frame sink callback and starts the symbol processing goroutine.
-func (m *SX1255Modem) StartDecoding(sink func(typ uint16, softBits []SoftBit)) {
+func (m *SX1255) StartDecoding(sink func(typ uint16, softBits []m17.SoftBit)) {
 	m.frameSink = sink
 	go processSymbolStream(m.rxSymbols, m.frameSink, 5)
 }
 
 // Start enables the RX path.
-func (m *SX1255Modem) Start() error {
+func (m *SX1255) Start() error {
 	return m.sx1255EnableRX(true)
 }
 
@@ -316,7 +318,7 @@ func (m *SX1255Modem) Start() error {
 // gains, or RX/TX enable. It backs the "-reset" flag, which resets the hardware
 // and exits, so leaving the chip in its post-reset default state is the point.
 // Anything that wants a working radio afterwards should call configure().
-func (m *SX1255Modem) Reset() error {
+func (m *SX1255) Reset() error {
 	log.Print("[DEBUG] SX1255 modem Reset()")
 	// sx1255Init begins with a hardware reset, so calling sx1255Reset first
 	// would reset the chip twice.
@@ -324,7 +326,7 @@ func (m *SX1255Modem) Reset() error {
 }
 
 // Close shuts down the SX1255 modem, releasing all resources.
-func (m *SX1255Modem) Close() error {
+func (m *SX1255) Close() error {
 	log.Print("[DEBUG] SX1255 modem Close()")
 	m.stopTX()
 	m.sx1255EnableRX(false)
@@ -349,7 +351,7 @@ func (m *SX1255Modem) Close() error {
 
 // startTX enables the SX1255 TX PA, resets DSP state, and starts the safety timer.
 // Full-duplex: RX is NOT stopped.
-func (m *SX1255Modem) startTX(txState int) (bool, error) {
+func (m *SX1255) startTX(txState int) (bool, error) {
 	if txState == txIdleSX1255 {
 		return false, errors.New("cannot start txIdleSX1255")
 	}
@@ -407,7 +409,7 @@ func (m *SX1255Modem) startTX(txState int) (bool, error) {
 // and stops the safety timer. Drain() blocks until all buffered samples
 // have been played out, then transitions the stream to SETUP state —
 // ready for a clean Prepare() on the next transmission.
-func (m *SX1255Modem) stopTX() {
+func (m *SX1255) stopTX() {
 	m.txMutex.Lock()
 	defer m.txMutex.Unlock()
 	if m.txState == txIdleSX1255 {
@@ -436,7 +438,7 @@ func (m *SX1255Modem) stopTX() {
 
 // TransmitPacket sends a packet over RF.
 // Full-duplex: RX continues running during TX.
-func (m *SX1255Modem) TransmitPacket(p Packet) error {
+func (m *SX1255) TransmitPacket(p m17.Packet) error {
 	log.Printf("[DEBUG] SX1255 TransmitPacket: %v", p)
 	_, err := m.startTX(txPacketSX1255)
 	defer m.stopTX()
@@ -446,13 +448,13 @@ func (m *SX1255Modem) TransmitPacket(p Packet) error {
 	time.Sleep(10 * time.Millisecond) // TX PA settle time
 
 	// Preamble
-	syms := AppendPreamble(nil, lsfPreamble)
+	syms := m17.AppendPreamble(nil, m17.LSFPreamble)
 	err = m.sx1255WriteSymbols(syms)
 	if err != nil {
 		return fmt.Errorf("failed to send preamble: %w", err)
 	}
 
-	// LSF
+	// m17.LSF
 	syms, err = generateLSFSymbols(p.LSF)
 	if err != nil {
 		return fmt.Errorf("failed to generate LSF symbols: %w", err)
@@ -462,11 +464,11 @@ func (m *SX1255Modem) TransmitPacket(p Packet) error {
 		return fmt.Errorf("failed to send LSF: %w", err)
 	}
 
-	// Packet chunks
+	// m17.Packet chunks
 	chunkCnt := 0
 	packetData := p.PayloadBytes()
 	for bytesLeft := len(packetData); bytesLeft > 0; bytesLeft -= 25 {
-		syms = AppendSyncwordSymbols(nil, PacketSync)
+		syms = m17.AppendSyncwordSymbols(nil, m17.PacketSync)
 		chunk := make([]byte, 25+1)
 		if bytesLeft > 25 {
 			copy(chunk, packetData[chunkCnt*25:chunkCnt*25+25])
@@ -479,14 +481,14 @@ func (m *SX1255Modem) TransmitPacket(p Packet) error {
 				chunk[25] = uint8((1 << 7) | ((bytesLeft % 25) << 2))
 			}
 		}
-		b, err := ConvolutionalEncode(chunk, PacketPuncturePattern, PacketModeFinalBit)
+		b, err := m17.ConvolutionalEncode(chunk, m17.PacketPuncturePattern, m17.PacketModeFinalBit)
 		if err != nil {
 			return fmt.Errorf("unable to encode packet: %w", err)
 		}
-		encodedBits := NewPayloadBits(b)
-		rfBits := InterleaveBits(encodedBits)
-		rfBits = RandomizeBits(rfBits)
-		syms = AppendBits(syms, rfBits)
+		encodedBits := m17.NewPayloadBits(b)
+		rfBits := m17.InterleaveBits(encodedBits)
+		rfBits = m17.RandomizeBits(rfBits)
+		syms = m17.AppendBits(syms, rfBits)
 		err = m.sx1255WriteSymbols(syms)
 		if err != nil {
 			return fmt.Errorf("failed to send packet chunk: %w", err)
@@ -495,7 +497,7 @@ func (m *SX1255Modem) TransmitPacket(p Packet) error {
 	}
 
 	// EOT
-	syms = AppendEOT(nil)
+	syms = m17.AppendEOT(nil)
 	err = m.sx1255WriteSymbols(syms)
 	if err != nil {
 		return fmt.Errorf("failed to send EOT: %w", err)
@@ -507,27 +509,27 @@ func (m *SX1255Modem) TransmitPacket(p Packet) error {
 
 // TransmitVoiceStream sends a voice stream frame over RF.
 // Full-duplex: RX continues running during TX.
-func (m *SX1255Modem) TransmitVoiceStream(sd StreamDatagram) error {
+func (m *SX1255) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	firstFrame, err := m.startTX(txStreamSX1255)
 	if err != nil {
 		return err
 	}
-	var syms []Symbol
+	var syms []m17.Symbol
 
 	if firstFrame {
-		// First frame: enable TX, send preamble + LSF
+		// First frame: enable TX, send preamble + m17.LSF
 		log.Printf("[DEBUG] SX1255 Sending LSF for stream %x, lsf: %v", sd.StreamID, sd.LSF)
 		time.Sleep(10 * time.Millisecond) // TX PA settle time
 
 		// Preamble
-		syms = AppendPreamble(nil, lsfPreamble)
+		syms = m17.AppendPreamble(nil, m17.LSFPreamble)
 		err = m.sx1255WriteSymbols(syms)
 		if err != nil {
 			m.stopTX()
 			return fmt.Errorf("failed to send preamble: %w", err)
 		}
 
-		// LSF
+		// m17.LSF
 		syms, err = generateLSFSymbols(sd.LSF)
 		if err != nil {
 			m.stopTX()
@@ -556,7 +558,7 @@ func (m *SX1255Modem) TransmitVoiceStream(sd StreamDatagram) error {
 	if sd.LastFrame {
 		// Send EOT
 		log.Printf("[DEBUG] SX1255 Sending EOT for stream %04x, fn %04x", sd.StreamID, sd.FrameNumber)
-		syms = AppendEOT(nil)
+		syms = m17.AppendEOT(nil)
 		err = m.sx1255WriteSymbols(syms)
 		if err != nil {
 			m.stopTX()

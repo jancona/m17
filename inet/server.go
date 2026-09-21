@@ -1,4 +1,4 @@
-package server
+package inet
 
 import (
 	"fmt"
@@ -10,7 +10,14 @@ import (
 	"github.com/jancona/m17"
 )
 
-type InetServer struct {
+// Module handles the traffic of one reflector module.
+type Module interface {
+	Name() byte
+	HandlePacket(m17.Packet) error
+	HandleStreamDatagram(m17.StreamDatagram) error
+}
+
+type Server struct {
 	Name          string
 	InterfaceAddr string
 	conn          *net.UDPConn
@@ -20,8 +27,8 @@ type InetServer struct {
 	clients       map[string]*client
 }
 
-func NewInetServer(name string, addr string, modules map[byte]Module) *InetServer {
-	s := InetServer{
+func NewServer(name string, addr string, modules map[byte]Module) *Server {
+	s := Server{
 		Name:          name,
 		InterfaceAddr: addr,
 		modules:       modules,
@@ -29,7 +36,7 @@ func NewInetServer(name string, addr string, modules map[byte]Module) *InetServe
 	}
 	return &s
 }
-func (s *InetServer) Start() error {
+func (s *Server) Start() error {
 	udpAddr, err := net.ResolveUDPAddr("udp", s.InterfaceAddr)
 	if err != nil {
 		log.Printf("[ERROR] Failed to resolve address %s", s.InterfaceAddr)
@@ -47,8 +54,8 @@ func (s *InetServer) Start() error {
 
 	return nil
 }
-func (s *InetServer) handle() {
-	log.Print("[INFO] InetServer is ready")
+func (s *Server) handle() {
+	log.Print("[INFO] Server is ready")
 	for {
 		buf := make([]byte, 1024)
 		s.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
@@ -107,13 +114,13 @@ func (s *InetServer) handle() {
 				}
 			}
 		case m17.MagicM17Stream:
-			log.Printf("[DEBUG] InetServer received stream message: % 2x", buf)
+			log.Printf("[DEBUG] Server received stream message: % 2x", buf)
 			sd, err := m17.NewStreamDatagramFromBytes(buf)
 			if err != nil {
 				log.Printf("[INFO] Dropping bad stream datagram: %v", err)
 				s.sendNACK(addr)
 			} else {
-				log.Printf("[DEBUG] InetServer received StreamDatagram: %s", sd)
+				log.Printf("[DEBUG] Server received StreamDatagram: %s", sd)
 				c := s.lookupClient(addr)
 				if c != nil {
 					err := c.module.HandleStreamDatagram(sd)
@@ -131,7 +138,7 @@ func (s *InetServer) handle() {
 			}
 		case m17.MagicM17Packet:
 			p := m17.NewPacketFromBytes(buf[4:])
-			log.Printf("[DEBUG] InetServer received packet: %s", p.String())
+			log.Printf("[DEBUG] Server received packet: %s", p.String())
 			c := s.lookupClient(addr)
 			if c != nil {
 				c.module.HandlePacket(p)
@@ -147,11 +154,11 @@ func (s *InetServer) handle() {
 	}
 }
 
-func (s *InetServer) Close() {
+func (s *Server) Close() {
 	s.conn.Close()
 }
 
-func (s *InetServer) recvConnect(buf []byte, addr *net.UDPAddr, listenOnly bool) {
+func (s *Server) recvConnect(buf []byte, addr *net.UDPAddr, listenOnly bool) {
 	if len(buf) != 11 {
 		s.sendNACK(addr)
 		log.Printf("[INFO] Bad CONN packet length %d, should be 11", len(buf))
@@ -169,7 +176,7 @@ func (s *InetServer) recvConnect(buf []byte, addr *net.UDPAddr, listenOnly bool)
 	s.sendACKN(addr)
 }
 
-func (s *InetServer) sendACKN(addr *net.UDPAddr) error {
+func (s *Server) sendACKN(addr *net.UDPAddr) error {
 	// log.Print("[DEBUG] Sending ACKN")
 	cmd := make([]byte, 10)
 	copy(cmd, []byte(m17.MagicACKN))
@@ -180,7 +187,7 @@ func (s *InetServer) sendACKN(addr *net.UDPAddr) error {
 	return nil
 }
 
-func (s *InetServer) sendNACK(addr *net.UDPAddr) error {
+func (s *Server) sendNACK(addr *net.UDPAddr) error {
 	// log.Print("[DEBUG] Sending NACK")
 	cmd := make([]byte, 10)
 	copy(cmd, []byte(m17.MagicNACK))
@@ -191,7 +198,7 @@ func (s *InetServer) sendNACK(addr *net.UDPAddr) error {
 	return nil
 }
 
-func (s *InetServer) sendPING(encodedCallsign []byte, addr *net.UDPAddr) error {
+func (s *Server) sendPING(encodedCallsign []byte, addr *net.UDPAddr) error {
 	// log.Print("[DEBUG] Sending PING")
 	cmd := make([]byte, 10)
 	copy(cmd, []byte(m17.MagicPING))
@@ -203,7 +210,7 @@ func (s *InetServer) sendPING(encodedCallsign []byte, addr *net.UDPAddr) error {
 	return nil
 }
 
-// func (s *InetServer) sendDISC(encodedCallsign []byte, addr *net.UDPAddr) error {
+// func (s *Server) sendDISC(encodedCallsign []byte, addr *net.UDPAddr) error {
 // 	cmd := make([]byte, 10)
 // 	copy(cmd, []byte(m17.MagicDISC))
 // 	copy(cmd[4:10], encodedCallsign[:])
@@ -215,7 +222,7 @@ func (s *InetServer) sendPING(encodedCallsign []byte, addr *net.UDPAddr) error {
 // 	return nil
 // }
 
-func (s *InetServer) SendPacket(p *m17.Packet, addr *net.UDPAddr) error {
+func (s *Server) SendPacket(p *m17.Packet, addr *net.UDPAddr) error {
 	cmd := []byte("M17P")
 	cmd = append(cmd, p.ToBytes()...)
 	log.Printf("[DEBUG] Sending Packet: %#v", cmd)
@@ -226,7 +233,7 @@ func (s *InetServer) SendPacket(p *m17.Packet, addr *net.UDPAddr) error {
 	return nil
 }
 
-func (s *InetServer) SendDatagram(sd *m17.StreamDatagram, addr *net.UDPAddr) error {
+func (s *Server) SendDatagram(sd *m17.StreamDatagram, addr *net.UDPAddr) error {
 	cmd := []byte("M17 ")
 	cmd = append(cmd, sd.ToBytes()...)
 	log.Printf("[DEBUG] Sending StreamDatagram: %#v to %s", cmd, addr.String())
@@ -247,7 +254,7 @@ type client struct {
 	listenOnly      bool
 }
 
-func (s *InetServer) newClient(callsign []byte, module Module, addr *net.UDPAddr, listenOnly bool) *client {
+func (s *Server) newClient(callsign []byte, module Module, addr *net.UDPAddr, listenOnly bool) *client {
 	var c client
 	cs, _ := m17.DecodeCallsign(callsign)
 	c = client{
@@ -271,19 +278,19 @@ func (s *InetServer) newClient(callsign []byte, module Module, addr *net.UDPAddr
 	return &c
 }
 
-func (s *InetServer) addClient(c *client) {
+func (s *Server) addClient(c *client) {
 	s.mutex.Lock()
 	s.clients[c.addr.String()] = c
 	s.mutex.Unlock()
 }
 
-func (s *InetServer) removeClient(c *client) {
+func (s *Server) removeClient(c *client) {
 	s.mutex.Lock()
 	delete(s.clients, c.addr.String())
 	s.mutex.Unlock()
 }
 
-func (s *InetServer) lookupClient(addr *net.UDPAddr) *client {
+func (s *Server) lookupClient(addr *net.UDPAddr) *client {
 	key := addr.String()
 	s.mutex.Lock()
 	c := s.clients[key]
@@ -292,7 +299,7 @@ func (s *InetServer) lookupClient(addr *net.UDPAddr) *client {
 	return c
 }
 
-func (s *InetServer) lookupClientsByModule(m byte) []*client {
+func (s *Server) lookupClientsByModule(m byte) []*client {
 	ret := []*client{}
 	for _, c := range s.clients {
 		if c.module.Name() == m {
@@ -300,4 +307,13 @@ func (s *InetServer) lookupClientsByModule(m byte) []*client {
 		}
 	}
 	return ret
+}
+
+// SendPacketToModule sends a packet to every client linked to module m.
+func (s *Server) SendPacketToModule(m byte, p *m17.Packet) {
+	for _, c := range s.lookupClientsByModule(m) {
+		if err := s.SendPacket(p, c.addr); err != nil {
+			log.Printf("[INFO] Error sending packet to %s: %v", c.addr, err)
+		}
+	}
 }

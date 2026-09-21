@@ -1,4 +1,4 @@
-package m17
+package modem
 
 import (
 	"encoding/binary"
@@ -6,16 +6,18 @@ import (
 	"fmt"
 	"io"
 	"log"
+
+	"github.com/jancona/m17"
 )
 
-type DummyModem struct {
+type Dummy struct {
 	In        io.ReadCloser
 	Out       io.WriteCloser
 	extra     []byte
-	frameSink func(typ uint16, softBits []SoftBit)
+	frameSink func(typ uint16, softBits []m17.SoftBit)
 }
 
-func (m *DummyModem) TransmitPacket(p Packet) error {
+func (m *Dummy) TransmitPacket(p m17.Packet) error {
 	encoded, err := p.Encode()
 	if err != nil {
 		return err
@@ -27,11 +29,11 @@ func (m *DummyModem) TransmitPacket(p Packet) error {
 	return nil
 }
 
-func (m *DummyModem) TransmitVoiceStream(sd StreamDatagram) error {
+func (m *Dummy) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	return nil
 }
 
-func (m *DummyModem) Read(p []byte) (n int, err error) {
+func (m *Dummy) Read(p []byte) (n int, err error) {
 	l := len(p)
 	el := len(m.extra)
 	log.Printf("[DEBUG] Request to read %d bytes, el: %d", l, el)
@@ -49,7 +51,7 @@ func (m *DummyModem) Read(p []byte) (n int, err error) {
 		log.Printf("[DEBUG] Attempting to read %d bytes", len(sBuff))
 		nn, err := m.In.Read(sBuff)
 		if err != nil {
-			log.Printf("[ERROR] DummyModem Read failed: %v", err)
+			log.Printf("[ERROR] Dummy Read failed: %v", err)
 			if nn == 0 {
 				return 0, err
 			}
@@ -74,37 +76,37 @@ func (m *DummyModem) Read(p []byte) (n int, err error) {
 	return
 }
 
-func (m *DummyModem) Write(buf []byte) (n int, err error) {
+func (m *Dummy) Write(buf []byte) (n int, err error) {
 	return m.Out.Write(buf)
 }
-func (m *DummyModem) Reset() error {
+func (m *Dummy) Reset() error {
 	return nil
 }
-func (m *DummyModem) SetAFC(afc bool) error {
+func (m *Dummy) SetAFC(afc bool) error {
 	return nil
 }
-func (m *DummyModem) SetFreqCorrection(corr int16) error {
+func (m *Dummy) SetFreqCorrection(corr int16) error {
 	return nil
 }
-func (m *DummyModem) SetRXFreq(freq uint32) error {
+func (m *Dummy) SetRXFreq(freq uint32) error {
 	return nil
 }
-func (m *DummyModem) SetTXFreq(freq uint32) error {
+func (m *Dummy) SetTXFreq(freq uint32) error {
 	return nil
 }
-func (m *DummyModem) SetTXPower(dbm float32) error {
+func (m *Dummy) SetTXPower(dbm float32) error {
 	return nil
 }
-func (m *DummyModem) Start() error {
+func (m *Dummy) Start() error {
 	return nil
 }
 
-func (m *DummyModem) Close() error {
+func (m *Dummy) Close() error {
 	err := m.In.Close()
 	err2 := m.Out.Close()
 	return errors.Join(err, err2)
 }
 
-func (m *DummyModem) StartDecoding(sink func(typ uint16, softBits []SoftBit)) {
+func (m *Dummy) StartDecoding(sink func(typ uint16, softBits []m17.SoftBit)) {
 	m.frameSink = sink
 }
