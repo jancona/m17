@@ -16,6 +16,11 @@ import (
 // "Disconnect", with the reflector name and module as arguments.
 const maxRetries = 10
 
+// connRetryInterval is how often an unanswered CONN is resent. A reflector
+// that is not up yet (a local one still starting, say) or that drops the
+// first CONN would otherwise leave the client unlinked for good.
+var connRetryInterval = 5 * time.Second
+
 type EventFunc func(event string, name string, module byte)
 
 func (r *Client) event(event string) {
@@ -139,17 +144,39 @@ func (r *Client) Close() error {
 func (r *Client) handle() {
 	r.running = true
 	for r.connected || r.connecting {
-		r.conn.SetDeadline(time.Now().Add(10 * time.Second))
+		wait := 10 * time.Second
+		if r.connecting {
+			wait = connRetryInterval
+		}
+		// A read deadline only: SetDeadline would also expire writes, so a
+		// resent CONN, or any packet sent after a quiet spell, would fail.
+		r.conn.SetReadDeadline(time.Now().Add(wait))
 		// Receiving a message
 		buffer := make([]byte, 1024)
 		l, _, err := r.conn.ReadFromUDP(buffer)
 		if err != nil {
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				log.Printf("[DEBUG] Reflector read timed out")
+			switch {
+			case errors.Is(err, os.ErrDeadlineExceeded):
+				if r.connecting {
+					log.Printf("[DEBUG] No answer to CONN; resending")
+					if err := r.sendCONN(); err != nil {
+						log.Printf("[DEBUG] Resending CONN: %v", err)
+					}
+				} else {
+					log.Printf("[DEBUG] Reflector read timed out")
+				}
+				continue
+			case errors.Is(err, net.ErrClosed):
+				log.Printf("[DEBUG] Client.Handle(): connection closed")
+				r.running = false
+			default:
+				// A UDP socket reports "connection refused" when nothing
+				// was listening for an earlier datagram. Keep going: the
+				// reflector may be starting up.
+				log.Printf("[DEBUG] Client.Handle(): error reading from UDP: %v; retrying", err)
+				time.Sleep(time.Second)
 				continue
 			}
-			log.Printf("[DEBUG] Client.Handle(): error reading from UDP: %v", err)
-			r.running = false
 			break
 		}
 		buffer = buffer[:l]
