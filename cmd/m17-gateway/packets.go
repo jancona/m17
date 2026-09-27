@@ -10,18 +10,18 @@ import (
 // Packets the gateway transmits (from the reflector, and its own /ECHO and
 // /INFO replies) go through one queue and one sender, so that:
 //
-//   - a packet never starts while the channel is busy: while RF is being
-//     received (a radio that is transmitting cannot hear it, and stopping
-//     RX to transmit would cut that radio off), while the gateway is
-//     transmitting voice from the reflector, or during its local voice
-//     replies;
-//   - consecutive packets are spaced by at least packetGap, giving the
-//     receiving radio time to decode and store each one; and
+//   - a packet never starts while a radio is transmitting: it waits until
+//     no RF frame has been received for rxHoldoff (a radio that is
+//     transmitting cannot hear it, and stopping RX to transmit would cut
+//     that radio off);
+//   - a packet starts at least packetGap after the gateway's own last
+//     transmission, a packet or a voice frame (from the reflector, or its
+//     local replies); and
 //   - only one goroutine calls the modem to transmit a packet.
 //
-// The channel is timed from the last frame received or voice frame sent,
-// not from the gateway state, because a stream whose EOT is missed leaves
-// the state stuck until the next transmission; a timer cannot stick.
+// The channel is timed from the last frame received or sent, not from the
+// gateway state, because a stream whose EOT is missed leaves the state
+// stuck until the next transmission; a timer cannot stick.
 
 // packetQueueLen bounds packets waiting for the channel; more are dropped.
 const packetQueueLen = 64
@@ -29,12 +29,18 @@ const packetQueueLen = 64
 // channelPoll is how often a waiting packet rechecks the channel.
 const channelPoll = 50 * time.Millisecond
 
-// rfHeard notes channel activity: any frame decoded from the receiver, or
-// a voice frame the gateway transmits (from the reflector, or its own
-// replies).
-func (g *Gateway) rfHeard() {
+// rxHeard notes a frame decoded from the receiver.
+func (g *Gateway) rxHeard() {
 	g.stateMutex.Lock()
-	g.lastRF = time.Now()
+	g.lastRX = time.Now()
+	g.stateMutex.Unlock()
+}
+
+// voiceSent notes a voice frame the gateway transmitted (from the
+// reflector, or its own replies).
+func (g *Gateway) voiceSent() {
+	g.stateMutex.Lock()
+	g.lastTX = time.Now()
 	g.stateMutex.Unlock()
 }
 
@@ -67,12 +73,12 @@ func (g *Gateway) sendPackets() {
 			log.Printf("[ERROR] Error transmitting packet: %v", err)
 		}
 		g.stateMutex.Lock()
-		g.lastPacketTX = time.Now()
+		g.lastTX = time.Now()
 		g.stateMutex.Unlock()
 	}
 }
 
-// waitForChannel returns once the channel has been clear for packetGap.
+// waitForChannel returns once the channel is clear (see channelWait).
 func (g *Gateway) waitForChannel() {
 	logged := false
 	for {
@@ -93,5 +99,5 @@ func (g *Gateway) waitForChannel() {
 func (g *Gateway) channelWait(now time.Time) time.Duration {
 	g.stateMutex.Lock()
 	defer g.stateMutex.Unlock()
-	return max(g.lastRF.Add(g.packetGap).Sub(now), g.lastPacketTX.Add(g.packetGap).Sub(now))
+	return max(g.lastRX.Add(g.rxHoldoff).Sub(now), g.lastTX.Add(g.packetGap).Sub(now))
 }

@@ -30,6 +30,7 @@ type config struct {
 	callsign         string
 	dashboardLogger  *slog.Logger
 	duplex           bool
+	rxHoldoff        time.Duration
 	packetGap        time.Duration
 	rxFrequency      uint32
 	txFrequency      uint32
@@ -77,7 +78,8 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	afc, afcErr := cfg.Section("Radio").Key("AFC").Bool()
 	frequencyCorr, frequencyCorrErr := cfg.Section("Radio").Key("FrequencyCorr").Int()
 	duplex, duplexErr := cfg.Section("Radio").Key("Duplex").Bool()
-	packetGap := cfg.Section("Radio").Key("PacketGap").MustDuration(2 * time.Second)
+	rxHoldoff := cfg.Section("Radio").Key("RXHoldoff").MustDuration(500 * time.Millisecond)
+	packetGap := cfg.Section("Radio").Key("PacketGap").MustDuration(250 * time.Millisecond)
 
 	hostFile := cfg.Section("Reflector").Key("HostFile").String()
 	overrideHostFile := cfg.Section("Reflector").Key("OverrideHostFile").String()
@@ -188,6 +190,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	return config{
 		callsign:         callsign,
 		duplex:           duplex,
+		rxHoldoff:        rxHoldoff,
 		packetGap:        packetGap,
 		rxFrequency:      uint32(rxFrequency),
 		txFrequency:      uint32(txFrequency),
@@ -347,8 +350,9 @@ type Gateway struct {
 	callsign         string
 	stateMutex       sync.Mutex
 	state            gatewayState
-	lastRF           time.Time // last RF frame received or voice frame sent; guarded by stateMutex
-	lastPacketTX     time.Time // when the last packet finished; guarded by stateMutex
+	lastRX           time.Time // last RF frame received; guarded by stateMutex
+	lastTX           time.Time // last packet finished or voice frame sent; guarded by stateMutex
+	rxHoldoff        time.Duration
 	packetGap        time.Duration
 	packetQueue      chan func() error
 
@@ -378,6 +382,7 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 		callsign:         cfg.callsign,
 		state:            Idle,
 		lastStreamID:     0xFFFF,
+		rxHoldoff:        cfg.rxHoldoff,
 		packetGap:        cfg.packetGap,
 		packetQueue:      make(chan func() error, packetQueueLen),
 	}
@@ -452,7 +457,7 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 		log.Printf("[ERROR] Error transmitting voice stream: %v", err)
 		return err
 	}
-	g.rfHeard()
+	g.voiceSent()
 	if g.lastFrameTimer != nil {
 		g.lastFrameTimer.Reset(time.Second)
 	}
@@ -503,7 +508,7 @@ func (g *Gateway) setState(state gatewayState) {
 }
 
 func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
-	g.rfHeard()
+	g.rxHeard()
 	if g.getState() == Idle &&
 		lsf.Type[1]&byte(m17.LSFTypeStream) == byte(m17.LSFTypeStream) {
 		g.dashLog.LogFrame(&lsf, "RF", "Voice Start", "mer", json.Number(fmt.Sprintf("%f", ber)))
@@ -525,7 +530,7 @@ func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
 	return nil
 }
 func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uint16, ber float64) error {
-	g.rfHeard()
+	g.rxHeard()
 	var err error
 	sd := m17.NewStreamDatagram(sid, fn, &lsf, payload)
 	switch g.getState() {
@@ -545,7 +550,7 @@ func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uin
 	return err
 }
 func (g *Gateway) receivedRFStreamLICH(lsf m17.LSF, ber float64) error {
-	g.rfHeard()
+	g.rxHeard()
 	if g.getState() == Idle {
 		// A LICH-reconstructed LSF is the same LSF arriving by a different
 		// route, and the decoder has already verified its CRC before calling
@@ -564,7 +569,7 @@ func (g *Gateway) receivedRFStreamLICH(lsf m17.LSF, ber float64) error {
 	return nil
 }
 func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) error {
-	g.rfHeard()
+	g.rxHeard()
 	switch g.getState() {
 	case Echo:
 		go g.echoStreamEnd()
@@ -594,7 +599,7 @@ func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) 
 	return nil
 }
 func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) error {
-	g.rfHeard()
+	g.rxHeard()
 	var err error
 	p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
 	g.dashLog.LogGNSS(&lsf, "RF")
