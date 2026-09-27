@@ -163,6 +163,7 @@ func (g *Gateway) playMessage(msg ...string) error {
 			if err != nil {
 				return fmt.Errorf("unable to send message frame: %w", err)
 			}
+			g.rfHeard()
 			fn++
 		}
 	}
@@ -181,6 +182,7 @@ func (g *Gateway) sendSilence(sid uint16, fn *uint16, lsf m17.LSF, duration time
 		if err != nil {
 			return fmt.Errorf("unable to send silent frame: %w", err)
 		}
+		g.rfHeard()
 		*fn++
 	}
 	return nil
@@ -212,6 +214,7 @@ func (g *Gateway) echoStreamEnd() error {
 				log.Printf("[ERROR] Error transmitting voice stream in echoStreamEnd(): %v", err)
 				break
 			}
+			g.rfHeard()
 		}
 	}
 	g.echoStream = nil

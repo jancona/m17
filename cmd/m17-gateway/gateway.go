@@ -30,6 +30,7 @@ type config struct {
 	callsign         string
 	dashboardLogger  *slog.Logger
 	duplex           bool
+	packetGap        time.Duration
 	rxFrequency      uint32
 	txFrequency      uint32
 	power            float32
@@ -76,6 +77,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	afc, afcErr := cfg.Section("Radio").Key("AFC").Bool()
 	frequencyCorr, frequencyCorrErr := cfg.Section("Radio").Key("FrequencyCorr").Int()
 	duplex, duplexErr := cfg.Section("Radio").Key("Duplex").Bool()
+	packetGap := cfg.Section("Radio").Key("PacketGap").MustDuration(2 * time.Second)
 
 	hostFile := cfg.Section("Reflector").Key("HostFile").String()
 	overrideHostFile := cfg.Section("Reflector").Key("OverrideHostFile").String()
@@ -186,6 +188,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	return config{
 		callsign:         callsign,
 		duplex:           duplex,
+		packetGap:        packetGap,
 		rxFrequency:      uint32(rxFrequency),
 		txFrequency:      uint32(txFrequency),
 		power:            float32(power),
@@ -344,6 +347,10 @@ type Gateway struct {
 	callsign         string
 	stateMutex       sync.Mutex
 	state            gatewayState
+	lastRF           time.Time // last RF frame received or voice frame sent; guarded by stateMutex
+	lastPacketTX     time.Time // when the last packet finished; guarded by stateMutex
+	packetGap        time.Duration
+	packetQueue      chan func() error
 
 	lastFrameTimer *time.Timer
 	lastLSF        *m17.LSF // Workaround for reflectors that change the SRC during the stream
@@ -371,7 +378,10 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 		callsign:         cfg.callsign,
 		state:            Idle,
 		lastStreamID:     0xFFFF,
+		packetGap:        cfg.packetGap,
+		packetQueue:      make(chan func() error, packetQueueLen),
 	}
+	go g.sendPackets()
 	err = g.loadAudioClips(cfg.audioDir, cfg.callsign)
 	if err != nil {
 		return nil, err
@@ -388,7 +398,7 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 	log.Printf("[DEBUG] Connecting to %s, %s:%d, module %s", g.Name, g.Server, g.Port, g.Module)
 	g.inetClient, err = inet.NewClient(g.Name, g.Server, g.Port, g.Module, cfg.callsign, func(event, name string, module byte) {
 		g.dashLog.Log("Reflector", event, "name", name, "module", string(module))
-	}, g.TransmitPacket, g.TransmitVoiceStream)
+	}, g.queuePacket, g.TransmitVoiceStream)
 	if err != nil {
 		return nil, fmt.Errorf("error creating client: %v", err)
 	}
@@ -402,7 +412,9 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 	return &g, nil
 }
 
-func (g *Gateway) TransmitPacket(p m17.Packet) error {
+// transmitNetPacket transmits a packet from the reflector. It runs on the
+// packet sender (packets.go), never directly from the reflector client.
+func (g *Gateway) transmitNetPacket(p m17.Packet) error {
 	lsf := *p.LSF
 	// Replace META with Extended Callsign Data
 	// Don't swap Src for Packet
@@ -440,6 +452,7 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 		log.Printf("[ERROR] Error transmitting voice stream: %v", err)
 		return err
 	}
+	g.rfHeard()
 	if g.lastFrameTimer != nil {
 		g.lastFrameTimer.Reset(time.Second)
 	}
@@ -490,6 +503,7 @@ func (g *Gateway) setState(state gatewayState) {
 }
 
 func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
+	g.rfHeard()
 	if g.getState() == Idle &&
 		lsf.Type[1]&byte(m17.LSFTypeStream) == byte(m17.LSFTypeStream) {
 		g.dashLog.LogFrame(&lsf, "RF", "Voice Start", "mer", json.Number(fmt.Sprintf("%f", ber)))
@@ -511,6 +525,7 @@ func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
 	return nil
 }
 func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uint16, ber float64) error {
+	g.rfHeard()
 	var err error
 	sd := m17.NewStreamDatagram(sid, fn, &lsf, payload)
 	switch g.getState() {
@@ -530,6 +545,7 @@ func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uin
 	return err
 }
 func (g *Gateway) receivedRFStreamLICH(lsf m17.LSF, ber float64) error {
+	g.rfHeard()
 	if g.getState() == Idle {
 		// A LICH-reconstructed LSF is the same LSF arriving by a different
 		// route, and the decoder has already verified its CRC before calling
@@ -548,6 +564,7 @@ func (g *Gateway) receivedRFStreamLICH(lsf m17.LSF, ber float64) error {
 	return nil
 }
 func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) error {
+	g.rfHeard()
 	switch g.getState() {
 	case Echo:
 		go g.echoStreamEnd()
@@ -577,6 +594,7 @@ func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) 
 	return nil
 }
 func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) error {
+	g.rfHeard()
 	var err error
 	p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
 	g.dashLog.LogGNSS(&lsf, "RF")
@@ -603,7 +621,7 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 			// Don't swap Src for packet
 			p.LSF.SetECD(&g.encodedCallsign, nil)
 			// p.LSF.Src = g.encodedCallsign
-			err = g.modem.TransmitPacket(p)
+			err = g.queueLocalPacket(p)
 		}
 	}
 	return err
@@ -655,7 +673,7 @@ func (g *Gateway) echoPacket(p m17.Packet) error {
 	p.LSF.Dst = p.LSF.Src
 	p.LSF.Src = g.encodedCallsign
 	p.LSF.CalcCRC()
-	err = g.modem.TransmitPacket(p)
+	err = g.queueLocalPacket(p)
 	return err
 }
 
@@ -669,6 +687,6 @@ func (g *Gateway) infoPacket(p m17.Packet) error {
 	msg := g.callsign + " is linked to " + g.inetClient.Name + " " + string(g.inetClient.Module)
 	p.Payload = append(([]byte)(msg), 0) // NULL terminate the string
 	p.CalcCRC()
-	err = g.modem.TransmitPacket(p)
+	err = g.queueLocalPacket(p)
 	return err
 }

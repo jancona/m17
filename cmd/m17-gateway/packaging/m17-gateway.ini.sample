@@ -13,6 +13,11 @@ Power=10
 AFC=true
 FrequencyCorr=0
 Duplex=false
+; Least time between the end of any activity on the channel (a transmission
+; received, or voice or a packet sent) and the next packet (SMS) sent. It
+; keeps packets from starting while a radio is transmitting, and gives the
+; receiving radio time to store each message. Default 2s.
+PacketGap=2s
 
 [Reflector]
 HostFile=/opt/m17/m17-gateway/M17Hosts.txt
