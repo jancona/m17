@@ -16,10 +16,16 @@ import (
 // "Disconnect", with the reflector name and module as arguments.
 const maxRetries = 10
 
-// connRetryInterval is how often an unanswered CONN is resent. A reflector
-// that is not up yet (a local one still starting, say) or that drops the
-// first CONN would otherwise leave the client unlinked for good.
-var connRetryInterval = 5 * time.Second
+// An unanswered CONN is resent after connRetryInterval, the wait doubling
+// each time up to maxConnRetryInterval. Without resends a reflector that is
+// not up yet (a local one still starting, say) or that drops the first CONN
+// would leave the client unlinked for good; without the backoff a
+// reflector that stays unreachable would get a CONN every few seconds
+// indefinitely.
+var (
+	connRetryInterval    = 5 * time.Second
+	maxConnRetryInterval = time.Minute
+)
 
 type EventFunc func(event string, name string, module byte)
 
@@ -143,10 +149,11 @@ func (r *Client) Close() error {
 
 func (r *Client) handle() {
 	r.running = true
+	connGap := connRetryInterval // wait before resending an unanswered CONN
 	for r.connected || r.connecting {
 		wait := 10 * time.Second
 		if r.connecting {
-			wait = connRetryInterval
+			wait = connGap
 		}
 		// A read deadline only: SetDeadline would also expire writes, so a
 		// resent CONN, or any packet sent after a quiet spell, would fail.
@@ -158,7 +165,8 @@ func (r *Client) handle() {
 			switch {
 			case errors.Is(err, os.ErrDeadlineExceeded):
 				if r.connecting {
-					log.Printf("[DEBUG] No answer to CONN; resending")
+					connGap = min(2*connGap, maxConnRetryInterval)
+					log.Printf("[DEBUG] No answer to CONN; resending (next in %v)", connGap)
 					if err := r.sendCONN(); err != nil {
 						log.Printf("[DEBUG] Resending CONN: %v", err)
 					}

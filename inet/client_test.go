@@ -64,3 +64,57 @@ func TestClientLinksToLateReflector(t *testing.T) {
 		t.Fatal("client never linked to the late reflector")
 	}
 }
+
+// TestClientBacksOffCONN: a reflector that never answers gets CONNs at a
+// growing interval, capped at maxConnRetryInterval.
+func TestClientBacksOffCONN(t *testing.T) {
+	oldRetry, oldMax := connRetryInterval, maxConnRetryInterval
+	connRetryInterval, maxConnRetryInterval = 50*time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() { connRetryInterval, maxConnRetryInterval = oldRetry, oldMax })
+
+	refl, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { refl.Close() })
+	conns := make(chan time.Time, 32)
+	go func() {
+		buf := make([]byte, 64)
+		for {
+			n, _, err := refl.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			if n >= 4 && string(buf[:4]) == m17.MagicCONN {
+				conns <- time.Now()
+			}
+		}
+	}()
+
+	c, err := NewClient("M17-M17", "127.0.0.1", uint(refl.LocalAddr().(*net.UDPAddr).Port), "C", "N1ADJ G", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+
+	var at []time.Time
+	for len(at) < 6 {
+		select {
+		case ts := <-conns:
+			at = append(at, ts)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("only %d CONNs", len(at))
+		}
+	}
+	// Waits after the first CONN: 100, 200, 200, 200 ms (the first resend
+	// doubles 50 to 100). Allow for scheduling slack.
+	for i, want := range []time.Duration{100, 200, 200, 200} {
+		got := at[i+2].Sub(at[i+1])
+		if got < want*time.Millisecond*8/10 || got > want*time.Millisecond*2 {
+			t.Errorf("gap %d: %v, want about %vms", i+1, got, want)
+		}
+	}
+}
