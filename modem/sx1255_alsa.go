@@ -490,7 +490,16 @@ func (m *SX1255) sx1255WriteSymbols(symbols []m17.Symbol) error {
 	iq := m.txFMMod.Modulate(baseband125k, deviationHz)
 
 	// 4. Pack complex IQ → stereo S32_LE bytes and write to ALSA
-	return m.sx1255WriteIQ(iq)
+	if err := m.sx1255WriteIQ(iq); err != nil {
+		return err
+	}
+	// Data is still flowing: push back the safety timeout. Without this a
+	// packet longer than the timeout (about 8 frames) had its PA switched
+	// off part way through.
+	if m.txTimer != nil {
+		m.txTimer.Reset(txTimeoutSX1255)
+	}
+	return nil
 }
 
 // sx1255WriteIQ packs complex128 IQ samples as stereo S32_LE and writes

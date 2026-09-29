@@ -552,9 +552,6 @@ func (m *SX1255) TransmitVoiceStream(sd m17.StreamDatagram) error {
 		return fmt.Errorf("failed to send stream frame: %w", err)
 	}
 
-	// Reset safety timer
-	m.txTimer.Reset(txTimeoutSX1255)
-
 	if sd.LastFrame {
 		// Send EOT
 		log.Printf("[DEBUG] SX1255 Sending EOT for stream %04x, fn %04x", sd.StreamID, sd.FrameNumber)
