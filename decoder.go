@@ -125,12 +125,16 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 		}
 		// log.Printf("[DEBUG] frameData: % x %s", pktFrame, pktFrame)
 
+		// Offsets in int: frame 10 onwards is past 255 bytes.
 		if frameNumOrByteCnt <= 31 && frameNumOrByteCnt == d.lastPacketFN+1 && !lastFrame {
-			copy(d.packetData[frameNumOrByteCnt*25:(frameNumOrByteCnt+1)*25], pktFrame)
+			start := int(frameNumOrByteCnt) * 25
+			copy(d.packetData[start:start+25], pktFrame)
 			d.lastPacketFN++
 		} else if lastFrame {
-			copy(d.packetData[(d.lastPacketFN+1)*25:(d.lastPacketFN+1)*25+frameNumOrByteCnt], pktFrame[:frameNumOrByteCnt])
-			d.packetData = d.packetData[:(d.lastPacketFN+1)*25+frameNumOrByteCnt]
+			start := int(d.lastPacketFN+1) * 25
+			end := start + int(frameNumOrByteCnt)
+			copy(d.packetData[start:end], pktFrame[:frameNumOrByteCnt])
+			d.packetData = d.packetData[:end]
 			// log.Printf("[DEBUG] pktFrame[:frameNumOrByteCnt]: % 0x, d.packetData: % 0x", pktFrame[:frameNumOrByteCnt], d.packetData)
 			log.Printf("[DEBUG] d.packetData: [% 2x]", d.packetData)
 			if CRC(d.packetData) == 0 {
