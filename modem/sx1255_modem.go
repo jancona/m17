@@ -24,6 +24,9 @@ const (
 // sent within this duration. Must be longer than the Drain + TX tail time.
 const txTimeoutSX1255 = endTXWait + 2*m17.FrameTime
 
+// txTailSX1255 is how long TX stays on after the playback buffer has drained.
+const txTailSX1255 = 2 * m17.FrameTime
+
 // SX1255 register addresses
 const (
 	regControlSX1255    = 0x00
@@ -419,7 +422,6 @@ func (m *SX1255) stopTX() {
 	m.txCond.Broadcast() // wake all waiting start() calls
 	log.Print("[DEBUG] SX1255 stopTX()")
 
-	t := time.Now()
 	// Drain waits for all buffered samples to play out, then the stream
 	// transitions to SETUP state — ready for a clean Prepare() next time.
 	if m.playDev != nil {
@@ -427,7 +429,11 @@ func (m *SX1255) stopTX() {
 			log.Printf("[WARN] SX1255 ALSA playback drain: %v", err)
 		}
 	}
-	time.Sleep(time.Until(t.Add(endTXWait)))
+	// The drain has already waited for the EOT to go out; allow a margin for
+	// the last samples still in the I2S path. This used to sleep until
+	// endTXWait after stopTX was called, which left about 200 ms of bare
+	// carrier after every transmission.
+	time.Sleep(txTailSX1255)
 	if err := m.sx1255EnableTX(false); err != nil {
 		log.Printf("[WARN] SX1255 disable TX: %v", err)
 	}
