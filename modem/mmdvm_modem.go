@@ -112,10 +112,10 @@ type MMDVMConfig struct {
 	txInvert   bool
 	pttInvert  bool
 	debug      bool
-	txDCOffset byte
+	txDCOffset int8
 	txDelay    byte
 	rxLevel    float32
-	rxDCOffset byte
+	rxDCOffset int8
 
 	m17Enabled bool
 	m17TXLevel float32
@@ -135,6 +135,7 @@ type MMDVM struct {
 	lastStatusCheck time.Time
 	lastTXData      time.Time
 	space           int
+	maxSpace        int // most free M17 buffer space seen: an empty buffer
 	// end protected by mutex
 
 	capabilities    [2]byte
@@ -168,10 +169,10 @@ func NewMMDVM(
 	txInvert := modemCfg.Key("TXInvert").MustBool(true)
 	pttInvert := modemCfg.Key("PTTInvert").MustBool(false)
 	debug := modemCfg.Key("Debug").MustBool(false)
-	txDCOffset := modemCfg.Key("TXDCOffset").MustUint(0)
+	txDCOffset, txDCErr := dcOffset(modemCfg, "TXDCOffset")
 	txDelay := modemCfg.Key("TXDelay").MustUint(100)
 	rxLevel := modemCfg.Key("RXLevel").MustUint(50)
-	rxDCOffset := modemCfg.Key("RXDCOffset").MustUint(0)
+	rxDCOffset, rxDCErr := dcOffset(modemCfg, "RXDCOffset")
 	txLevel := modemCfg.Key("TXLevel").MustUint(50)
 	txHang := modemCfg.Key("TXHang").MustUint(5)
 
@@ -180,6 +181,8 @@ func NewMMDVM(
 		protocolErr,
 		portErr,
 		speedErr,
+		txDCErr,
+		rxDCErr,
 	)
 	if err != nil {
 		return nil, err
@@ -194,10 +197,10 @@ func NewMMDVM(
 			txInvert:   txInvert,
 			pttInvert:  pttInvert,
 			debug:      debug,
-			txDCOffset: byte(txDCOffset),
+			txDCOffset: txDCOffset,
 			txDelay:    byte(txDelay),
 			rxLevel:    float32(rxLevel),
-			rxDCOffset: byte(rxDCOffset),
+			rxDCOffset: rxDCOffset,
 			m17Enabled: true,
 			m17TXLevel: float32(txLevel),
 			m17TXHang:  byte(txHang),
@@ -423,18 +426,33 @@ func (m *MMDVM) checkStatus() error {
 
 func (m *MMDVM) readVersion() error {
 	time.Sleep(2 * time.Second)
+	// Read replies continuously, resending the request each second, until
+	// the version arrives. Frames the modem received from the air arrive in
+	// the same stream: while the receiver hears M17 traffic they queue ahead
+	// of the reply, and are skipped.
 	cmd := []byte{mmdvmFrameStart, 3, mmdvmGetVersion}
-	log.Printf("[DEBUG] Trying GetVersion")
-	_, err := m.port.Write(cmd)
-	if err != nil {
-		return fmt.Errorf("error writing GetVersion cmd: %w", err)
-	}
+	deadline := time.Now().Add(10 * time.Second)
+	var sent time.Time
 retry:
-	for range 6 {
-		time.Sleep(10 * time.Millisecond)
+	for {
+		if time.Now().After(deadline) {
+			log.Printf("[ERROR] Modem did not answer GetVersion")
+			return errors.New("modem not responding")
+		}
+		if time.Since(sent) > time.Second {
+			log.Printf("[DEBUG] Trying GetVersion")
+			if _, err := m.port.Write(cmd); err != nil {
+				return fmt.Errorf("error writing GetVersion cmd: %w", err)
+			}
+			sent = time.Now()
+		}
 		responseType, buf, err := m.getResponse()
-		log.Printf("[DEBUG] GetVersion response: [% x], err: %v", buf, err)
+		if err == ErrMMDVMReadTimeout {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
 		if err == nil && responseType == mmdvmGetVersion {
+			log.Printf("[DEBUG] GetVersion response: [% x]", buf)
 			switch {
 			case string(buf[1:1+6]) == "MMDVM " || string(buf[23:23+6]) == "MMDVM ":
 				m.hwType = mmdvmHWTypeMMDVM
@@ -488,7 +506,6 @@ retry:
 				return ErrUnsupportedModemProtocol
 			}
 		}
-		time.Sleep(1500 * time.Millisecond)
 	}
 	modeText := "Modes:"
 	if (m.capabilities[0] & mmdvmCapabilities1DSTAR) == mmdvmCapabilities1DSTAR {
@@ -631,8 +648,8 @@ func (m *MMDVM) setProtocol1Config() error {
 	// cmd[15] = byte(m.config.p25TXLevel*2.55 + 0.5)
 	cmd[15] = 128
 
-	cmd[16] = byte(m.config.txDCOffset + 128)
-	cmd[17] = byte(m.config.rxDCOffset + 128)
+	cmd[16] = dcOffsetByte(m.config.txDCOffset)
+	cmd[17] = dcOffsetByte(m.config.rxDCOffset)
 
 	// cmd[18] = byte(m.config.nxdnTXLevel*2.55 + 0.5)
 	cmd[18] = 128
@@ -720,8 +737,8 @@ func (m *MMDVM) setProtocol2Config() error {
 
 	cmd[6] = m.config.txDelay / 10 // In 10ms units
 	cmd[7] = mmdvmModeIdle
-	cmd[8] = byte(m.config.txDCOffset + 128)
-	cmd[9] = byte(m.config.rxDCOffset + 128)
+	cmd[8] = dcOffsetByte(m.config.txDCOffset)
+	cmd[9] = dcOffsetByte(m.config.rxDCOffset)
 	cmd[10] = byte(m.config.rxLevel*2.55 + 0.5)
 
 	// cmd[11] = byte(m.config.cwIdTXLevel*2.55 + 0.5)
@@ -786,26 +803,32 @@ func (m *MMDVM) setMode(mode byte) error {
 	return err
 }
 
+// getEmptyResponse waits for the modem to ACK or NAK a command. Frames the
+// modem received from the air arrive in the same stream and are skipped: a
+// hotspot started while its receiver hears M17 traffic gets them ahead of
+// the ACK.
 func (m *MMDVM) getEmptyResponse() error {
-	var responseType byte
-	var buf []byte
-	var err error
-	for i := range 30 {
-		time.Sleep(10 * time.Millisecond)
-		responseType, buf, err = m.getResponse()
-		if i == 29 && err == nil && responseType != mmdvmACK && responseType != mmdvmNAK {
-			log.Printf("[ERROR] Modem not responding to command")
-			return errors.New("modem not responding")
-		} else if (err != nil && err != ErrMMDVMReadTimeout) || responseType == mmdvmACK || responseType == mmdvmNAK {
-			break
+	deadline := time.Now().Add(modemReplyTimeoutMMDVM)
+	for time.Now().Before(deadline) {
+		responseType, buf, err := m.getResponse()
+		switch {
+		case err == ErrMMDVMReadTimeout:
+			time.Sleep(10 * time.Millisecond)
+		case err != nil:
+			return err
+		case responseType == mmdvmACK:
+			return nil
+		case responseType == mmdvmNAK:
+			log.Printf("[ERROR] Received a NAK to the SetConfig command from the modem: % x", buf)
+			return ErrModemNAK
 		}
 	}
-	if err == nil && responseType == mmdvmNAK {
-		log.Printf("[ERROR] Received a NAK to the SetConfig command from the modem: % x", buf)
-		return ErrModemNAK
-	}
-	return err
+	log.Printf("[ERROR] Modem not responding to command")
+	return errors.New("modem not responding")
 }
+
+// modemReplyTimeoutMMDVM bounds the wait for the modem's reply to a command.
+const modemReplyTimeoutMMDVM = 3 * time.Second
 
 func (m *MMDVM) getResponse() (byte, []byte, error) {
 	var n int
@@ -968,7 +991,46 @@ func (m *MMDVM) TransmitPacket(p m17.Packet) error {
 		chunkCnt++
 	}
 	m.writeEOT()
+	// Return when the packet has gone out, not when it is queued, so that
+	// the gateway's PacketGap spaces transmissions rather than writes. The
+	// modem first sends 500 ms plus TXDelay of preamble if it was idle.
+	preamble := 500*time.Millisecond + time.Duration(m.config.txDelay)*time.Millisecond
+	m.waitTXDone(preamble + time.Duration(chunkCnt+2)*m17.FrameTime + 2*time.Second)
 	return nil
+}
+
+// packetEndMarginMMDVM is how long after the modem's M17 buffer empties a
+// packet is taken to be on the air: the last frame taken from the buffer
+// (the EOT) is still being modulated, and status arrives every 250 ms.
+const packetEndMarginMMDVM = 2 * m17.FrameTime
+
+// waitTXDone waits until everything queued has been sent to the modem and
+// the modem reports its M17 buffer empty again, then a margin for the last
+// frame. It gives up after limit. The modem's TX-on flag is no use here: in
+// duplex mode it stays set through the hang time.
+func (m *MMDVM) waitTXDone(limit time.Duration) {
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		if m.txQueueEmpty() {
+			time.Sleep(packetEndMarginMMDVM)
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	log.Printf("[WARN] MMDVM: packet not confirmed sent after %v", limit)
+}
+
+// txQueueEmpty reports whether nothing is waiting to be written to the
+// modem and its M17 buffer is back to the most free space it has reported.
+func (m *MMDVM) txQueueEmpty() bool {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if m.maxSpace == 0 {
+		// The modem does not report its buffer space: all we can know is
+		// that everything has been written, as before.
+		return len(m.sendCmds) == 0
+	}
+	return len(m.sendCmds) == 0 && m.space >= m.maxSpace
 }
 
 func (m *MMDVM) transmitLSF(lsf m17.LSF) error {
@@ -1040,6 +1102,22 @@ func (m *MMDVM) sendToModem(cmd []byte) {
 	m.lastTXData = time.Now()
 }
 
+// dcOffset reads a TX or RX DC offset setting: a signed value, -128 to 127,
+// 0 if unset.
+func dcOffset(sec *ini.Section, key string) (int8, error) {
+	v := sec.Key(key).MustInt(0)
+	if v < -128 || v > 127 {
+		return 0, fmt.Errorf("modem %s is %d, must be between -128 and 127", key, v)
+	}
+	return int8(v), nil
+}
+
+// dcOffsetByte encodes a DC offset for the modem's config command, which
+// takes it offset by 128 (128 means none).
+func dcOffsetByte(v int8) byte {
+	return byte(int(v) + 128)
+}
+
 func (m *MMDVM) getSpace() int {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -1050,6 +1128,7 @@ func (m *MMDVM) setSpace(space byte) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.space = int(space)
+	m.maxSpace = max(m.maxSpace, m.space)
 }
 
 func (m *MMDVM) decrementSpace() int {

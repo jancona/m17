@@ -46,6 +46,7 @@ RXInvert=false
 TXInvert=true
 PTTInvert=false
 Debug=false
+; TXDCOffset and RXDCOffset: -128 to 127
 TXDCOffset=0
 TXDelay=100
 RXLevel=50
