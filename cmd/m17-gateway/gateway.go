@@ -391,25 +391,35 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 	if err != nil {
 		return nil, err
 	}
-	h, ok := g.overrideHostfile.Hosts[g.Name]
-	if !ok {
-		h, ok = g.hostfile.Hosts[g.Name]
+	if g.Name == "" {
+		// No reflector: RF only. Nothing is sent to or received from the
+		// network; local RF works as usual, and a duplex hotspot repeats.
+		log.Printf("[INFO] No reflector configured: RF only")
+	} else {
+		var h inet.Host
+		var ok bool
+		if g.overrideHostfile != nil {
+			h, ok = g.overrideHostfile.Hosts[g.Name]
+		}
+		if !ok && g.hostfile != nil {
+			h, ok = g.hostfile.Hosts[g.Name]
+		}
 		if !ok {
 			return nil, fmt.Errorf("reflector %s not found", g.Name)
 		}
-	}
-	g.Server = h.Server
-	g.Port = h.Port
-	log.Printf("[DEBUG] Connecting to %s, %s:%d, module %s", g.Name, g.Server, g.Port, g.Module)
-	g.inetClient, err = inet.NewClient(g.Name, g.Server, g.Port, g.Module, cfg.callsign, func(event, name string, module byte) {
-		g.dashLog.Log("Reflector", event, "name", name, "module", string(module))
-	}, g.queuePacket, g.TransmitVoiceStream)
-	if err != nil {
-		return nil, fmt.Errorf("error creating client: %v", err)
-	}
-	err = g.inetClient.Connect()
-	if err != nil {
-		return nil, fmt.Errorf("error connecting to %s %s:%d %s: %v", g.Name, g.Server, g.Port, g.Module, err)
+		g.Server = h.Server
+		g.Port = h.Port
+		log.Printf("[DEBUG] Connecting to %s, %s:%d, module %s", g.Name, g.Server, g.Port, g.Module)
+		g.inetClient, err = inet.NewClient(g.Name, g.Server, g.Port, g.Module, cfg.callsign, func(event, name string, module byte) {
+			g.dashLog.Log("Reflector", event, "name", name, "module", string(module))
+		}, g.queuePacket, g.TransmitVoiceStream)
+		if err != nil {
+			return nil, fmt.Errorf("error creating client: %v", err)
+		}
+		err = g.inetClient.Connect()
+		if err != nil {
+			return nil, fmt.Errorf("error connecting to %s %s:%d %s: %v", g.Name, g.Server, g.Port, g.Module, err)
+		}
 	}
 
 	modem.Start()
@@ -537,7 +547,9 @@ func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uin
 	case Echo:
 		g.echoStreamRecord(sd)
 	case RFStreamRX:
-		err = g.inetClient.SendStream(sd)
+		if g.inetClient != nil {
+			err = g.inetClient.SendStream(sd)
+		}
 		if g.duplex {
 			// Replace META with Extended Callsign Data
 			sd.LSF.SetECD(&sd.LSF.Src, nil)
@@ -576,7 +588,11 @@ func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) 
 	case LocalCommand:
 		switch lsf.Dst.Callsign() {
 		case "/INFO", "#INFO":
-			go g.playMessage("welcome", "callsign", "is_linked_to", g.inetClient.Name+" "+string(g.inetClient.Module))
+			if g.inetClient != nil {
+				go g.playMessage("welcome", "callsign", "is_linked_to", g.inetClient.Name+" "+string(g.inetClient.Module))
+			} else {
+				go g.playMessage("welcome", "callsign", "is_unlinked")
+			}
 		}
 	case RFStreamRX:
 		log.Printf("[DEBUG] receivedRFStreamEOT() setState(Idle)")
@@ -617,7 +633,9 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 		go g.infoPacket(p)
 	default:
 		log.Printf("[DEBUG] receivedRFPacket() packet dst: %s", lsf.Dst.Callsign())
-		err = g.inetClient.SendPacket(p)
+		if g.inetClient != nil {
+			err = g.inetClient.SendPacket(p)
+		}
 		if g.duplex {
 			// Repeat whether or not the reflector send worked, as for voice.
 			// Replace META with Extended Callsign Data
@@ -657,7 +675,9 @@ func (g *Gateway) Run() {
 func (g *Gateway) Close() {
 	log.Print("[DEBUG] Gateway.Close()")
 	g.done = true
-	g.inetClient.Close()
+	if g.inetClient != nil {
+		g.inetClient.Close()
+	}
 	if g.modem != nil {
 		g.modem.Close()
 	}
@@ -687,7 +707,10 @@ func (g *Gateway) infoPacket(p m17.Packet) error {
 	p.LSF.Dst = p.LSF.Src
 	p.LSF.Src = g.encodedCallsign
 	p.LSF.CalcCRC()
-	msg := g.callsign + " is linked to " + g.inetClient.Name + " " + string(g.inetClient.Module)
+	msg := g.callsign + " is not linked to a reflector"
+	if g.inetClient != nil {
+		msg = g.callsign + " is linked to " + g.inetClient.Name + " " + string(g.inetClient.Module)
+	}
 	p.Payload = append(([]byte)(msg), 0) // NULL terminate the string
 	p.CalcCRC()
 	err = g.queueLocalPacket(p)

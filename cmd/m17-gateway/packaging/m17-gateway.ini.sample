@@ -23,6 +23,9 @@ PacketGap=250ms
 [Reflector]
 HostFile=/opt/m17/m17-gateway/M17Hosts.txt
 OverrideHostFile=/opt/m17/m17-gateway/OverrideHosts.txt
+; Leave Name empty to run without a reflector: RF only, nothing sent to or
+; received from the network. Local RF works as usual, and a duplex hotspot
+; still repeats.
 Name=M17-M17
 Module=C
 
