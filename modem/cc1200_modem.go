@@ -156,6 +156,11 @@ const (
 const endTXWait = 8 * m17.FrameTime
 const txTimeout = endTXWait + 2*m17.FrameTime
 
+// packetEndMargin is how long TX stays on after a packet's last symbol should
+// have gone out: the modem starts sending a few tens of ms after the first
+// write, and switching off sooner clips the EOT.
+const packetEndMargin = 2 * m17.FrameTime
+
 // Values calculated by SP5WWP to apply a 48us pre-emphasis
 var iirBParam = []float64{2.8233128196365653, -1.0349763850514728}
 var iirAParam = []float64{1.0, 0.7883364345850924}
@@ -463,10 +468,23 @@ func (m *CC1200) TransmitPacket(p m17.Packet) error {
 	m.startTX()
 	time.Sleep(10 * time.Millisecond)
 
+	// writeSymbols returns once the modem has buffered the symbols, which
+	// for a long packet is several hundred ms before they are on the air.
+	// Count them, so TX stays on until the last one has gone out.
+	started := time.Now()
+	sent := 0
+	write := func(syms []m17.Symbol) error {
+		err := m.writeSymbols(syms)
+		if err == nil {
+			sent += len(syms)
+		}
+		return err
+	}
+
 	var syms []m17.Symbol
 	//fill preamble
 	syms = m17.AppendPreamble(nil, m17.LSFPreamble)
-	err := m.writeSymbols(syms)
+	err := write(syms)
 	if err != nil {
 		return fmt.Errorf("failed to send preamble: %w", err)
 	}
@@ -475,7 +493,7 @@ func (m *CC1200) TransmitPacket(p m17.Packet) error {
 	if err != nil {
 		return fmt.Errorf("failed to generate LSF symbols: %w", err)
 	}
-	err = m.writeSymbols(syms)
+	err = write(syms)
 	if err != nil {
 		return fmt.Errorf("failed to send LSF: %w", err)
 	}
@@ -512,7 +530,7 @@ func (m *CC1200) TransmitPacket(p m17.Packet) error {
 		rfBits = m17.RandomizeBits(rfBits)
 		// Append chunk to the output
 		syms = m17.AppendBits(syms, rfBits)
-		err = m.writeSymbols(syms)
+		err = write(syms)
 		if err != nil {
 			return fmt.Errorf("failed to send: %w", err)
 		}
@@ -520,12 +538,15 @@ func (m *CC1200) TransmitPacket(p m17.Packet) error {
 		chunkCnt++
 	}
 	syms = m17.AppendEOT(nil)
-	err = m.writeSymbols(syms)
+	err = write(syms)
 	if err != nil {
 		return fmt.Errorf("failed to send EOT: %w", err)
 	}
 	log.Printf("[DEBUG] Finished TransmitPacket")
-	time.Sleep(endTXWait)
+	onAir := started.Add(time.Duration(sent) * m17.FrameTime / m17.SymbolsPerFrame)
+	wait := time.Until(onAir.Add(packetEndMargin))
+	m.txTimer.Reset(wait + txTimeout)
+	time.Sleep(wait)
 	log.Printf("[DEBUG] Finished TransmitPacket wait")
 	m.stopTX()
 	m.Start()
