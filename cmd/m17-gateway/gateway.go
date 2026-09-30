@@ -587,13 +587,10 @@ func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) 
 	// gain: lower is better, and it is objective in a way that "sounds better"
 	// is not.
 	//
-	// Despite the parameter name this is not a bit error rate. DecodePunctured
-	// returns the Viterbi accumulated path metric, which decodeStreamFrame
-	// offsets and the decoder divides by the bit count — a normalised measure of
-	// how far the received soft bits sat from the decoded path. Good for ranking
-	// settings against each other; the absolute value is not a fraction of bits
-	// in error.
-	log.Printf("[DEBUG] RF voice stream %04x ended at frame %04x, decode metric %.2f%% (Viterbi path cost, lower is better)",
+	// ber is the channel bit error rate before error correction: the share of
+	// received bits whose hard decision differed from the re-encoded decoded
+	// stream. It means the same for every modem, soft bits or hard.
+	log.Printf("[DEBUG] RF voice stream %04x ended at frame %04x, bit error rate %.2f%% before FEC",
 		sid, fn&0x7fff, ber)
 	g.dashLog.LogFrame(&lsf, "RF", "Voice End", "mer", json.Number(fmt.Sprintf("%f", ber)))
 	return nil

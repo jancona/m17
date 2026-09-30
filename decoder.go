@@ -235,11 +235,11 @@ func decodeLSF(softBit []SoftBit) (*LSF, int) {
 
 	//decode
 	vd := ViterbiDecoder{}
-	lsf, e := vd.DecodePunctured(dSoftBit, LSFPuncturePattern)
-	e = e - len(LSFPuncturePattern) + 1
+	lsf, _ := vd.DecodePunctured(dSoftBit, LSFPuncturePattern)
 
 	//shift the buffer 1 position left - get rid of the encoded flushing bits
 	lsf = lsf[1 : LSFLen+1]
+	e := channelBitErrors(lsf, LSFPuncturePattern, LSFFinalBit, dSoftBit)
 	// log.Printf("[DEBUG] lsf: %x", lsf)
 	// if CRC(lsf) == 0 {
 	// 	dst, err := DecodeCallsign(lsf[0:6])
@@ -272,8 +272,8 @@ func (d *Decoder) decodeStreamFrame(softBit []SoftBit) (frameData []byte, lich [
 
 	//decode
 	vd := ViterbiDecoder{}
-	frameData, e = vd.DecodePunctured(dSoftBit[96:], StreamPuncturePattern)
-	e = e - len(StreamPuncturePattern)
+	frameData, _ = vd.DecodePunctured(dSoftBit[96:], StreamPuncturePattern)
+	e = channelBitErrors(frameData[1:1+2+16], StreamPuncturePattern, 7, dSoftBit[96:])
 
 	// log.Printf("[DEBUG] frameData[:3]: [% 02x]", frameData[:3])
 	fn = (uint16(frameData[1]) << 8) | uint16(frameData[2])
@@ -296,11 +296,29 @@ func (d *Decoder) decodePacketFrame(softBit []SoftBit) ([]byte, int) {
 
 	//decode
 	vd := ViterbiDecoder{}
-	pkt, e := vd.DecodePunctured(dSoftBit, PacketPuncturePattern)
-	// log.Printf("[DEBUG] pkt: %#v", pkt)
-	e = e - len(PacketPuncturePattern)
+	pkt, _ := vd.DecodePunctured(dSoftBit, PacketPuncturePattern)
+	e := channelBitErrors(pkt[1:1+26], PacketPuncturePattern, PacketModeFinalBit, dSoftBit)
 
 	return pkt[1:], e
+}
+
+// channelBitErrors counts the received bits that were wrong before error
+// correction: it re-encodes the decoded data as the transmitter did and
+// compares each transmitted bit with the hard decision on the one received.
+// Divided by the number of received bits it is the channel bit error rate,
+// the same measure whether a modem supplies soft bits or hard ones.
+func channelBitErrors(data []byte, pp PuncturePattern, finalBit byte, received []SoftBit) int {
+	sent, err := ConvolutionalEncode(data, pp, finalBit)
+	if err != nil {
+		return 0
+	}
+	errs := 0
+	for i := range min(len(sent), len(received)) {
+		if bool(sent[i]) != (received[i] > SoftMaybe) {
+			errs++
+		}
+	}
+	return errs
 }
 
 func CalcSoftbits(pld []Symbol) []SoftBit {
