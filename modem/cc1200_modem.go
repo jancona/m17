@@ -657,9 +657,17 @@ func (m *CC1200) setTXFreq(freq uint32) error {
 	}
 	return nil
 }
+
+// txPowerByte encodes a TX power for the modem's CMD_SET_TX_POWER, which
+// takes a signed byte in quarter-dB steps (the firmware accepts -16 to +14
+// dBm, raw -64 to +56).
+func txPowerByte(dbm int8) byte {
+	return byte(int8(int(dbm) * 4))
+}
+
 func (m *CC1200) setTXPower(dbm int8) error {
 	log.Printf("[DEBUG] setTXPower(%v)", dbm)
-	cmd := newCommandV2(cc1200CmdSetTXPower, []byte{byte(dbm)})
+	cmd := newCommandV2(cc1200CmdSetTXPower, []byte{txPowerByte(dbm)})
 	err := m.commandWithErrResponse(cmd)
 	if err != nil {
 		return fmt.Errorf("send set TX power: %w", err)
