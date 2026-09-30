@@ -384,33 +384,43 @@ func (v *ViterbiDecoder) Init(l int) {
 	v.currMetricsData = make([]uint32, ConvolutionStates)
 }
 
+// DecodePunctured depunctures and decodes soft bits. It returns the decoded
+// bytes and the path cost in bits: how far the received soft bits sat from
+// the decoded path, summed over the bits actually received. A punctured bit is
+// filled with SoftMaybe, which adds half a bit to every path whatever was
+// sent, so that is subtracted here, as libm17 does.
 func (v *ViterbiDecoder) DecodePunctured(puncturedSoftBits []SoftBit, puncturePattern PuncturePattern) ([]byte, int) {
-	// log.Printf("[DEBUG] DecodePunctured len(puncturedSoftBits): %d, len(puncturePattern): %d", len(puncturedSoftBits), len(puncturePattern))
-	// log.Printf("[DEBUG] puncturedSoftBits: %#v, puncturePattern: %#v", puncturedSoftBits, puncturePattern)
 	// unpuncture input
 	var softBits = make([]SoftBit, 2*len(puncturedSoftBits))
 
 	p := 0
 	u := 0
+	erased := 0
 	for i := 0; i < len(puncturedSoftBits); {
 		if puncturePattern[p] {
 			softBits[u] = puncturedSoftBits[i]
 			i++
 		} else {
 			softBits[u] = SoftMaybe
+			erased++
 		}
 		u++
 		p++
 		p %= len(puncturePattern)
 	}
-	softBits = softBits[:u+u%2]
+	if u%2 == 1 {
+		softBits[u] = SoftMaybe
+		erased++
+		u++
+	}
+	softBits = softBits[:u]
 
-	out, e := v.decode(softBits)
-	// log.Printf("[DEBUG] DecodePunctured: e: %d", e)
-	return out, e
+	out, raw := v.decode(softBits)
+	cost := math.Round((float64(raw) - float64(erased)*SoftMaybe) / SoftTrue)
+	return out, max(int(cost), 0)
 }
 
-func (v *ViterbiDecoder) decode(softBits []SoftBit) ([]byte, int) {
+func (v *ViterbiDecoder) decode(softBits []SoftBit) ([]byte, uint32) {
 	// log.Printf("[DEBUG] decode() len(softBits): %d, softBits: %#v", len(softBits), softBits)
 	v.Init(len(softBits))
 	pos := 0
@@ -476,7 +486,7 @@ func absDiff(v1, v2 SoftBit) uint32 {
 	return uint32(v2 - v1)
 }
 
-func (v *ViterbiDecoder) chainback(pos, l int) ([]byte, int) {
+func (v *ViterbiDecoder) chainback(pos, l int) ([]byte, uint32) {
 	state := byte(0)
 	bitPos := l + 4
 	out := make([]byte, (l-1)/8+1)
@@ -494,8 +504,5 @@ func (v *ViterbiDecoder) chainback(pos, l int) ([]byte, int) {
 		}
 	}
 
-	cost := int(slices.Min(v.prevMetrics) / SoftMaybe / 2)
-	// log.Printf("[DEBUG] chainback(%d, %d) cost: %d", pos, l, cost)
-
-	return out, cost
+	return out, slices.Min(v.prevMetrics)
 }
