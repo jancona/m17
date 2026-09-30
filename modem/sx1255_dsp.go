@@ -60,6 +60,90 @@ func (f *FMDemodulator) process(sample complex128) []float64 {
 	return []float64{cmplx.Phase(product)}
 }
 
+// --- FM Demodulator with carrier-triggered AFC ---
+
+// FMDemodAFC demodulates FM like FMDemodulator and removes the carrier's
+// frequency offset (software AFC; see sx1255RXPipelineTuned for why it is
+// needed). The offset is the mean of the demodulated signal. It restarts
+// whenever a carrier arrives, detected as the short-term IQ power jumping to
+// more than carrierRiseSX1255 times its recent average, and then builds up
+// over the samples since, settling into an exponential average over avgCnt
+// samples.
+//
+// Fading does not restart it. A carrier counts as gone only when the power
+// is back near the noise level from before it arrived, and it counts as
+// arriving only when the power jumps 10x above the 100 ms average; during
+// mobile flutter (picket fencing) the dropouts are too short to move that
+// average, so the returning signal is not a jump. Only a dropout into the
+// noise lasting a few hundred ms, long enough for the average to fall
+// 10 dB, restarts the estimate, and by then re-acquiring is right. A signal
+// less than 10 dB above the noise never triggers a restart and behaves like
+// a plain running average.
+//
+// The restart is the point. With no signal, an SX1255's demodulated noise
+// does not average to zero: in a capture it sat 500-1100 Hz high. A plain
+// running average spends the idle time converging on that, and a
+// transmission then starts with the offset hundreds of Hz wrong until the
+// average catches up. With a 40 ms preamble that damaged the LSF of short
+// transmissions (about 5% bit errors on one), while long overs recovered
+// after their first frames.
+type FMDemodAFC struct {
+	Transform[complex128, float64]
+	prev         complex128
+	fast, slow   float64 // short- and long-term IQ power
+	before       float64 // long-term power just before the carrier arrived
+	warm         float64 // samples seen, up to slowN
+	carrier      bool
+	offset       float64
+	n, avgCnt    int
+	fastN, slowN float64
+}
+
+const (
+	// A carrier arrived: short-term power above 10x (+10 dB) its recent average.
+	carrierRiseSX1255 = 10.0
+	// It has gone: short-term power back below twice (+3 dB) the level just
+	// before it arrived. A steady carrier stays present however long it
+	// lasts, so the estimate is not restarted mid-transmission, and a noise
+	// spike clears itself as soon as it has passed.
+	carrierFallSX1255 = 2.0
+)
+
+// NewFMDemodAFC returns the stage. fastN and slowN are the power averaging
+// lengths in samples (about 1 ms and 100 ms suit M17); avgCnt < 2 turns the
+// AFC off.
+func NewFMDemodAFC(sink chan complex128, avgCnt int, fastN, slowN float64) *FMDemodAFC {
+	f := &FMDemodAFC{prev: complex(1, 0), avgCnt: avgCnt, fastN: fastN, slowN: slowN}
+	f.Transform = NewTransform(sink, f.process, 0)
+	return f
+}
+
+func (f *FMDemodAFC) process(sample complex128) []float64 {
+	d := cmplx.Phase(sample * cmplx.Conj(f.prev))
+	f.prev = sample
+	if f.avgCnt < 2 {
+		return []float64{d}
+	}
+	p := real(sample)*real(sample) + imag(sample)*imag(sample)
+	f.fast += (p - f.fast) / f.fastN
+	f.slow += (p - f.slow) / f.slowN
+	// The trigger is armed only once the averages have settled: at start-up
+	// they rise from zero (and a decimator's output ramps up while its filter
+	// fills), which would otherwise look like a carrier arriving.
+	if f.warm < f.slowN {
+		f.warm++
+	}
+	switch {
+	case !f.carrier && f.warm >= f.slowN && f.fast > carrierRiseSX1255*f.slow:
+		f.carrier, f.before, f.offset, f.n = true, f.slow, 0, 0
+	case f.carrier && f.fast < carrierFallSX1255*f.before:
+		f.carrier = false
+	}
+	f.n++
+	f.offset += (d - f.offset) / float64(min(f.n, f.avgCnt))
+	return []float64{d - f.offset}
+}
+
 // --- Polyphase Decimating FIR Filter ---
 
 // PolyphaseDecimator performs efficient decimation with FIR filtering using

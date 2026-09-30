@@ -224,9 +224,9 @@ func TestSX1255CaptureSweep(t *testing.T) {
 	// A count of 1 skips the filter entirely: the behaviour before software AFC.
 	t.Logf("--- software AFC window sweep (coefficient held at %.2f) ---", rxScalingCoeffSX1255)
 	t.Logf("%-12s %-10s %-8s %s", "avgCnt", "window", "syncs", "best dist")
-	for _, cnt := range []int{1, 125, 250, 500, 1000, 2000, 4000, 8000, 20000} {
+	for _, cnt := range []int{1, 250, 500, 1000, 2000, 4000, 8000, 16000, 40000} {
 		acc, best := run(cnt, rxScalingCoeffSX1255)
-		label := fmt.Sprintf("%.0f ms", float64(cnt)/12500*1000)
+		label := fmt.Sprintf("%.0f ms", float64(cnt)/25000*1000)
 		if cnt <= 1 {
 			label = "off"
 		}

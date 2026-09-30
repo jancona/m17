@@ -41,17 +41,22 @@ const (
 	// symbols going in are known exactly, the recovered constellation gives the
 	// coefficient directly, with no channel, noise or unknown transmitter in the
 	// path. The sweeps in TestSX1255CaptureSweep agree, favouring 1.10-1.24 on
-	// both the synthetic reference and an off-air capture.
+	// both the synthetic reference and an off-air capture. Those figures were
+	// for demodulation at 12.5 kSa/s; at the current 25 kSa/s the demodulator's
+	// radians per sample halve, so the coefficient doubles (1.24 -> 2.48). The
+	// loopback now implies 2.29 for a signal at exactly nominal deviation; 2.48
+	// suits real transmitters, which tend to run a few percent low (an MMDVM
+	// capture decodes at 0.05% BER with 2.48 and 0.4% with 2.29).
 	//
 	// The previous value of 1.54 put the constellation 24% high, spending ~2.9
 	// of the sync-distance budget before a signal arrived — which strong signals
 	// survive and marginal ones do not. That error was receive-side: the
 	// transmitter was separately confirmed on air to be within ~2% of a
 	// commercial radio, measured through the same receiver.
-	rxScalingCoeffSX1255 = 1.24
+	rxScalingCoeffSX1255 = 2.48
 
 	// basebandDCAvgCntSX1255 is the averaging window of the software AFC, in
-	// samples at the post-decimation rate (12.5 kSa/s). 2000 samples = 160 ms,
+	// samples at the post-decimation rate (25 kSa/s). 4000 samples = 160 ms,
 	// about four M17 frames. See sx1255RXPipelineTuned for why this exists.
 	//
 	// Swept against the issue #6 capture (TestSX1255CaptureSweep): accepted
@@ -60,7 +65,7 @@ const (
 	// averaging over enough frames not to track the data (M17 is only roughly
 	// DC-balanced over a frame) and converging early enough in an over to catch
 	// the m17.LSF. 160 ms converges in about four frames.
-	basebandDCAvgCntSX1255 = 2000
+	basebandDCAvgCntSX1255 = 4000
 
 	// captureBackoffMinSX1255 and captureBackoffMaxSX1255 bound the retry delay
 	// after a failed capture recovery, so an unrecoverable device (for example a
@@ -554,9 +559,9 @@ func (m *SX1255) sx1255WriteIQ(iq []complex128) error {
 //
 //	125 kSa/s complex IQ
 //	→ DC removal
-//	→ Polyphase decimating FIR (125k → 12.5k, channel filter)
+//	→ Polyphase decimating FIR (125k → 25k, channel filter)
 //	→ FM demodulator (complex IQ → real instantaneous frequency)
-//	→ Rational resampler (12.5k → 24k, ratio 48/25)
+//	→ Rational resampler (25k → 24k, ratio 24/25)
 //	→ RRC matched filter (5 sps at 24 kSa/s → symbols)
 //
 // It takes the IQ source as a channel rather than an ALSA device so the chain
@@ -572,15 +577,18 @@ func sx1255RXPipelineTuned(iqSamples chan complex128, basebandDCAvgCnt int, scal
 	// DC removal (exponential moving average high-pass)
 	dcr := NewComplexDCRemoval(iqSamples, 0.9999)
 
-	// Polyphase decimating FIR: 125 kSa/s → 12.5 kSa/s
+	// Polyphase decimating FIR: 125 kSa/s → 25 kSa/s
 	// Channel filter: 12.5 kHz bandwidth at 125 kSa/s input
+	//
+	// Not 12.5 kSa/s: at that rate the complex band only spans ±6.25 kHz,
+	// too little room around an M17 signal (about ±4.8 kHz) for the FM
+	// demodulator, and a clean signal came out with about 2% bit errors.
+	// At 25 kSa/s the same capture decodes with about 0.05%.
 	channelTaps := designChannelFilter(12500, float64(sampleRateSX1255), 200)
-	decimator := NewPolyphaseDecimator(dcr.Source(), channelTaps, 10)
+	decimator := NewPolyphaseDecimator(dcr.Source(), channelTaps, 5)
 
-	// FM demodulator: complex IQ → real instantaneous frequency (radians/sample)
-	fmDemod := NewFMDemodulator(decimator.Source())
-
-	// Baseband DC removal — software AFC.
+	// FM demodulator and software AFC: complex IQ → instantaneous frequency
+	// (radians/sample) with the carrier offset removed.
 	//
 	// A receive/transmit carrier offset lands here as a constant offset on the
 	// demodulated frequency. The complex DC removal above cannot touch it: that
@@ -597,21 +605,14 @@ func sx1255RXPipelineTuned(iqSamples chan complex128, basebandDCAvgCnt int, scal
 	//
 	// The averaging window is a compromise: long enough not to track the data
 	// (M17 is only DC-balanced over a frame or so), short enough to converge
-	// early in an over.
-	// A count of 1 would make DCFilter a first-difference filter rather than a
-	// no-op, so anything below 2 means "no correction at all".
-	demodulated := fmDemod.Source()
-	if basebandDCAvgCnt > 1 {
-		basebandDC, err := NewDCFilter(demodulated, basebandDCAvgCnt)
-		if err != nil {
-			// Unreachable: NewDCFilter only rejects counts below 1.
-			panic(fmt.Sprintf("SX1255 baseband DC filter: %v", err))
-		}
-		demodulated = basebandDC.Source()
-	}
+	// early in an over. The estimate restarts when a carrier arrives, so it
+	// converges within the preamble instead of starting from whatever the
+	// idle noise averaged to (see FMDemodAFC). The power averages are about
+	// 1 ms and 100 ms at 25 kSa/s. A count below 2 turns the AFC off.
+	demodulated := NewFMDemodAFC(decimator.Source(), basebandDCAvgCnt, 25, 2500).Source()
 
-	// Rational resampler: 12.5 kSa/s → 24 kSa/s (ratio 48/25)
-	resampler := NewRationalResampler(demodulated, 48, 25)
+	// Rational resampler: 25 kSa/s → 24 kSa/s (ratio 24/25)
+	resampler := NewRationalResampler(demodulated, 24, 25)
 
 	// No IIR pre-emphasis filter — that's CC1200-specific. The FM demodulator
 	// output doesn't need the same compensation as the CC1200's baseband.
