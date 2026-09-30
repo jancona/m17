@@ -621,12 +621,13 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 	default:
 		log.Printf("[DEBUG] receivedRFPacket() packet dst: %s", lsf.Dst.Callsign())
 		err = g.inetClient.SendPacket(p)
-		if err == nil && g.duplex {
+		if g.duplex {
+			// Repeat whether or not the reflector send worked, as for voice.
 			// Replace META with Extended Callsign Data
 			// Don't swap Src for packet
 			p.LSF.SetECD(&g.encodedCallsign, nil)
 			// p.LSF.Src = g.encodedCallsign
-			err = g.queueLocalPacket(p)
+			err = errors.Join(err, g.queueLocalPacket(p))
 		}
 	}
 	return err
