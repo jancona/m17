@@ -202,21 +202,30 @@ func (r *Client) handle() {
 		case m17.MagicACKN:
 			r.connected = true
 			r.connecting = false
+			connGap = connRetryInterval
 			r.event("Connect")
 			r.pingTimer.Reset(30 * time.Second)
 			log.Printf("[DEBUG] Received ACKN")
 		case m17.MagicNACK:
+			// Refused: the M17 inet spec's reasons (no such module, blocked
+			// by the GateKeeper, a mismatched interlink) are not transient,
+			// so asking again would only annoy the reflector. Give up.
+			r.pingTimer.Stop()
 			r.connected = false
 			r.connecting = false
-			log.Print("[INFO] Received NACK, disconnecting")
+			log.Print("[INFO] Reflector refused the link (NACK); not retrying")
 			r.event("Disconnect")
-			// r.done = true
 		case m17.MagicDISC:
+			// Dropped by the reflector. The spec says the reflector can be
+			// assumed to be going down for maintenance, and the client may
+			// reconnect after an appropriate time: ask again with the
+			// unanswered-CONN backoff. The ping timer's reconnect is stopped
+			// so the two cannot run at once.
+			r.pingTimer.Stop()
 			r.connected = false
-			r.connecting = false
-			log.Print("[INFO] Received DISC, disconnecting")
+			r.connecting = true
+			log.Printf("[INFO] Reflector disconnected us (DISC); relinking in %v", connGap)
 			r.event("Disconnect")
-			// r.done = true
 		case m17.MagicPING:
 			r.sendPONG()
 			r.pingTimer.Reset(30 * time.Second)
