@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -27,18 +28,32 @@ type Packet struct {
 	CRC     uint16
 }
 
-func NewPacketFromBytes(buf []byte) Packet {
+// NewPacketFromBytes parses an LSF followed by a packet type, payload and CRC.
+// The input comes from RF or the network, so its length is checked before
+// slicing: a short buffer would otherwise panic and take the process down.
+func NewPacketFromBytes(buf []byte) (Packet, error) {
 	var p Packet
-	p.LSF = NewLSFFromBytes(buf[:LSFLen])
+	if len(buf) < LSFLen+1+CRCLen {
+		return p, fmt.Errorf("packet too short: %d bytes", len(buf))
+	}
 	t, size := utf8.DecodeRune(buf[LSFLen:])
+	if len(buf) < LSFLen+size+CRCLen {
+		return p, fmt.Errorf("packet too short for its %d byte type: %d bytes", size, len(buf))
+	}
+	p.LSF = NewLSFFromBytes(buf[:LSFLen])
 	p.Type = PacketType(t)
-	p.Payload = buf[LSFLen+size : len(buf)-2]
+	p.Payload = buf[LSFLen+size : len(buf)-CRCLen]
 	_, err := binary.Decode(buf[len(buf)-2:], binary.BigEndian, &p.CRC)
 	if err != nil {
 		// should never happen
 		log.Printf("[ERROR] Error decoding CRC: %v", err)
 	}
-	return p
+	return p, nil
+}
+
+// SMSText returns the text of an SMS packet without its NUL terminator.
+func (p Packet) SMSText() string {
+	return strings.TrimRight(string(p.Payload), "\x00")
 }
 
 func NewPacket(dst, src string, t PacketType, data []byte) (*Packet, error) {

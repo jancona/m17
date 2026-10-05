@@ -18,8 +18,11 @@ type Logger struct {
 func New(l *slog.Logger) *Logger {
 	return &Logger{l, time.Now()}
 }
+
+// Log writes one dashboard event. The Logger may wrap a nil *slog.Logger
+// when no DashboardLog is configured; then nothing is written.
 func (l *Logger) Log(logType string, logSubtype string, addlArgs ...any) {
-	if l == nil {
+	if l == nil || l.Logger == nil {
 		return
 	}
 	args := []any{"type", logType, "subtype", logSubtype}
@@ -27,11 +30,17 @@ func (l *Logger) Log(logType string, logSubtype string, addlArgs ...any) {
 	l.Info("", args...)
 }
 func (l *Logger) LogFrame(lsf *m17.LSF, logType string, logSubtype string, addlArgs ...any) {
+	if l == nil || l.Logger == nil {
+		return
+	}
 	args := []any{"src", lsf.Src.Callsign(), "dst", lsf.Dst.Callsign(), "can", lsf.CAN()}
 	args = append(args, addlArgs...)
 	l.Log(logType, logSubtype, args...)
 }
 func (l *Logger) LogGNSS(lsf *m17.LSF, logType string) {
+	if l == nil || l.Logger == nil {
+		return
+	}
 	if lsf.GNSS() != nil && lsf.GNSS().ValidLatLon && time.Since(l.lastLogTime) > 15*time.Second {
 		log.Printf("[DEBUG] Writing GNSS data to dashboard.log: %s", lsf.GNSS().String())
 		l.lastLogTime = time.Now()
