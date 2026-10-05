@@ -152,55 +152,62 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 		var e int
 		var fn uint16
 		d.frameData, lich, fn, lichCnt, e = d.decodeStreamFrame(softBits)
-		// log.Printf("[DEBUG] frameData: [% 2x], lich: %02x, lichCnt: %d, d.lichParts: %04x, fn: %04x, d.lastStreamFN: %04x, e: %d", d.frameData, lich, lichCnt, d.lichParts, fn, d.lastStreamFN, e)
+		// Frame numbers count up by one per frame, modulo 0x8000. Only a
+		// repeat of the last frame is dropped: the same frame detected twice.
+		// Anything else is passed on, in sequence or not. A gateway or
+		// repeater that switches streams without sending a new LSF restarts
+		// the count, and dropping lower numbers would lose the new caller's
+		// audio until the count caught up, after a long stream the whole over.
+		//
+		// If the stream did change, the LICH reassembly may mix chunks of the
+		// two LSFs. That LSF fails its CRC and is discarded, and the next six
+		// frames rebuild the new one.
+		fn7 := fn & 0x7fff
+		if fn7 == d.lastStreamFN {
+			break
+		}
 		d.errors += e
 		d.bits += 272
-		if d.lastStreamFN+1 <= fn&0x7fff {
-			if d.lichParts != 0x3F && lichCnt < 6 { //6 chunks = 0b111111
-				//reconstruct LSF chunk by chunk
-				copy(d.lsfBytes[lichCnt*5:lichCnt*5+5], lich)
-				d.lichParts |= (1 << lichCnt)
-				if d.lichParts == 0x3F {
-					d.lichParts = 0
-					lsfB := NewLSFFromBytes(d.lsfBytes)
-					if lsfB.CheckCRC() {
-						d.lsf = lsfB
-						d.gotLSF = true
-						d.timeoutCnt = 0
-						// log.Printf("[DEBUG] Received stream LSF: %v", lsfB)
-						d.receivedRFStreamLICH(*d.lsf, float64(d.errors)/float64(d.bits)*100)
-					} else {
-						log.Printf("[DEBUG] Stream LSF CRC error: %v", lsfB)
-					}
+		if d.lichParts != 0x3F && lichCnt < 6 { //6 chunks = 0b111111
+			//reconstruct LSF chunk by chunk
+			copy(d.lsfBytes[lichCnt*5:lichCnt*5+5], lich)
+			d.lichParts |= (1 << lichCnt)
+			if d.lichParts == 0x3F {
+				d.lichParts = 0
+				lsfB := NewLSFFromBytes(d.lsfBytes)
+				if lsfB.CheckCRC() {
+					d.lichLSF(lsfB, e)
+				} else {
+					log.Printf("[DEBUG] Stream LSF CRC error: %v", lsfB)
 				}
 			}
-			// log.Printf("[DEBUG] Received stream frame: FN:%04X, LICH_CNT:%d, e: %d, BER: %1.1f", fn, lichCnt, e, float64(e)/2.72)
-			// The last-frame flag is a single bit inside the convolutionally
-			// coded payload, so a Viterbi failure can set it and end the over
-			// early — after which the decoder resets and the gateway stops
-			// forwarding until the operator re-keys. Honour it only on a
-			// plausibly sequential frame: a burst large enough to flip bit 15
-			// will usually disturb its neighbours too, and so fail this check.
-			//
-			// Rejecting a genuine last frame here is cheap: the transmitter
-			// sends an EOT marker immediately afterwards, and that path (below)
-			// terminates the stream. This only gives up the fast path, not the
-			// reliable one.
-			lastFrame := fn&0x8000 == 0x8000 && fn&0x7fff == (d.lastStreamFN+1)&0x7fff
-			if d.gotLSF {
-				d.streamFN = fn
-				d.receivedRFStream(*d.lsf, d.frameData, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
-				d.timeoutCnt = 0
-				if lastFrame {
-					log.Printf("[DEBUG] Last frame for RF voice stream %04x", d.streamID)
-					d.receivedRFStreamEOT(*d.lsf, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
-				}
-			}
+		}
+		// log.Printf("[DEBUG] Received stream frame: FN:%04X, LICH_CNT:%d, e: %d, BER: %1.1f", fn, lichCnt, e, float64(e)/2.72)
+		// The last-frame flag is a single bit inside the convolutionally
+		// coded payload, so a Viterbi failure can set it and end the over
+		// early — after which the decoder resets and the gateway stops
+		// forwarding until the operator re-keys. Honour it only on a
+		// plausibly sequential frame: a burst large enough to flip bit 15
+		// will usually disturb its neighbours too, and so fail this check.
+		//
+		// Rejecting a genuine last frame here is cheap: the transmitter
+		// sends an EOT marker immediately afterwards, and that path (below)
+		// terminates the stream. This only gives up the fast path, not the
+		// reliable one.
+		lastFrame := fn&0x8000 == 0x8000 && fn7 == (d.lastStreamFN+1)&0x7fff
+		if d.gotLSF {
+			d.streamFN = fn
+			d.receivedRFStream(*d.lsf, d.frameData, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
+			d.timeoutCnt = 0
 			if lastFrame {
-				d.reset()
-			} else {
-				d.lastStreamFN = fn
+				log.Printf("[DEBUG] Last frame for RF voice stream %04x", d.streamID)
+				d.receivedRFStreamEOT(*d.lsf, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
 			}
+		}
+		if lastFrame {
+			d.reset()
+		} else {
+			d.lastStreamFN = fn
 		}
 	case typ == EOTMarker && d.syncedType == StreamSync:
 		if d.gotLSF {
@@ -351,6 +358,38 @@ func CalcSoftbits(pld []Symbol) []SoftBit {
 		}
 	}
 	return softBit
+}
+
+// lichLSF handles an LSF rebuilt from the LICH, whose frame error count was
+// e. It starts a stream if no LSF was received. If the LSF names a different
+// stream from the current one, the transmitter switched streams without
+// sending a new LSF: the current stream ends and a new one starts.
+func (d *Decoder) lichLSF(lsf *LSF, e int) {
+	newStream := d.syncedType != StreamSync || !d.gotLSF
+	if !newStream && !sameStream(d.lsf, lsf) {
+		log.Printf("[DEBUG] LICH names a new stream: %s", lsf)
+		// The ending stream's counts exclude this frame, which belongs to
+		// the new one.
+		ber := float64(d.errors-e) / float64(max(d.bits-272, 1)) * 100
+		d.receivedRFStreamEOT(*d.lsf, d.streamID, (d.lastStreamFN+1)&0x7fff|0x8000, ber)
+		d.errors = e
+		d.bits = 272
+		newStream = true
+	}
+	if newStream {
+		d.syncedType = StreamSync
+		d.streamID = uint16(rand.Intn(0x10000))
+	}
+	d.lsf = lsf
+	d.gotLSF = true
+	d.timeoutCnt = 0
+	d.receivedRFStreamLICH(*d.lsf, float64(d.errors)/float64(d.bits)*100)
+}
+
+// sameStream reports whether two LSFs describe the same stream. META is
+// left out: it can change during a stream (GNSS position, text).
+func sameStream(a, b *LSF) bool {
+	return a.Dst == b.Dst && a.Src == b.Src && a.Type == b.Type
 }
 
 func (d *Decoder) reset() {
