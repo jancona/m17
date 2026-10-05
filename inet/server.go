@@ -137,7 +137,11 @@ func (s *Server) handle() {
 				}
 			}
 		case m17.MagicM17Packet:
-			p := m17.NewPacketFromBytes(buf[4:])
+			p, err := m17.NewPacketFromBytes(buf[4:])
+			if err != nil {
+				log.Printf("[INFO] Dropping bad packet from %s: %v", addr, err)
+				continue
+			}
 			log.Printf("[DEBUG] Server received packet: %s", p.String())
 			c := s.lookupClient(addr)
 			if c != nil {

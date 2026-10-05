@@ -300,7 +300,7 @@ func setupLogging(c config) {
 	logWriter := os.Stderr
 
 	if c.logRoot != "" {
-		logWriter, err = os.OpenFile(c.logPath+"/"+c.logRoot+".log", os.O_WRONLY|os.O_CREATE|os.O_SYNC, 0644)
+		logWriter, err = os.OpenFile(c.logPath+"/"+c.logRoot+".log", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 		if err != nil {
 			log.Fatalf("Error opening server output, exiting: %v", err)
 		}
@@ -444,7 +444,7 @@ func (g *Gateway) transmitNetPacket(p m17.Packet) error {
 	}
 	// log.Printf("[DEBUG] received packet from server: %#v", p)
 	if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
-		msg := string(p.Payload[0 : len(p.Payload)-1])
+		msg := p.SMSText()
 		g.dashLog.LogFrame(&lsf, "Internet", "Packet", "packetType", p.Type, "smsMessage", msg)
 	} else {
 		g.dashLog.LogFrame(&lsf, "Internet", "Packet", "packetType", p.Type)
@@ -639,10 +639,14 @@ func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) 
 func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) error {
 	g.rxHeard()
 	var err error
-	p := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
+	p, err := m17.NewPacketFromBytes(append(lsf.ToBytes(), payload...))
+	if err != nil {
+		log.Printf("[INFO] Dropping bad RF packet: %v", err)
+		return nil
+	}
 	g.dashLog.LogGNSS(&lsf, "RF")
 	if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
-		msg := string(p.Payload[0 : len(p.Payload)-1])
+		msg := p.SMSText()
 		g.dashLog.LogFrame(&lsf, "RF", "Packet", "mer", json.Number(fmt.Sprintf("%f", ber)), "packetType", p.Type, "smsMessage", msg)
 	} else {
 		g.dashLog.LogFrame(&lsf, "RF", "Packet", "mer", json.Number(fmt.Sprintf("%f", ber)), "packetType", p.Type)

@@ -105,7 +105,7 @@ func setupLogging(c *config) {
 	logWriter := os.Stderr
 
 	if c.logRoot != "" {
-		logWriter, err = os.OpenFile(c.logPath+"/"+c.logRoot+".log", os.O_WRONLY|os.O_CREATE|os.O_SYNC, 0644)
+		logWriter, err = os.OpenFile(c.logPath+"/"+c.logRoot+".log", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 		if err != nil {
 			log.Fatalf("Error opening server output, exiting: %v", err)
 		}

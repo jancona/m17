@@ -243,7 +243,11 @@ func (r *Client) handle() {
 			}
 		case m17.MagicM17Packet: // M17 packet
 			if r.packetHandler != nil {
-				p := m17.NewPacketFromBytes(buffer[4:])
+				p, err := m17.NewPacketFromBytes(buffer[4:])
+				if err != nil {
+					log.Printf("[INFO] Dropping bad packet from reflector: %v", err)
+					continue
+				}
 				// log.Printf("[DEBUG] Received packet from reflector. buffer: % 02x, buffer len: %d, p: %v", buffer[4:], len(buffer[4:]), p)
 				r.packetHandler(p)
 			}

@@ -253,9 +253,45 @@ func TestNewPacketFromBytes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NewPacketFromBytes(tt.args.buf); !reflect.DeepEqual(got, tt.want) {
+			got, err := NewPacketFromBytes(tt.args.buf)
+			if err != nil {
+				t.Fatalf("NewPacketFromBytes() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("NewPacketFromBytes() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNewPacketFromBytesShort(t *testing.T) {
+	// Anything shorter than LSF + type + CRC must be rejected, not panic
+	for n := 0; n < LSFLen+1+CRCLen; n++ {
+		if _, err := NewPacketFromBytes(make([]byte, n)); err == nil {
+			t.Errorf("NewPacketFromBytes(%d bytes) returned no error", n)
+		}
+	}
+	// A two-byte UTF-8 packet type needs one more byte
+	buf := make([]byte, LSFLen+3)
+	copy(buf[LSFLen:], []byte{0xc2, 0x80, 0})
+	if _, err := NewPacketFromBytes(buf); err == nil {
+		t.Errorf("NewPacketFromBytes() accepted a packet with a truncated CRC")
+	}
+}
+
+func TestSMSText(t *testing.T) {
+	tests := []struct {
+		payload []byte
+		want    string
+	}{
+		{[]byte("Hello\x00"), "Hello"},
+		{[]byte("Hello"), "Hello"},
+		{[]byte("\x00"), ""},
+		{[]byte{}, ""},
+	}
+	for _, tt := range tests {
+		if got := (Packet{Payload: tt.payload}).SMSText(); got != tt.want {
+			t.Errorf("SMSText(%q) = %q, want %q", tt.payload, got, tt.want)
+		}
 	}
 }
