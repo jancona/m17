@@ -1,10 +1,12 @@
 package modem
 
 import (
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jancona/m17"
 	"gopkg.in/ini.v1"
 )
 
@@ -133,5 +135,68 @@ func TestStartupWhileReceiving(t *testing.T) {
 	streamFrames(p, 60)
 	if err := m.setFrequency(444175000, 434175000, 0); err != nil {
 		t.Errorf("setFrequency behind received frames: %v", err)
+	}
+}
+
+// TestStreamLSF: the MMDVM driver sends a preamble and LSF before the first
+// frame it transmits of a stream, whatever its frame number, and ends a
+// stream that another one takes over from with an EOT.
+func TestStreamLSF(t *testing.T) {
+	m := &MMDVM{sendCmds: make(chan []byte, 32)}
+	a, err := m17.NewLSF("@ALL", "W2JJT", m17.LSFTypeStream, m17.LSFDataTypeVoice, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := m17.NewLSF("@ALL", "AA5RL", m17.LSFTypeStream, m17.LSFDataTypeVoice, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(sid, fn uint16, lsf *m17.LSF) {
+		if err := m.TransmitVoiceStream(m17.NewStreamDatagram(sid, fn, lsf, make([]byte, 16))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sent := func() string {
+		var s string
+		for len(m.sendCmds) > 0 {
+			cmd := <-m.sendCmds
+			switch {
+			case cmd[2] == mmdvmM17LinkSetup && cmd[4] == 0x77 && cmd[4+m17.BytesPerFrame-1] == 0x77:
+				s += "P"
+			case cmd[2] == mmdvmM17LinkSetup:
+				s += "L"
+			case cmd[2] == mmdvmM17Stream:
+				s += "s"
+			case cmd[2] == mmdvmM17EOT:
+				s += "E"
+			default:
+				s += "?"
+			}
+		}
+		return s
+	}
+
+	send(0xa, 14, &a) // joined late: not frame 0
+	send(0xa, 15, &a)
+	if got := sent(); got != "PLss" {
+		t.Errorf("late join sent %q, want PLss", got)
+	}
+	send(0xb, 0, &b) // takes over while 0xa is on the air
+	send(0xb, 1|0x8000, &b)
+	if got := sent(); got != "EPLssE" {
+		t.Errorf("takeover sent %q, want EPLssE", got)
+	}
+	send(0xc, 0, &a) // after a stream ended: no EOT
+	if got := sent(); got != "PLs" {
+		t.Errorf("new stream sent %q, want PLs", got)
+	}
+}
+
+// TestPreambleBytes: 0x77 bytes are the LSF preamble's +3, -3 symbols.
+func TestPreambleBytes(t *testing.T) {
+	want := m17.AppendPreamble(nil, m17.LSFPreamble)[:8]
+	got := m17.AppendSyncwordSymbols(nil, 0x7777)
+	if !slices.Equal(got, want) {
+		t.Errorf("0x77 bytes give symbols %v, want %v", got, want)
 	}
 }

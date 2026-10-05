@@ -1,6 +1,7 @@
 package modem
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -137,6 +138,11 @@ type MMDVM struct {
 	space           int
 	maxSpace        int // most free M17 buffer space seen: an empty buffer
 	// end protected by mutex
+
+	// Stream being transmitted, and whether it is still open (its last frame
+	// not yet sent). Only TransmitVoiceStream uses them.
+	txStreamID   uint16
+	txStreamOpen bool
 
 	capabilities    [2]byte
 	hwType          byte
@@ -1004,6 +1010,12 @@ func (m *MMDVM) TransmitPacket(p m17.Packet) error {
 // (the EOT) is still being modulated, and status arrives every 250 ms.
 const packetEndMarginMMDVM = 2 * m17.FrameTime
 
+// streamHandoverWindowMMDVM is how recently the last frame of an open stream
+// must have been sent for a new stream to count as taking over from it, so
+// the old one gets an EOT. Longer than reflector jitter; a stream that has
+// been silent longer than this is not on the air any more.
+const streamHandoverWindowMMDVM = 500 * time.Millisecond
+
 // waitTXDone waits until everything queued has been sent to the modem and
 // the modem reports its M17 buffer empty again, then a margin for the last
 // frame. It gives up after limit. The modem's TX-on flag is no use here: in
@@ -1047,13 +1059,31 @@ func (m *MMDVM) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	log.Printf("[DEBUG] TransmitVoiceStream id: %04x, fn: %04x, last: %v", sd.StreamID, sd.FrameNumber, sd.LastFrame)
 	var bits []m17.Bit
 	var err error
-	if sd.FrameNumber == 0 && sd.LSF != nil { // first frame
+	// A stream starts with its LSF, whatever its first frame number: the
+	// gateway joins a reflector stream late after local RF. Another stream
+	// can also take over while one is on the air (a duplex gateway repeating
+	// local RF over reflector audio); end the old one so receivers start the
+	// new one from its LSF, not from the LICH, and don't see its frame
+	// numbers jump backwards.
+	if sd.LSF != nil && (!m.txStreamOpen || sd.StreamID != m.txStreamID) {
+		if m.txStreamOpen && time.Since(m.lastTXData) < streamHandoverWindowMMDVM {
+			log.Printf("[DEBUG] Stream %04x takes over from %04x, sending EOT", sd.StreamID, m.txStreamID)
+			time.Sleep(time.Until(m.lastTXData.Add(m17.FrameTime)))
+			m.writeEOT()
+		}
+		// The firmware's own preamble only comes at the start of a
+		// transmission: not after a takeover, nor while a duplex modem is in
+		// its hang time.
+		time.Sleep(time.Until(m.lastTXData.Add(m17.FrameTime)))
+		m.writePreamble()
 		time.Sleep(time.Until(m.lastTXData.Add(m17.FrameTime)))
 		err = m.transmitLSF(*sd.LSF)
 		if err != nil {
 			return fmt.Errorf("failed to send stream LSF: %w", err)
 		}
 	}
+	m.txStreamID = sd.StreamID
+	m.txStreamOpen = !sd.LastFrame
 	bits, err = generateStreamBits(sd)
 	if err != nil {
 		return fmt.Errorf("failed to generate stream bits: %w", err)
@@ -1073,6 +1103,15 @@ func (m *MMDVM) writeBits(typ byte, bits []m17.Bit) {
 	buf := packBits(bits)
 	// log.Printf("[DEBUG] writeBits type: %02x, len: %d, buf: % 02x", typ, len(buf), buf)
 	cmd := []byte{mmdvmFrameStart, byte(4 + len(buf)), typ, 0}
+	cmd = append(cmd, buf...)
+	m.sendToModem(cmd)
+}
+
+// writePreamble sends one frame of LSF preamble (+3, -3, ...: 0x77 bytes).
+// The firmware sends frames as given, so this goes out like any other.
+func (m *MMDVM) writePreamble() {
+	buf := bytes.Repeat([]byte{0x77}, m17.BytesPerFrame)
+	cmd := []byte{mmdvmFrameStart, byte(4 + len(buf)), mmdvmM17LinkSetup, 0}
 	cmd = append(cmd, buf...)
 	m.sendToModem(cmd)
 }

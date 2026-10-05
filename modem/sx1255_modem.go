@@ -114,6 +114,8 @@ type SX1255 struct {
 	txState int         // txIdleSX1255, txPacketSX1255 or txStreamSX1255  (protected by mutexs above)
 	txTimer *time.Timer // safety timeout to disable TX PA
 
+	txStreamID uint16 // stream being transmitted; only TransmitVoiceStream uses it
+
 	// duplex leaves RX running during TX. Without it, captureLoop drops
 	// samples taken before rxMutedUntil (Unix nanoseconds): startTX sets it to
 	// the far future before enabling the PA, and stopTX sets it to the end of
@@ -557,10 +559,27 @@ func (m *SX1255) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	}
 	var syms []m17.Symbol
 
-	if firstFrame {
-		// First frame: enable TX, send preamble + m17.LSF
+	// Another stream can take over while one is on the air: a duplex
+	// gateway repeating local RF over reflector audio. End the old stream so
+	// receivers start the new one from its LSF, not from the LICH, and
+	// don't see its frame numbers jump backwards.
+	handover := !firstFrame && sd.StreamID != m.txStreamID
+	m.txStreamID = sd.StreamID
+	if handover {
+		log.Printf("[DEBUG] SX1255 stream %04x takes over, sending EOT", sd.StreamID)
+		err = m.sx1255WriteSymbols(m17.AppendEOT(nil))
+		if err != nil {
+			m.stopTX()
+			return fmt.Errorf("failed to send EOT: %w", err)
+		}
+	}
+
+	if firstFrame || handover {
+		// Preamble and LSF
 		log.Printf("[DEBUG] SX1255 Sending LSF for stream %x, lsf: %v", sd.StreamID, sd.LSF)
-		time.Sleep(10 * time.Millisecond) // TX PA settle time
+		if firstFrame {
+			time.Sleep(10 * time.Millisecond) // TX PA settle time
+		}
 
 		// Preamble
 		syms = m17.AppendPreamble(nil, m17.LSFPreamble)

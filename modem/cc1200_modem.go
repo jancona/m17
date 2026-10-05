@@ -177,7 +177,8 @@ type CC1200 struct {
 	frameSink func(typ uint16, softBits []m17.SoftBit)
 
 	mutex      sync.Mutex
-	txState    int // protected by mutex
+	txState    int    // protected by mutex
+	txStreamID uint16 // stream being transmitted; only TransmitVoiceStream uses it
 	txTimer    *time.Timer
 	cmdSource  chan commandV2
 	nRST       gpioLine
@@ -560,13 +561,27 @@ func (m *CC1200) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	m.mutex.Lock()
 	firstFrame := m.txState != txActiveCC1200
 	m.mutex.Unlock()
-	if firstFrame {
-		// First frame
+	// Another stream can take over while one is on the air: a duplex
+	// gateway repeating local RF over reflector audio. End the old stream so
+	// receivers start the new one from its LSF, not from the LICH, and
+	// don't see its frame numbers jump backwards.
+	handover := !firstFrame && sd.StreamID != m.txStreamID
+	m.txStreamID = sd.StreamID
+	if handover {
+		log.Printf("[DEBUG] Stream %04x takes over, sending EOT", sd.StreamID)
+		err = m.writeSymbols(m17.AppendEOT(nil))
+		if err != nil {
+			return fmt.Errorf("failed to send EOT: %w", err)
+		}
+	}
+	if firstFrame || handover {
 		log.Printf("[DEBUG] Sending LSF for stream %x, lsf: %v", sd.StreamID, sd.LSF)
-		m.stopRX()
-		time.Sleep(2 * time.Millisecond)
-		m.startTX()
-		time.Sleep(10 * time.Millisecond)
+		if firstFrame {
+			m.stopRX()
+			time.Sleep(2 * time.Millisecond)
+			m.startTX()
+			time.Sleep(10 * time.Millisecond)
+		}
 
 		//fill preamble
 		syms = m17.AppendPreamble(nil, m17.LSFPreamble)
