@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jancona/m17"
@@ -26,6 +28,12 @@ const txTimeoutSX1255 = endTXWait + 2*m17.FrameTime
 
 // txTailSX1255 is how long TX stays on after the playback buffer has drained.
 const txTailSX1255 = 2 * m17.FrameTime
+
+// rxHoldoffSX1255 is how long a simplex receiver stays muted after the PA is
+// switched off. Samples reach captureLoop up to an ALSA period (4096 frames,
+// about 33 ms) after they were taken, plus scheduling delay, so a read just
+// after the PA goes off can still hold the end of our own transmission.
+const rxHoldoffSX1255 = 3 * m17.FrameTime
 
 // SX1255 register addresses
 const (
@@ -85,6 +93,8 @@ const expectedVersionSX1255 = 0x11
 // is a raw IQ analog front-end — all baseband DSP is performed in software.
 //
 // The SX1255 supports full-duplex operation: RX runs continuously even during TX.
+// In simplex the receiver is on the transmit frequency and decodes our own
+// transmission, so captured samples are discarded while TX is on.
 type SX1255 struct {
 	spi      *spiDevice
 	resetPin gpioLine
@@ -103,6 +113,13 @@ type SX1255 struct {
 	txCond  *sync.Cond
 	txState int         // txIdleSX1255, txPacketSX1255 or txStreamSX1255  (protected by mutexs above)
 	txTimer *time.Timer // safety timeout to disable TX PA
+
+	// duplex leaves RX running during TX. Without it, captureLoop drops
+	// samples taken before rxMutedUntil (Unix nanoseconds): startTX sets it to
+	// the far future before enabling the PA, and stopTX sets it to the end of
+	// the holdoff once the PA is off.
+	duplex       bool
+	rxMutedUntil atomic.Int64
 
 	// TX DSP state — persists across writeSymbols calls within a transmission
 	txRRC       *TXPulseShaper
@@ -129,6 +146,7 @@ func NewSX1255(
 	txFrequency uint32,
 	frequencyCorr int16,
 	modemCfg *ini.Section,
+	duplex bool,
 ) (*SX1255, error) {
 	spiPath := modemCfg.Key("SPIDevice").MustString("/dev/spidev0.0")
 	gpioChip := modemCfg.Key("GPIOChip").MustString("gpiochip0")
@@ -146,6 +164,7 @@ func NewSX1255(
 
 	m := &SX1255{
 		txState:      txIdleSX1255,
+		duplex:       duplex,
 		rxSymbols:    make(chan float32, 1),
 		spiPath:      spiPath,
 		gpioChip:     gpioChip,
@@ -353,7 +372,7 @@ func (m *SX1255) Close() error {
 }
 
 // startTX enables the SX1255 TX PA, resets DSP state, and starts the safety timer.
-// Full-duplex: RX is NOT stopped.
+// In duplex RX keeps running; in simplex it is muted until stopTX.
 func (m *SX1255) startTX(txState int) (bool, error) {
 	if txState == txIdleSX1255 {
 		return false, errors.New("cannot start txIdleSX1255")
@@ -385,8 +404,12 @@ func (m *SX1255) startTX(txState int) (bool, error) {
 		old.Close()
 	}
 
+	if !m.duplex {
+		m.rxMutedUntil.Store(math.MaxInt64)
+	}
 	err := m.sx1255EnableTX(true)
 	if err != nil {
+		m.unmuteRX()
 		return false, fmt.Errorf("SX1255 enable TX: %w", err)
 	}
 
@@ -437,13 +460,26 @@ func (m *SX1255) stopTX() {
 	if err := m.sx1255EnableTX(false); err != nil {
 		log.Printf("[WARN] SX1255 disable TX: %v", err)
 	}
+	m.unmuteRX()
 	if m.txTimer != nil {
 		m.txTimer.Stop()
 	}
 }
 
+// unmuteRX lets a simplex receiver hear again once the holdoff has passed.
+func (m *SX1255) unmuteRX() {
+	if !m.duplex {
+		m.rxMutedUntil.Store(time.Now().Add(rxHoldoffSX1255).UnixNano())
+	}
+}
+
+// rxMuted reports whether captured samples should be discarded because
+// a simplex transmission is on the air or has only just ended.
+func (m *SX1255) rxMuted() bool {
+	return time.Now().UnixNano() < m.rxMutedUntil.Load()
+}
+
 // TransmitPacket sends a packet over RF.
-// Full-duplex: RX continues running during TX.
 func (m *SX1255) TransmitPacket(p m17.Packet) error {
 	log.Printf("[DEBUG] SX1255 TransmitPacket: %v", p)
 	_, err := m.startTX(txPacketSX1255)
@@ -514,7 +550,6 @@ func (m *SX1255) TransmitPacket(p m17.Packet) error {
 }
 
 // TransmitVoiceStream sends a voice stream frame over RF.
-// Full-duplex: RX continues running during TX.
 func (m *SX1255) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	firstFrame, err := m.startTX(txStreamSX1255)
 	if err != nil {

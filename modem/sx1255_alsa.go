@@ -312,6 +312,13 @@ func (m *SX1255) captureLoop(dev *alsa.Device, iqSamples chan<- complex128) {
 			}
 		}
 
+		// In simplex the receiver hears our own transmission. Dropping the
+		// samples, rather than zeroing them, leaves the DC removal and AFC
+		// estimates where they were before TX.
+		if m.rxMuted() {
+			continue
+		}
+
 		// Parse stereo int32 pairs into complex128
 		numFrames := len(readBuf) / bytesPerFrame
 

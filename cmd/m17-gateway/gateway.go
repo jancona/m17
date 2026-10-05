@@ -264,7 +264,7 @@ func main() {
 		}
 		log.Printf("[INFO] Connected to MMDVM modem on %s", cfg.modemCfg.Key("Port").String())
 	case "sx1255":
-		mdm, err = modem.NewSX1255(cfg.rxFrequency, cfg.txFrequency, cfg.frequencyCorr, cfg.modemCfg)
+		mdm, err = modem.NewSX1255(cfg.rxFrequency, cfg.txFrequency, cfg.frequencyCorr, cfg.modemCfg, cfg.duplex)
 		if err != nil {
 			log.Fatalf("Error creating SX1255 modem: %v", err)
 		}
