@@ -37,6 +37,12 @@ func TestServerSurvivesShortPacket(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// An SMS packet with an empty payload is long enough to parse
+	sms := make([]byte, m17.LSFLen+1+m17.CRCLen)
+	sms[m17.LSFLen] = byte(m17.PacketTypeSMS)
+	if _, err := conn.Write(append([]byte(m17.MagicM17Packet), sms...)); err != nil {
+		t.Fatal(err)
+	}
 	// A panic in the server goroutine would have ended the test binary by now
 	time.Sleep(200 * time.Millisecond)
 

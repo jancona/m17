@@ -279,6 +279,18 @@ func TestNewPacketFromBytesShort(t *testing.T) {
 	}
 }
 
+func TestEmptySMSString(t *testing.T) {
+	// The server logs every packet it receives, so String() must not panic
+	// on an SMS with no payload
+	buf := make([]byte, LSFLen+1+CRCLen)
+	buf[LSFLen] = byte(PacketTypeSMS)
+	p, err := NewPacketFromBytes(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = p.String()
+}
+
 func TestSMSText(t *testing.T) {
 	tests := []struct {
 		payload []byte

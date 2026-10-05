@@ -161,8 +161,8 @@ func (p *Packet) Encode() ([]Symbol, error) {
 
 func (p Packet) String() string {
 	var pl string
-	if p.Type == 5 {
-		pl = string(p.Payload[:len(p.Payload)-1])
+	if p.Type == PacketTypeSMS {
+		pl = p.SMSText()
 	} else {
 		pl = fmt.Sprintf("%#v", p.Payload)
 	}
