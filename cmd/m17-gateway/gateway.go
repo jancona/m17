@@ -351,6 +351,7 @@ type Gateway struct {
 	stateMutex       sync.Mutex
 	state            gatewayState
 	lastRX           time.Time // last RF frame received; guarded by stateMutex
+	rxEnded          bool      // that frame ended a stream; guarded by stateMutex
 	lastTX           time.Time // last packet finished or voice frame sent; guarded by stateMutex
 	rxHoldoff        time.Duration
 	packetGap        time.Duration
@@ -359,6 +360,7 @@ type Gateway struct {
 	lastFrameTimer *time.Timer
 	lastLSF        *m17.LSF // Workaround for reflectors that change the SRC during the stream
 	lastStreamID   uint16
+	netStreamHeld  bool // reflector voice is being held back for local RF
 	echoStream     []m17.StreamDatagram
 	audioClips     map[string][]byte
 }
@@ -462,12 +464,27 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	sd.LSF.SetECD(&sd.LSF.Src, g.inetClient.EncodedName)
 	sd.LSF.Src = g.encodedCallsign
 	sd.LSF.CalcCRC()
-	err := g.modem.TransmitVoiceStream(sd)
-	if err != nil {
-		log.Printf("[ERROR] Error transmitting voice stream: %v", err)
-		return err
+	// Local RF takes precedence. While a radio is transmitting to us, hold
+	// the reflector stream back, then join it once the channel is clear: the
+	// modem starts a fresh transmission, preamble and LSF, with the next frame.
+	held := g.localRFActive()
+	if held != g.netStreamHeld {
+		if held {
+			log.Printf("[DEBUG] Holding Internet voice stream %04x for local RF", sd.StreamID)
+		} else {
+			log.Printf("[DEBUG] Joining Internet voice stream %04x at frame %04x", sd.StreamID, sd.FrameNumber&0x7fff)
+		}
+		g.netStreamHeld = held
 	}
-	g.voiceSent()
+	var err error
+	if !held {
+		err = g.modem.TransmitVoiceStream(sd)
+		if err != nil {
+			log.Printf("[ERROR] Error transmitting voice stream: %v", err)
+			return err
+		}
+		g.voiceSent()
+	}
 	if g.lastFrameTimer != nil {
 		g.lastFrameTimer.Reset(time.Second)
 	}
@@ -540,7 +557,15 @@ func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
 	return nil
 }
 func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uint16, ber float64) error {
-	g.rxHeard()
+	// Note a last frame as the end of the stream now. In duplex, repeating
+	// it below blocks until the modem has sent it (about 300 ms on an
+	// SX1255), and only then does the decoder report the end; until it does,
+	// held reflector voice would wait the full rxHoldoff.
+	if fn&0x8000 != 0 {
+		g.rxStreamEnded()
+	} else {
+		g.rxHeard()
+	}
 	var err error
 	sd := m17.NewStreamDatagram(sid, fn, &lsf, payload)
 	switch g.getState() {
@@ -581,7 +606,7 @@ func (g *Gateway) receivedRFStreamLICH(lsf m17.LSF, ber float64) error {
 	return nil
 }
 func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) error {
-	g.rxHeard()
+	g.rxStreamEnded()
 	switch g.getState() {
 	case Echo:
 		go g.echoStreamEnd()

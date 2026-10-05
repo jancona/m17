@@ -29,11 +29,44 @@ const packetQueueLen = 64
 // channelPoll is how often a waiting packet rechecks the channel.
 const channelPoll = 50 * time.Millisecond
 
+// rfTurnaround is how long reflector voice waits after a local stream ends
+// (EOT, last frame, or decoder timeout): time for the radio to switch back
+// to receive. Waiting the full rxHoldoff would cut off the start of a quick
+// reply, such as a parrot playback. RF that stops without ending a stream
+// still waits rxHoldoff.
+const rfTurnaround = 100 * time.Millisecond
+
 // rxHeard notes a frame decoded from the receiver.
 func (g *Gateway) rxHeard() {
 	g.stateMutex.Lock()
 	g.lastRX = time.Now()
+	g.rxEnded = false
 	g.stateMutex.Unlock()
+}
+
+// rxStreamEnded notes the end of a received stream. The end can be
+// reported twice, by the last frame and then by the decoder after that
+// frame has been repeated; the first report sets the time.
+func (g *Gateway) rxStreamEnded() {
+	g.stateMutex.Lock()
+	if !g.rxEnded {
+		g.lastRX = time.Now()
+		g.rxEnded = true
+	}
+	g.stateMutex.Unlock()
+}
+
+// localRFActive reports whether a local radio is transmitting, or has only
+// just stopped: an RF frame was received within rxHoldoff, or within
+// rfTurnaround if that frame ended the stream.
+func (g *Gateway) localRFActive() bool {
+	g.stateMutex.Lock()
+	defer g.stateMutex.Unlock()
+	wait := g.rxHoldoff
+	if g.rxEnded {
+		wait = min(wait, rfTurnaround)
+	}
+	return time.Since(g.lastRX) < wait
 }
 
 // voiceSent notes a voice frame the gateway transmitted (from the
