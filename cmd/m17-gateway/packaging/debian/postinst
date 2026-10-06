@@ -18,6 +18,15 @@ fi
 # Create directories
 mkdir -p /opt/m17/m17-gateway
 
+# Packages before 'dpkg-deb --root-owner-group' created these directories
+# owned by the build user (UID 1001), and dpkg doesn't change the owner of
+# a directory that already exists. Give any such directory back to root.
+for dir in /opt/m17 /etc/polkit-1 /etc/polkit-1/rules.d; do
+    if [ -d "$dir" ] && [ "$(stat -c %u "$dir")" != 0 ]; then
+        chown root "$dir"
+    fi
+done
+
 # Set permissions
 # chown m17-gateway:m17-gateway /opt/m17 # should we do this one?
 chown -R m17-gateway:m17-gateway /opt/m17/m17-gateway
