@@ -44,6 +44,6 @@ chmod +x "${BUILD_DIR}/DEBIAN/prerm"
 chmod +x "${BUILD_DIR}/DEBIAN/postrm"
 
 # Build the package
-dpkg-deb --build "${BUILD_DIR}"
+dpkg-deb --root-owner-group --build "${BUILD_DIR}"
 
 echo "Package built: ${BUILD_DIR}.deb"
