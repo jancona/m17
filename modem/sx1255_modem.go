@@ -134,6 +134,7 @@ type SX1255 struct {
 	resetPinN    int
 	alsaCapture  string
 	alsaPlayback string
+	captureCard  int    // ALSA card of the open capture device, -1 if unknown
 	rawIQPath    string // if set, captureLoop dumps raw IQ here for off-line analysis
 	rawIQSeconds int
 	lnaGain      uint8
@@ -173,6 +174,7 @@ func NewSX1255(
 		resetPinN:    resetPin,
 		alsaCapture:  alsaCapture,
 		alsaPlayback: alsaPlayback,
+		captureCard:  -1,
 		rawIQPath:    rawIQPath,
 		rawIQSeconds: rawIQSeconds,
 		lnaGain:      uint8(lnaGain),
