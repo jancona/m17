@@ -1,6 +1,7 @@
 package inet
 
 import (
+	"bytes"
 	"net"
 	"testing"
 	"time"
@@ -213,4 +214,193 @@ func TestClientRelinksAfterDISC(t *testing.T) {
 	refl.WriteToUDP([]byte(m17.MagicDISC), from)
 	waitEvent(t, events, "Disconnect")
 	waitEvent(t, events, "Connect")
+}
+
+// parrotReflector answers CONN with ACKN and reports each packet a client
+// sends it. If echo returns true for a packet (numbered from 1), the
+// packet is sent back readdressed to broadcast, as mrefd's PARROT does.
+func parrotReflector(t *testing.T, echo func(n int) bool) (*net.UDPConn, chan m17.Packet) {
+	t.Helper()
+	refl, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { refl.Close() })
+	pkts := make(chan m17.Packet, 16)
+	go func() {
+		n := 0
+		for {
+			buf := make([]byte, 1024)
+			l, from, err := refl.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			buf = buf[:l]
+			switch {
+			case l >= 4 && string(buf[:4]) == m17.MagicCONN:
+				refl.WriteToUDP([]byte(m17.MagicACKN), from)
+			case l > 4 && string(buf[:4]) == m17.MagicM17Packet:
+				p, err := m17.NewPacketFromBytes(buf[4:])
+				if err != nil {
+					t.Errorf("bad packet from client: %v", err)
+					continue
+				}
+				n++
+				pkts <- p
+				if echo(n) {
+					reply := p
+					lsf := *p.LSF
+					reply.LSF = &lsf
+					reply.LSF.Dst = m17.EncodedDestinationAllBytes
+					reply.LSF.CalcCRC()
+					refl.WriteToUDP(append([]byte(m17.MagicM17Packet), reply.ToBytes()...), from)
+				}
+			}
+		}
+	}()
+	return refl, pkts
+}
+
+func probingClient(t *testing.T, refl *net.UDPConn, handler func(m17.Packet) error) (*Client, chan string) {
+	t.Helper()
+	old := ProbeInterval
+	ProbeInterval = 100 * time.Millisecond
+	t.Cleanup(func() { ProbeInterval = old })
+	events := make(chan string, 16)
+	c, err := NewClient("M17-QTC", "127.0.0.1", uint(refl.LocalAddr().(*net.UDPAddr).Port), "A", "N1ADJ G",
+		func(event, _ string, _ byte) { events <- event }, handler, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.ProbeReflector = true
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	return c, events
+}
+
+func nextPacket(t *testing.T, pkts chan m17.Packet) m17.Packet {
+	t.Helper()
+	select {
+	case p := <-pkts:
+		return p
+	case <-time.After(2 * time.Second):
+		t.Fatal("no packet from client")
+	}
+	return m17.Packet{}
+}
+
+// TestProbeCurrentReflector: on linking, the client sends PARROT a raw
+// packet with valid CRCs; a reflector that echoes it is current, and the
+// echo is not passed on.
+func TestProbeCurrentReflector(t *testing.T) {
+	refl, pkts := parrotReflector(t, func(int) bool { return true })
+	passed := make(chan m17.Packet, 4)
+	c, _ := probingClient(t, refl, func(p m17.Packet) error { passed <- p; return nil })
+
+	p := nextPacket(t, pkts)
+	if got := p.LSF.Dst.Callsign(); got != "PARROT" {
+		t.Errorf("probe DST %q, want PARROT", got)
+	}
+	if got := p.LSF.Src.Callsign(); got != "N1ADJ G" {
+		t.Errorf("probe SRC %q, want the linked callsign", got)
+	}
+	if p.Type != m17.PacketTypeRAW || len(p.Payload) != probeTagLen {
+		t.Errorf("probe type %v, payload % x; want a raw %d-byte tag", p.Type, p.Payload, probeTagLen)
+	}
+	if !p.LSF.CheckCRC() || !p.CheckCRC() {
+		t.Error("probe has a bad LSF or payload CRC")
+	}
+	// Wait past the point where an unanswered probe would make it legacy.
+	time.Sleep(5 * ProbeInterval)
+	if c.Legacy() {
+		t.Error("reflector that echoed the probe is legacy")
+	}
+	select {
+	case p := <-pkts:
+		t.Errorf("probe resent after the reply: %v", p)
+	default:
+	}
+	select {
+	case p := <-passed:
+		t.Errorf("probe reply passed to the packet handler: %v", p)
+	default:
+	}
+}
+
+// TestProbeLegacyReflector: a reflector that doesn't answer three probes
+// is legacy (and current until then); a late answer makes it current.
+func TestProbeLegacyReflector(t *testing.T) {
+	refl, pkts := parrotReflector(t, func(n int) bool { return n == 4 })
+	c, _ := probingClient(t, refl, nil)
+
+	p1 := nextPacket(t, pkts)
+	if c.Legacy() {
+		t.Error("legacy before the probe went unanswered")
+	}
+	nextPacket(t, pkts)
+	nextPacket(t, pkts)
+	time.Sleep(3 * ProbeInterval / 2)
+	if !c.Legacy() {
+		t.Fatal("not legacy after three unanswered probes")
+	}
+	select {
+	case p := <-pkts:
+		t.Fatalf("fourth probe sent: %v", p)
+	default:
+	}
+
+	// The reply to the first probe arrives late.
+	p1.LSF.Dst = m17.EncodedDestinationAllBytes
+	p1.LSF.CalcCRC()
+	from := c.conn.LocalAddr().(*net.UDPAddr)
+	refl.WriteToUDP(append([]byte(m17.MagicM17Packet), p1.ToBytes()...), from)
+	deadline := time.Now().Add(2 * time.Second)
+	for c.Legacy() {
+		if time.Now().After(deadline) {
+			t.Fatal("still legacy after a late reply")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestProbeOnRelink: each link is probed afresh, with a new tag.
+func TestProbeOnRelink(t *testing.T) {
+	old := connRetryInterval
+	connRetryInterval = 100 * time.Millisecond
+	t.Cleanup(func() { connRetryInterval = old })
+	refl, pkts := parrotReflector(t, func(int) bool { return true })
+	c, events := probingClient(t, refl, nil)
+	waitEvent(t, events, "Connect")
+	p1 := nextPacket(t, pkts)
+
+	refl.WriteToUDP([]byte(m17.MagicDISC), c.conn.LocalAddr().(*net.UDPAddr))
+	waitEvent(t, events, "Disconnect")
+	waitEvent(t, events, "Connect")
+	p2 := nextPacket(t, pkts)
+	if bytes.Equal(p1.Payload, p2.Payload) {
+		t.Error("relink probe reused the tag")
+	}
+}
+
+// TestNoProbeByDefault: a client without ProbeReflector sends no probe.
+func TestNoProbeByDefault(t *testing.T) {
+	refl, pkts := parrotReflector(t, func(int) bool { return true })
+	events := make(chan string, 16)
+	c, err := NewClient("M17-QTC", "127.0.0.1", uint(refl.LocalAddr().(*net.UDPAddr).Port), "A", "N1ADJ G",
+		func(event, _ string, _ byte) { events <- event }, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	waitEvent(t, events, "Connect")
+	select {
+	case p := <-pkts:
+		t.Errorf("probe sent without ProbeReflector: %v", p)
+	case <-time.After(300 * time.Millisecond):
+	}
 }

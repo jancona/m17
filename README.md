@@ -19,6 +19,8 @@ It bridges to these systems:
 
 [m17-gateway](./cmd/m17-gateway/) allows a computer and modem to act as a repeater/hotspot. It also connects RF clients to Internet services such as reflectors. It currently supports the [CC1200 Pi HAT](https://github.com/M17-Project/CC1200_HAT-hw), the [SX1255 Pi HAT](https://github.com/M17-Project/SX1255_HAT-hw) and MMDVM-compatible hotspots and modems. When run on a Raspberry Pi with a compatible HAT or modem, it can forward M17 voice and packet traffic to and from a reflector, making it an M17 voice and packet hotspot. When used with the SX1255 HAT or an MMDVM modem it can form the heart of an M17 repeater.
 
+Current M17 reflectors (mrefd 1.0.0 and later) forward each stream and packet to its real destination, so the gateway sends them with the destination unchanged. Legacy reflectors (urfd, and mrefd before 1.0.0) forward only streams addressed to their reflector and module, and support neither PARROT nor packet mode. Each time it links, the gateway sends the reflector a short test packet to PARROT; a reflector that doesn't send it back within a few seconds is treated as legacy. On a legacy reflector, a broadcast stream (to `@ALL`, `ALL` or `#ALL`) is addressed to the reflector and module instead, a stream to PARROT or a callsign is sent unchanged (the reflector will probably drop it, and the gateway logs that), and packets are not sent.
+
 The easiest way to get a working hotspot, including `m17-gateway` and a [web dashboard](https://github.com/M17-Project/rpi-dashboard) is using DK1MI's [excellent installer script](https://github.com/DK1MI/m17-hotspot-installer). Highly recommended!
 
 Another way to install just the gateway is using the APT package from a release on Github. To install it:

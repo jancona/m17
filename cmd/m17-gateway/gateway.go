@@ -361,6 +361,8 @@ type Gateway struct {
 	lastLSF        *m17.LSF // Workaround for reflectors that change the SRC during the stream
 	lastStreamID   uint16
 	netStreamHeld  bool // reflector voice is being held back for local RF
+	rfToLegacy     bool // the current RF stream is going to a legacy reflector
+	rfDirectLogged bool // and a warning that it will probably be dropped was logged
 	echoStream     []m17.StreamDatagram
 	audioClips     map[string][]byte
 }
@@ -418,6 +420,7 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error creating client: %v", err)
 		}
+		g.inetClient.ProbeReflector = true
 		err = g.inetClient.Connect()
 		if err != nil {
 			return nil, fmt.Errorf("error connecting to %s %s:%d %s: %v", g.Name, g.Server, g.Port, g.Module, err)
@@ -550,6 +553,10 @@ func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
 			g.setState(LocalCommand)
 		default:
 			log.Printf("[DEBUG] receivedRFLSF() RFStream: %s", lsf.Dst.Callsign())
+			// Decided once per stream, so that the probe finishing
+			// mid-stream cannot readdress it partway through.
+			g.rfToLegacy = g.inetClient != nil && g.inetClient.Legacy()
+			g.rfDirectLogged = false
 			g.setState(RFStreamRX)
 		}
 		// TODO: Should we be sending the RF LSF here?
@@ -573,7 +580,7 @@ func (g *Gateway) receivedRFStreamFrame(lsf m17.LSF, payload []byte, sid, fn uin
 		g.echoStreamRecord(sd)
 	case RFStreamRX:
 		if g.inetClient != nil {
-			err = g.inetClient.SendStream(sd)
+			err = g.inetClient.SendStream(g.streamForReflector(sd))
 		}
 		if g.duplex {
 			// Replace META with Extended Callsign Data
@@ -662,7 +669,9 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 		go g.infoPacket(p)
 	default:
 		log.Printf("[DEBUG] receivedRFPacket() packet dst: %s", lsf.Dst.Callsign())
-		if g.inetClient != nil {
+		if g.inetClient != nil && g.inetClient.Legacy() {
+			log.Printf("[INFO] Not sending packet to %s: legacy reflectors don't support packet mode", g.inetClient.Name)
+		} else if g.inetClient != nil {
 			err = g.inetClient.SendPacket(p)
 		}
 		if g.duplex {
@@ -675,6 +684,45 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 		}
 	}
 	return err
+}
+
+// streamForReflector returns sd as it is to be sent to the reflector.
+// Current reflectors forward a stream to its real destination, so it is
+// sent unchanged. Legacy ones forward only streams addressed to their
+// reflector and module, so a broadcast is readdressed to those; a directed
+// stream (to PARROT, or a callsign) is sent unchanged, though the
+// reflector will probably drop it. The LSF is copied, not changed in
+// place: in duplex, sd is repeated on RF as received.
+func (g *Gateway) streamForReflector(sd m17.StreamDatagram) m17.StreamDatagram {
+	if !g.rfToLegacy {
+		return sd
+	}
+	if !isBroadcast(sd.LSF.Dst) {
+		if !g.rfDirectLogged {
+			log.Printf("[INFO] Legacy reflector %s will probably drop stream %04x to %s: it forwards only broadcasts",
+				g.inetClient.Name, sd.StreamID, sd.LSF.Dst.Callsign())
+			g.rfDirectLogged = true
+		}
+		return sd
+	}
+	lsf := *sd.LSF
+	lsf.Dst = *g.inetClient.EncodedName
+	lsf.CalcCRC()
+	sd.LSF = &lsf
+	return sd
+}
+
+// isBroadcast reports whether dst is a broadcast: the broadcast address
+// (@ALL), or the callsigns ALL or #ALL.
+func isBroadcast(dst m17.EncodedCallsign) bool {
+	if dst == m17.EncodedDestinationAllBytes {
+		return true
+	}
+	switch dst.Callsign() {
+	case "ALL", "#ALL":
+		return true
+	}
+	return false
 }
 
 func (g *Gateway) Run() {

@@ -1,12 +1,14 @@
 package inet
 
 import (
+	"bytes"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
-
+	"sync"
 	"time"
 
 	"github.com/jancona/m17"
@@ -25,6 +27,23 @@ const maxRetries = 10
 var (
 	connRetryInterval    = 5 * time.Second
 	maxConnRetryInterval = time.Minute
+)
+
+// ProbeInterval is the wait between PARROT probes, and after the last
+// one before an unanswered reflector is taken to be legacy.
+var ProbeInterval = 1500 * time.Millisecond
+
+const (
+	probeTries  = 3
+	probeTagLen = 8
+)
+
+type reflectorKind int
+
+const (
+	reflectorUnknown reflectorKind = iota // not yet known; treated as current
+	reflectorCurrent
+	reflectorLegacy
 )
 
 type EventFunc func(event string, name string, module byte)
@@ -52,6 +71,15 @@ type Client struct {
 	streamHandler   func(m17.StreamDatagram) error
 	running         bool
 	events          EventFunc
+
+	// ProbeReflector, set before Connect, makes the client find out on
+	// each link whether the reflector is current or legacy (see Legacy).
+	ProbeReflector bool
+	probeMu        sync.Mutex
+	probeTag       []byte // payload of the probes for this link; nil if none
+	probeSent      int
+	probeTimer     *time.Timer
+	kind           reflectorKind
 }
 
 func NewClient(name string, server string, port uint, module string, callsign string, events EventFunc, packetHandler func(m17.Packet) error, streamHandler func(m17.StreamDatagram) error) (*Client, error) {
@@ -89,6 +117,7 @@ func NewClient(name string, server string, port uint, module string, callsign st
 			log.Printf("[DEBUG] No PINGs received in > 30 seconds. Disconnected.")
 			r.pingTimer.Stop()
 			r.connected = false
+			r.stopProbe()
 			r.event("Disconnect")
 			r.retryCount = 0
 			for !r.connected && r.retryCount < maxRetries {
@@ -142,6 +171,7 @@ func (r *Client) Close() error {
 	log.Print("[DEBUG] Client.Close()")
 	r.running = false
 	r.pingTimer.Stop()
+	r.stopProbe()
 	r.sendDISC()
 	r.event("Disconnect")
 	return r.conn.Close()
@@ -206,6 +236,9 @@ func (r *Client) handle() {
 			r.event("Connect")
 			r.pingTimer.Reset(30 * time.Second)
 			log.Printf("[DEBUG] Received ACKN")
+			if r.ProbeReflector {
+				r.startProbe()
+			}
 		case m17.MagicNACK:
 			// Refused: the M17 inet spec's reasons (no such module, blocked
 			// by the GateKeeper, a mismatched interlink) are not transient,
@@ -213,6 +246,7 @@ func (r *Client) handle() {
 			r.pingTimer.Stop()
 			r.connected = false
 			r.connecting = false
+			r.stopProbe()
 			log.Print("[INFO] Reflector refused the link (NACK); not retrying")
 			r.event("Disconnect")
 		case m17.MagicDISC:
@@ -224,6 +258,7 @@ func (r *Client) handle() {
 			r.pingTimer.Stop()
 			r.connected = false
 			r.connecting = true
+			r.stopProbe()
 			log.Printf("[INFO] Reflector disconnected us (DISC); relinking in %v", connGap)
 			r.event("Disconnect")
 		case m17.MagicPING:
@@ -242,10 +277,13 @@ func (r *Client) handle() {
 				}
 			}
 		case m17.MagicM17Packet: // M17 packet
-			if r.packetHandler != nil {
+			if r.packetHandler != nil || r.ProbeReflector {
 				p, err := m17.NewPacketFromBytes(buffer[4:])
 				if err != nil {
 					log.Printf("[INFO] Dropping bad packet from reflector: %v", err)
+					continue
+				}
+				if r.probeReply(p) || r.packetHandler == nil {
 					continue
 				}
 				// log.Printf("[DEBUG] Received packet from reflector. buffer: % 02x, buffer len: %d, p: %v", buffer[4:], len(buffer[4:]), p)
@@ -254,6 +292,93 @@ func (r *Client) handle() {
 		}
 	}
 	r.running = false
+}
+
+// Legacy reports whether the reflector is a legacy one (all urfd, and mrefd
+// before 1.0.0). Those forward only streams addressed to their reflector
+// and module, and support neither PARROT nor packet mode; current ones
+// forward traffic to its real destination. A reflector is legacy if it
+// did not answer the PARROT probe sent when the client linked; until then
+// it is treated as current. Always false unless ProbeReflector is set.
+func (r *Client) Legacy() bool {
+	r.probeMu.Lock()
+	defer r.probeMu.Unlock()
+	return r.kind == reflectorLegacy
+}
+
+// startProbe sends the reflector a raw packet to PARROT with a random tag.
+// A current reflector sends it back; a legacy one does not.
+func (r *Client) startProbe() {
+	tag := make([]byte, probeTagLen)
+	rand.Read(tag)
+	r.probeMu.Lock()
+	if r.probeTimer != nil {
+		r.probeTimer.Stop()
+	}
+	r.kind = reflectorUnknown
+	r.probeTag = tag
+	r.probeSent = 0
+	r.probeMu.Unlock()
+	r.sendProbe(tag)
+}
+
+// sendProbe sends the probe tagged tag, unless it has been answered or
+// superseded, and resends it after ProbeInterval. Once probeTries have
+// gone unanswered, the reflector is legacy.
+func (r *Client) sendProbe(tag []byte) {
+	r.probeMu.Lock()
+	if !bytes.Equal(tag, r.probeTag) || r.kind != reflectorUnknown {
+		r.probeMu.Unlock()
+		return
+	}
+	if r.probeSent == probeTries {
+		r.kind = reflectorLegacy
+		r.probeMu.Unlock()
+		log.Printf("[INFO] No reply from %s to PARROT; treating it as a legacy reflector", r.Name)
+		return
+	}
+	r.probeSent++
+	r.probeTimer = time.AfterFunc(ProbeInterval, func() { r.sendProbe(tag) })
+	r.probeMu.Unlock()
+	p, err := m17.NewPacket("PARROT", r.callsign, m17.PacketTypeRAW, tag)
+	if err == nil {
+		err = r.SendPacket(*p)
+	}
+	if err != nil {
+		log.Printf("[ERROR] Sending PARROT probe: %v", err)
+	}
+}
+
+// stopProbe stops probing the reflector, as the link has gone.
+func (r *Client) stopProbe() {
+	r.probeMu.Lock()
+	defer r.probeMu.Unlock()
+	if r.probeTimer != nil {
+		r.probeTimer.Stop()
+	}
+	r.probeTag = nil
+}
+
+// probeReply reports whether p is the reflector's reply to the probe, and
+// if so, notes the reflector is current. The reply's LSF is not checked:
+// mrefd readdresses it to broadcast.
+func (r *Client) probeReply(p m17.Packet) bool {
+	if p.Type != m17.PacketTypeRAW {
+		return false
+	}
+	r.probeMu.Lock()
+	defer r.probeMu.Unlock()
+	if r.probeTag == nil || !bytes.Equal(p.Payload, r.probeTag) {
+		return false
+	}
+	r.probeTimer.Stop()
+	if r.kind == reflectorLegacy {
+		log.Printf("[INFO] Late reply from %s to PARROT; treating it as a current reflector", r.Name)
+	} else {
+		log.Printf("[DEBUG] %s replied to PARROT: current reflector", r.Name)
+	}
+	r.kind = reflectorCurrent
+	return true
 }
 
 func (r *Client) SendPacket(p m17.Packet) error {
