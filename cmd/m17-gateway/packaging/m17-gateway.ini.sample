@@ -60,7 +60,13 @@ TXHang=5
 SPIDevice = /dev/spidev0.0
 GPIOChip = gpiochip0
 ResetPin = 22
-; In most cases the ALSA devices may be left blank
+; ALSA devices. Leave blank to use the SX1255's sound card automatically:
+; capture is the first I2S device, and playback is taken from the same card,
+; so HDMI audio is never picked. To choose a device, give one of:
+;   hw:CARD,DEVICE        e.g. hw:1,0 (numbers from "arecord -l" / "aplay -l")
+;   a device node path    e.g. /dev/snd/pcmC1D0c (capture) or pcmC1D1p (playback)
+;   the exact device name, e.g. 3f203000.i2s-dir-hifi dir-hifi-0
+; Card numbers can change between boots; device names don't.
 ALSACaptureDevice = 
 ALSAPlaybackDevice = 
 ; RX LNA gain. The SX1255 supports only these six settings, in uneven steps:
