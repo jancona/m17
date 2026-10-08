@@ -117,9 +117,9 @@ func recoverALSA(dev *alsa.Device) error {
 }
 
 // sx1255OpenCapture finds and opens an ALSA PCM capture device.
-// deviceHint matches against the device Path (e.g., "/dev/snd/pcmC0D1c")
-// or the device Title. If empty, a device whose title contains "i2s" is
-// preferred; falls back to first found.
+// deviceHint is the device Path (e.g., "/dev/snd/pcmC0D1c"), the device
+// Title, or hw:CARD[,DEVICE]. If empty, the device is chosen by the rules in
+// selectALSADevice.
 func sx1255OpenCapture(deviceHint string) (*alsa.Device, error) {
 	cards, err := alsa.OpenCards()
 	if err != nil {
@@ -339,13 +339,10 @@ func (m *SX1255) captureDevice() *alsa.Device {
 }
 
 // sx1255OpenPlayback finds and opens an ALSA PCM playback device.
-// deviceHint matches against the device Path or Title. If empty, a device
-// whose title contains "i2s" is preferred (to avoid selecting onboard audio
-// such as bcm2835 Headphones on Pi 3/4); falls back to first found.
+// deviceHint takes the same forms as for sx1255OpenCapture. Without one it
+// prefers a device on preferCard, the card the capture device is on: the
+// SX1255 card has both, and this keeps HDMI from being picked for transmit.
 // The device is configured for S32_LE stereo at the I2S master rate (125 kSa/s).
-// sx1255OpenPlayback opens the playback device. Without a configured device it
-// prefers one on preferCard, the card the capture device is on: the SX1255
-// card has both, and this keeps HDMI from being picked for transmit.
 func sx1255OpenPlayback(deviceHint string, preferCard int) (*alsa.Device, error) {
 	cards, err := alsa.OpenCards()
 	if err != nil {
