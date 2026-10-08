@@ -1,0 +1,71 @@
+name: Problem report
+description: Something in m17-gateway, the other tools, or the library didn't work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. There's no such thing as too much detail: many problems depend on hardware I don't have, so your setup may be the only place this can be seen. See [CONTRIBUTING.md](https://github.com/jancona/m17/blob/master/CONTRIBUTING.md) for more.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part?
+      options:
+        - m17-gateway (hotspot)
+        - m17-message (GUI client) or m17-text-cli
+        - m17-bridge
+        - m17-inet (reflector monitor)
+        - modem-emulator
+        - The Go library
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Include callsigns, the reflector and module, and roughly when (with time zone), so it can be found in the logs.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: As exactly as you can. Say whether it happens every time or only sometimes.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "On a hotspot, the output of `dpkg-query -W m17-gateway`. Otherwise the release or the commit you built from."
+      placeholder: m17-gateway 0.7.3
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware
+      description: "For the gateway: the Raspberry Pi model, the modem (CC1200 HAT, SX1255, MMDVM_HS or another MMDVM board) and its firmware version. For audio problems on an SX1255, include the output of `aplay -l` and `arecord -l`."
+      placeholder: Pi Zero 2 W with an SX1255 HAT
+  - type: input
+    id: radio
+    attributes:
+      label: Radio
+      description: If a radio was involved, its model and firmware version.
+      placeholder: CS7000 with OpenRTX 0.3.x
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: The relevant sections of `/etc/m17-gateway.ini` (usually `[Radio]` and `[Modem]`). Leave out anything private.
+      render: ini
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Set `Level = DEBUG` in the `[Log]` section of `/etc/m17-gateway.ini`, restart the gateway, reproduce the problem, and paste the output of `journalctl -u m17-gateway` from a little before to a little after."
+      render: text
+  - type: textarea
+    id: fix
+    attributes:
+      label: Ideas for a fix
+      description: Links to the relevant code, and a sketch of how you would fix it, if you have one.
