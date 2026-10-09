@@ -18,6 +18,19 @@ const (
 
 var EncodedDestinationAllBytes = EncodedCallsign{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
+// IsBroadcast reports whether dst is a broadcast: the broadcast address
+// (@ALL), or the callsigns ALL or #ALL.
+func IsBroadcast(dst EncodedCallsign) bool {
+	if dst == EncodedDestinationAllBytes {
+		return true
+	}
+	switch dst.Callsign() {
+	case "ALL", "#ALL":
+		return true
+	}
+	return false
+}
+
 const m17Chars = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/."
 
 var exactCallsignRegex = regexp.MustCompile(`^([0-9]?[A-Z]{1,2}[0-9]{0,2}/)?[0-9]?[A-Z]{1,2}[0-9]{1,2}[A-Z]{1,4}([ -/\.][A-Z0-9 -/\.]*)?$`)

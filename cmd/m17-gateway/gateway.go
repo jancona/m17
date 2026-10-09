@@ -697,7 +697,7 @@ func (g *Gateway) streamForReflector(sd m17.StreamDatagram) m17.StreamDatagram {
 	if !g.rfToLegacy {
 		return sd
 	}
-	if !isBroadcast(sd.LSF.Dst) {
+	if !m17.IsBroadcast(sd.LSF.Dst) {
 		if !g.rfDirectLogged {
 			log.Printf("[INFO] Legacy reflector %s will probably drop stream %04x to %s: it forwards only broadcasts",
 				g.inetClient.Name, sd.StreamID, sd.LSF.Dst.Callsign())
@@ -710,19 +710,6 @@ func (g *Gateway) streamForReflector(sd m17.StreamDatagram) m17.StreamDatagram {
 	lsf.CalcCRC()
 	sd.LSF = &lsf
 	return sd
-}
-
-// isBroadcast reports whether dst is a broadcast: the broadcast address
-// (@ALL), or the callsigns ALL or #ALL.
-func isBroadcast(dst m17.EncodedCallsign) bool {
-	if dst == m17.EncodedDestinationAllBytes {
-		return true
-	}
-	switch dst.Callsign() {
-	case "ALL", "#ALL":
-		return true
-	}
-	return false
 }
 
 func (g *Gateway) Run() {

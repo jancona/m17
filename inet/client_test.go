@@ -306,8 +306,8 @@ func TestProbeCurrentReflector(t *testing.T) {
 	if got := p.LSF.Src.Callsign(); got != "N1ADJ G" {
 		t.Errorf("probe SRC %q, want the linked callsign", got)
 	}
-	if p.Type != m17.PacketTypeRAW || len(p.Payload) != probeTagLen {
-		t.Errorf("probe type %v, payload % x; want a raw %d-byte tag", p.Type, p.Payload, probeTagLen)
+	if p.Type != m17.PacketTypeRAW || len(p.Payload) != 8 {
+		t.Errorf("probe type %v, payload % x; want a raw 8-byte tag", p.Type, p.Payload)
 	}
 	if !p.LSF.CheckCRC() || !p.CheckCRC() {
 		t.Error("probe has a bad LSF or payload CRC")

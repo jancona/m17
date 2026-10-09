@@ -1,8 +1,6 @@
 package inet
 
 import (
-	"bytes"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"log"
@@ -33,10 +31,7 @@ var (
 // one before an unanswered reflector is taken to be legacy.
 var ProbeInterval = 1500 * time.Millisecond
 
-const (
-	probeTries  = 3
-	probeTagLen = 8
-)
+const probeTries = 3
 
 type reflectorKind int
 
@@ -76,7 +71,7 @@ type Client struct {
 	// each link whether the reflector is current or legacy (see Legacy).
 	ProbeReflector bool
 	probeMu        sync.Mutex
-	probeTag       []byte // payload of the probes for this link; nil if none
+	probe          *m17.Probe // the probe for this link; nil if none
 	probeSent      int
 	probeTimer     *time.Timer
 	kind           reflectorKind
@@ -306,28 +301,27 @@ func (r *Client) Legacy() bool {
 	return r.kind == reflectorLegacy
 }
 
-// startProbe sends the reflector a raw packet to PARROT with a random tag.
-// A current reflector sends it back; a legacy one does not.
+// startProbe sends the reflector a new Probe. A current reflector sends
+// it back; a legacy one does not.
 func (r *Client) startProbe() {
-	tag := make([]byte, probeTagLen)
-	rand.Read(tag)
+	probe := m17.NewProbe()
 	r.probeMu.Lock()
 	if r.probeTimer != nil {
 		r.probeTimer.Stop()
 	}
 	r.kind = reflectorUnknown
-	r.probeTag = tag
+	r.probe = &probe
 	r.probeSent = 0
 	r.probeMu.Unlock()
-	r.sendProbe(tag)
+	r.sendProbe(&probe)
 }
 
-// sendProbe sends the probe tagged tag, unless it has been answered or
-// superseded, and resends it after ProbeInterval. Once probeTries have
-// gone unanswered, the reflector is legacy.
-func (r *Client) sendProbe(tag []byte) {
+// sendProbe sends probe, unless it has been answered or superseded, and
+// resends it after ProbeInterval. Once probeTries have gone unanswered,
+// the reflector is legacy.
+func (r *Client) sendProbe(probe *m17.Probe) {
 	r.probeMu.Lock()
-	if !bytes.Equal(tag, r.probeTag) || r.kind != reflectorUnknown {
+	if probe != r.probe || r.kind != reflectorUnknown {
 		r.probeMu.Unlock()
 		return
 	}
@@ -338,13 +332,9 @@ func (r *Client) sendProbe(tag []byte) {
 		return
 	}
 	r.probeSent++
-	r.probeTimer = time.AfterFunc(ProbeInterval, func() { r.sendProbe(tag) })
+	r.probeTimer = time.AfterFunc(ProbeInterval, func() { r.sendProbe(probe) })
 	r.probeMu.Unlock()
-	p, err := m17.NewPacket("PARROT", r.callsign, m17.PacketTypeRAW, tag)
-	if err == nil {
-		err = r.SendPacket(*p)
-	}
-	if err != nil {
+	if err := r.SendPacket(probe.Packet(*r.encodedCallsign)); err != nil {
 		log.Printf("[ERROR] Sending PARROT probe: %v", err)
 	}
 }
@@ -356,19 +346,15 @@ func (r *Client) stopProbe() {
 	if r.probeTimer != nil {
 		r.probeTimer.Stop()
 	}
-	r.probeTag = nil
+	r.probe = nil
 }
 
 // probeReply reports whether p is the reflector's reply to the probe, and
-// if so, notes the reflector is current. The reply's LSF is not checked:
-// mrefd readdresses it to broadcast.
+// if so, notes the reflector is current.
 func (r *Client) probeReply(p m17.Packet) bool {
-	if p.Type != m17.PacketTypeRAW {
-		return false
-	}
 	r.probeMu.Lock()
 	defer r.probeMu.Unlock()
-	if r.probeTag == nil || !bytes.Equal(p.Payload, r.probeTag) {
+	if r.probe == nil || !r.probe.IsReply(p) {
 		return false
 	}
 	r.probeTimer.Stop()

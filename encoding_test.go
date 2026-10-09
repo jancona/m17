@@ -253,3 +253,27 @@ func TestCSRegex(t *testing.T) {
 		})
 	}
 }
+
+func TestIsBroadcast(t *testing.T) {
+	all, err := EncodeCallsign("#ALL")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w1aw, err := EncodeCallsign("W1AW")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// EncodeCallsign rejects ALL, which a radio may still send: 1 + 12*40 + 12*40*40.
+	plainAll := EncodedCallsign{0, 0, 0, 0, 0x4c, 0xe1}
+	if plainAll.Callsign() != "ALL" {
+		t.Fatalf("test encoding of ALL decodes as %q", plainAll.Callsign())
+	}
+	for _, tt := range []struct {
+		dst  EncodedCallsign
+		want bool
+	}{{EncodedDestinationAllBytes, true}, {*all, true}, {plainAll, true}, {*w1aw, false}} {
+		if got := IsBroadcast(tt.dst); got != tt.want {
+			t.Errorf("IsBroadcast(%s) = %v, want %v", tt.dst.Callsign(), got, tt.want)
+		}
+	}
+}

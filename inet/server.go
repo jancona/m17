@@ -144,6 +144,19 @@ func (s *Server) handle() {
 			}
 			log.Printf("[DEBUG] Server received packet: %s", p.String())
 			c := s.lookupClient(addr)
+			if c != nil && m17.IsParrot(p.LSF.Dst) {
+				// Answered here, to the sender only, as a current
+				// reflector does: clients probe PARROT to tell current
+				// reflectors from legacy ones, and stop sending packets
+				// to a reflector that doesn't answer.
+				if !p.LSF.CheckCRC() || !p.CheckCRC() {
+					log.Printf("[INFO] Dropping packet to PARROT with a bad CRC from %s", addr)
+					continue
+				}
+				reply := m17.ParrotReply(p)
+				s.SendPacket(&reply, addr)
+				continue
+			}
 			if c != nil {
 				c.module.HandlePacket(p)
 				// Send the packet to other clients of the module, becuase the module won't send it back
