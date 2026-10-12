@@ -123,9 +123,8 @@ func NewLSF(destCall, sourceCall string, t LSFType, dt LSFDataType, can byte) (L
 		// Data Type is only defined for stream mode
 		dt = 0
 	}
-	lsf.Type[0] = (can & 0x7)
 	lsf.Type[1] = (byte(t) & 0x1) | ((byte(dt) & 0x3) << 1)
-	lsf.CalcCRC()
+	lsf.SetCAN(can) // also sets the CRC
 	return lsf, nil
 }
 
@@ -237,8 +236,18 @@ func (l *LSF) SetECD(slot1, slot2 *EncodedCallsign) {
 	l.CalcCRC()
 }
 
+// CAN returns the Channel Access Number: Type[0] bits 2–0, then Type[1] bit 7
+// (spec 2.0; the 3.0 draft moves it to the low nibble of Type[1]).
 func (l *LSF) CAN() byte {
-	return (l.Type[0] & 0x7)
+	return (l.Type[0]&0x7)<<1 | l.Type[1]>>7
+}
+
+// SetCAN puts the low four bits of can where CAN reads them, keeping the
+// other TYPE bits, and updates the CRC.
+func (l *LSF) SetCAN(can byte) {
+	l.Type[0] = l.Type[0]&^0x7 | (can>>1)&0x7
+	l.Type[1] = l.Type[1]&^0x80 | (can&0x1)<<7
+	l.CalcCRC()
 }
 
 func (l LSF) String() string {

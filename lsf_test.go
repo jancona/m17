@@ -307,3 +307,101 @@ func TestSMSText(t *testing.T) {
 		}
 	}
 }
+
+// TestLSFCAN reads the CAN where spec 2.0's Stream and Packet LSF TYPE Layout
+// tables put it.
+func TestLSFCAN(t *testing.T) {
+	tests := []struct {
+		name string
+		typ  [2]byte
+		want byte
+	}{
+		{"OpenRTX packet, CAN 0", [2]byte{0x00, 0x02}, 0},
+		{"packet, CAN 3", [2]byte{0x01, 0x80}, 3},
+		{"stream voice, CAN 1", [2]byte{0x00, 0x85}, 1},
+		{"stream voice, CAN 3", [2]byte{0x01, 0x85}, 3},
+		{"stream voice, CAN 8", [2]byte{0x04, 0x05}, 8},
+		{"CAN 15", [2]byte{0x07, 0x80}, 15},
+		{"CAN 0, other bits set", [2]byte{0xf8, 0x7f}, 0},
+		{"CAN 15, other bits set", [2]byte{0xff, 0xff}, 15},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := LSF{Type: tt.typ}
+			if got := l.CAN(); got != tt.want {
+				t.Errorf("CAN() of TYPE %#02x = %d, want %d", tt.typ, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestLSFCANCaptured decodes an LSF an MD-UV390 on OpenRTX sent on CAN 3.
+func TestLSFCANCaptured(t *testing.T) {
+	l := LSF{
+		Dst:  *gog.Must(EncodeCallsign("@ALL")),
+		Src:  *gog.Must(EncodeCallsign("K0RET-2")),
+		Type: [2]byte{0x01, 0x85},
+		Meta: [14]byte{0x11, 'O', 'p', 'e', 'n', 'R', 'T', 'X', ' ', ' ', ' ', ' ', ' ', ' '},
+		CRC:  [2]byte{0x37, 0x1e},
+	}
+	if !l.CheckCRC() {
+		t.Fatalf("captured LSF fails its CRC: %v", l.ToBytes())
+	}
+	if got := l.CAN(); got != 3 {
+		t.Errorf("CAN() = %d, want 3", got)
+	}
+}
+
+// TestNewLSFCAN checks that every CAN is written where CAN() reads it, which
+// as a big-endian TYPE word is bits 7–10.
+func TestNewLSFCAN(t *testing.T) {
+	modes := []struct {
+		name string
+		t    LSFType
+		dt   LSFDataType
+		base uint16 // TYPE with CAN 0
+	}{
+		{"packet", LSFTypePacket, LSFDataTypeData, 0x0000},
+		{"stream voice", LSFTypeStream, LSFDataTypeVoice, 0x0005},
+	}
+	for _, m := range modes {
+		for can := byte(0); can < 16; can++ {
+			l, err := NewLSF("@ALL", "N0CALL", m.t, m.dt, can)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want [2]byte
+			binary.BigEndian.PutUint16(want[:], m.base|uint16(can)<<7)
+			if l.Type != want || l.CAN() != can || !l.CheckCRC() {
+				t.Errorf("%s CAN %d: TYPE %#02x, CAN() %d, CRC ok %v; want TYPE %#02x",
+					m.name, can, l.Type, l.CAN(), l.CheckCRC(), want)
+			}
+		}
+	}
+}
+
+// TestSetCAN checks that SetCAN changes only the CAN bits and keeps the CRC valid.
+func TestSetCAN(t *testing.T) {
+	tests := []struct {
+		name string
+		from [2]byte
+		can  byte
+		want [2]byte
+	}{
+		{"packet, CAN 3", [2]byte{0x00, 0x00}, 3, [2]byte{0x01, 0x80}},
+		{"stream voice, CAN 3", [2]byte{0x00, 0x05}, 3, [2]byte{0x01, 0x85}},
+		{"other bits set, CAN 5", [2]byte{0xf8, 0x7f}, 5, [2]byte{0xfa, 0xff}},
+		{"other bits set, CAN 0", [2]byte{0xff, 0xff}, 0, [2]byte{0xf8, 0x7f}},
+		{"only four bits", [2]byte{0x00, 0x00}, 0x13, [2]byte{0x01, 0x80}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := LSF{Type: tt.from}
+			l.SetCAN(tt.can)
+			if l.Type != tt.want || !l.CheckCRC() {
+				t.Errorf("SetCAN(%d) on TYPE %#02x = %#02x, CRC ok %v; want %#02x",
+					tt.can, tt.from, l.Type, l.CheckCRC(), tt.want)
+			}
+		})
+	}
+}
