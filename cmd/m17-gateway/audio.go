@@ -132,6 +132,7 @@ func (g *Gateway) sayCallsign(callsign string) []byte {
 func (g *Gateway) playMessage(msg ...string) error {
 	log.Printf("[DEBUG] playMessage() setState(LocalCommand)")
 	defer g.setState(Idle)
+	defer g.holdVoice()()
 	lsf, err := m17.NewLSF(m17.DestinationAll, g.encodedCallsign.Callsign(), m17.LSFTypeStream, m17.LSFDataTypeVoice, 0)
 	if err != nil {
 		return fmt.Errorf("unable to make LSF: %w", err)
@@ -200,6 +201,7 @@ func (g *Gateway) echoStreamEnd() error {
 	defer g.setState(Idle)
 	var err error
 	if g.getState() == Echo {
+		defer g.holdVoice()()
 		log.Printf("[DEBUG] echoStreamEnd() %d frames", len(g.echoStream))
 		time.Sleep(250 * time.Millisecond)
 		sid := uint16(rand.Intn(0x10000))

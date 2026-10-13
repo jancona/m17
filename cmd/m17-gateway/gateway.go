@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -360,9 +361,10 @@ type Gateway struct {
 	lastFrameTimer *time.Timer
 	lastLSF        *m17.LSF // Workaround for reflectors that change the SRC during the stream
 	lastStreamID   uint16
-	netStreamHeld  bool // reflector voice is being held back for local RF
-	rfToLegacy     bool // the current RF stream is going to a legacy reflector
-	rfDirectLogged bool // and a warning that it will probably be dropped was logged
+	netStreamHeld  bool         // reflector voice is being held back
+	ownTX          atomic.Int32 // the gateway's own transmissions under way: announcements and echoes
+	rfToLegacy     bool         // the current RF stream is going to a legacy reflector
+	rfDirectLogged bool         // and a warning that it will probably be dropped was logged
 	echoStream     []m17.StreamDatagram
 	audioClips     map[string][]byte
 }
@@ -467,13 +469,21 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	sd.LSF.SetECD(&sd.LSF.Src, g.inetClient.EncodedName)
 	sd.LSF.Src = g.encodedCallsign
 	sd.LSF.CalcCRC()
-	// Local RF takes precedence. While a radio is transmitting to us, hold
-	// the reflector stream back, then join it once the channel is clear: the
-	// modem starts a fresh transmission, preamble and LSF, with the next frame.
-	held := g.localRFActive()
+	// Local RF takes precedence, and so does the gateway's own voice. While
+	// a radio is transmitting to us, or the gateway is speaking, hold the
+	// reflector stream back, then join it once the channel is clear: the
+	// modem starts a fresh transmission, preamble and LSF, with the next
+	// frame. Two streams sent at once would take the transmitter from each
+	// other frame by frame, each with an EOT and a new LSF.
+	own := g.ownTX.Load() > 0
+	held := own || g.localRFActive()
 	if held != g.netStreamHeld {
 		if held {
-			log.Printf("[DEBUG] Holding Internet voice stream %04x for local RF", sd.StreamID)
+			reason := "local RF"
+			if own {
+				reason = "the gateway's own voice"
+			}
+			log.Printf("[DEBUG] Holding Internet voice stream %04x for %s", sd.StreamID, reason)
 		} else {
 			log.Printf("[DEBUG] Joining Internet voice stream %04x at frame %04x", sd.StreamID, sd.FrameNumber&0x7fff)
 		}
@@ -522,6 +532,13 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 		g.lastFrameTimer = nil
 	}
 	return err
+}
+
+// holdVoice holds reflector voice back while the gateway transmits
+// something of its own, until the returned function is called. Holds nest.
+func (g *Gateway) holdVoice() func() {
+	g.ownTX.Add(1)
+	return func() { g.ownTX.Add(-1) }
 }
 
 func (g *Gateway) getState() gatewayState {

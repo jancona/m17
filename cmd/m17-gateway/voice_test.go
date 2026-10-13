@@ -51,6 +51,111 @@ func TestNetVoiceWaitsForRF(t *testing.T) {
 	}
 }
 
+// TestNetVoiceWaitsForSpeaking: reflector voice is held back while the
+// gateway speaks, through overlapping holds, and joined, with a fresh LSF,
+// once the last hold is released.
+func TestNetVoiceWaitsForSpeaking(t *testing.T) {
+	g, m := testGateway(t, 10*time.Millisecond, 10*time.Millisecond)
+	g.inetClient = &inet.Client{}
+	lsf, err := m17.NewLSF("@ALL", "W7GKB D", m17.LSFTypeStream, m17.LSFDataTypeVoice, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(fn uint16) {
+		sd := m17.NewStreamDatagram(0x6425, fn, &lsf, make([]byte, 16))
+		if err := g.TransmitVoiceStream(sd); err != nil {
+			t.Fatal(err)
+		}
+	}
+	release := g.holdVoice()
+	inner := g.holdVoice() // overlaps the first, and ends before it
+	for fn := range uint16(3) {
+		send(fn)
+	}
+	inner()
+	for fn := uint16(3); fn < 5; fn++ {
+		send(fn)
+	}
+	if got := m.voiceFrames(); len(got) > 0 {
+		t.Fatalf("frames %v transmitted while the gateway spoke", got)
+	}
+	release()
+	send(5)
+	send(6 | 0x8000)
+	if got, want := m.voiceFrames(), []uint16{5, 6 | 0x8000}; !slices.Equal(got, want) {
+		t.Errorf("transmitted frames %v, want %v", got, want)
+	}
+}
+
+// TestOwnVoiceNotInterrupted: reflector voice that arrives during an
+// announcement or an echo waits for it to finish, instead of taking the
+// transmitter from it frame by frame.
+func TestOwnVoiceNotInterrupted(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		speak func(g *Gateway) error
+		want  []uint16 // the gateway's own frames
+	}{
+		{"announcement", func(g *Gateway) error {
+			g.audioClips = map[string][]byte{"welcome": make([]byte, 2*16)}
+			return g.playMessage("welcome")
+		}, []uint16{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 | 0x8000}},
+		{"echo", func(g *Gateway) error {
+			lsf, err := m17.NewLSF("#ECHO", "N1ADJ", m17.LSFTypeStream, m17.LSFDataTypeVoice, 0)
+			if err != nil {
+				return err
+			}
+			g.setState(Echo)
+			g.echoStreamStart()
+			for _, fn := range []uint16{0, 1, 2 | 0x8000} {
+				l := lsf
+				g.echoStreamRecord(m17.NewStreamDatagram(0x2222, fn, &l, make([]byte, 16)))
+			}
+			return g.echoStreamEnd()
+		}, []uint16{0, 1, 2 | 0x8000}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, m := testGateway(t, 10*time.Millisecond, 10*time.Millisecond)
+			g.inetClient = &inet.Client{}
+			cs, err := m17.EncodeCallsign("N1ADJ G")
+			if err != nil {
+				t.Fatal(err)
+			}
+			g.encodedCallsign = *cs
+			lsf, err := m17.NewLSF("@ALL", "W7GKB D", m17.LSFTypeStream, m17.LSFDataTypeVoice, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			netFN := uint16(0x100)
+			send := func(fn uint16) {
+				sd := m17.NewStreamDatagram(0x6425, fn, &lsf, make([]byte, 16))
+				if err := g.TransmitVoiceStream(sd); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// A reflector frame arrives with each frame the gateway sends.
+			arriving := true
+			m.onVoice = func() {
+				if arriving {
+					arriving = false
+					send(netFN)
+					netFN++
+					arriving = true
+				}
+			}
+			if err := tc.speak(g); err != nil {
+				t.Fatal(err)
+			}
+			arriving = false
+			send(netFN | 0x8000)
+			want := append(tc.want, netFN|0x8000)
+			if got := m.voiceFrames(); !slices.Equal(got, want) {
+				t.Errorf("transmitted frames %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 // TestNetVoiceAfterRFStreamEnd: once a local stream has ended, reflector
 // voice waits only rfTurnaround, not the full rxHoldoff.
 func TestNetVoiceAfterRFStreamEnd(t *testing.T) {

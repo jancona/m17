@@ -11,9 +11,10 @@ import (
 // recordingModem records when each packet is transmitted, and the frame
 // number of each voice frame.
 type recordingModem struct {
-	mu    sync.Mutex
-	sent  []time.Time
-	voice []uint16
+	mu      sync.Mutex
+	sent    []time.Time
+	voice   []uint16
+	onVoice func() // if set, called after each voice frame, outside mu
 }
 
 func (m *recordingModem) StartDecoding(func(uint16, []m17.SoftBit)) {}
@@ -22,8 +23,12 @@ func (m *recordingModem) Reset() error                              { return nil
 func (m *recordingModem) Close() error                              { return nil }
 func (m *recordingModem) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.voice = append(m.voice, sd.FrameNumber)
+	onVoice := m.onVoice
+	m.mu.Unlock()
+	if onVoice != nil {
+		onVoice()
+	}
 	return nil
 }
 func (m *recordingModem) TransmitPacket(m17.Packet) error {
