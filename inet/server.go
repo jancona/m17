@@ -1,6 +1,7 @@
 package inet
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"net"
@@ -25,14 +26,27 @@ type Server struct {
 	running       bool
 	mutex         sync.Mutex
 	clients       map[string]*client
+
+	// CONN is unauthenticated UDP, so a source address can be spoofed:
+	// every client is sent PINGs and the module's traffic. These limits
+	// bound how much a flood of CONNs can make the server send.
+	maxClients      int
+	maxClientsPerIP int
 }
+
+const (
+	defaultMaxClients      = 250
+	defaultMaxClientsPerIP = 16
+)
 
 func NewServer(name string, addr string, modules map[byte]Module) *Server {
 	s := Server{
-		Name:          name,
-		InterfaceAddr: addr,
-		modules:       modules,
-		clients:       map[string]*client{},
+		Name:            name,
+		InterfaceAddr:   addr,
+		modules:         modules,
+		clients:         map[string]*client{},
+		maxClients:      defaultMaxClients,
+		maxClientsPerIP: defaultMaxClientsPerIP,
 	}
 	return &s
 }
@@ -90,10 +104,8 @@ func (s *Server) handle() {
 				log.Printf("[INFO] Bad DISC packet length %d, should be 19", n)
 			} else {
 				c := s.lookupClient(addr)
-				if c != nil {
+				if c != nil && bytes.Equal(buf[4:10], c.encodedCallsign) {
 					log.Printf("[INFO] Disconnecting client %s", addr.String())
-					c.pongTimer.Stop()
-					c.pingTimer.Stop()
 					s.removeClient(c)
 				}
 			}
@@ -110,7 +122,7 @@ func (s *Server) handle() {
 				c := s.lookupClient(addr)
 				if c != nil {
 					// log.Printf("[DEBUG] Received PING/PONG from client %v", *c)
-					c.pongTimer.Reset(30 * time.Second)
+					c.heard()
 				}
 			}
 		case m17.MagicM17Stream:
@@ -122,7 +134,9 @@ func (s *Server) handle() {
 			} else {
 				log.Printf("[DEBUG] Server received StreamDatagram: %s", sd)
 				c := s.lookupClient(addr)
-				if c != nil {
+				if c != nil && c.listenOnly {
+					log.Printf("[INFO] Dropping stream from listen-only client %s", addr)
+				} else if c != nil {
 					err := c.module.HandleStreamDatagram(sd)
 					if err != nil {
 						log.Printf("[ERROR] Error calling streamHandler: %v", err)
@@ -157,7 +171,9 @@ func (s *Server) handle() {
 				s.SendPacket(&reply, addr)
 				continue
 			}
-			if c != nil {
+			if c != nil && c.listenOnly {
+				log.Printf("[INFO] Dropping packet from listen-only client %s", addr)
+			} else if c != nil {
 				c.module.HandlePacket(p)
 				// Send the packet to other clients of the module, becuase the module won't send it back
 				// Should this be here or in the module?
@@ -188,8 +204,13 @@ func (s *Server) recvConnect(buf []byte, addr *net.UDPAddr, listenOnly bool) {
 		return
 	}
 	c := s.newClient(buf[4:10], module, addr, listenOnly)
+	if err := s.addClient(c); err != nil {
+		c.stop()
+		s.sendNACK(addr)
+		log.Printf("[INFO] Refusing client %s: %v", addr, err)
+		return
+	}
 	log.Printf("[INFO] Connecting client %s", addr.String())
-	s.addClient(c)
 	s.sendACKN(addr)
 }
 
@@ -266,45 +287,98 @@ type client struct {
 	callsign        string
 	module          Module
 	addr            *net.UDPAddr
-	pongTimer       *time.Timer
-	pingTimer       *time.Timer
 	listenOnly      bool
+
+	timerMutex sync.Mutex // guards the timers and stopped
+	pongTimer  *time.Timer
+	pingTimer  *time.Timer
+	stopped    bool
 }
 
 func (s *Server) newClient(callsign []byte, module Module, addr *net.UDPAddr, listenOnly bool) *client {
-	var c client
 	cs, _ := m17.DecodeCallsign(callsign)
-	c = client{
+	c := &client{
 		encodedCallsign: callsign,
 		callsign:        cs,
 		module:          module,
 		addr:            addr,
 		listenOnly:      listenOnly,
-		pongTimer: time.AfterFunc(30*time.Second, func() {
-			log.Printf("[DEBUG] No PONGs received in > 30 seconds. Disconnecting.")
-			c.pongTimer.Stop()
-			c.pingTimer.Stop()
-			s.removeClient(&c)
-		}),
-		pingTimer: time.AfterFunc(3*time.Second, func() {
-			// log.Printf("[DEBUG] Sending PING to %s at %s", c.callsign, c.addr.String())
-			s.sendPING(c.encodedCallsign, c.addr)
-			c.pingTimer.Reset(3 * time.Second)
-		}),
 	}
-	return &c
+	c.timerMutex.Lock()
+	defer c.timerMutex.Unlock()
+	c.pongTimer = time.AfterFunc(30*time.Second, func() {
+		log.Printf("[DEBUG] No PONGs received from %s in > 30 seconds. Disconnecting.", c.addr)
+		s.removeClient(c)
+	})
+	c.pingTimer = time.AfterFunc(3*time.Second, func() {
+		// The timer re-arms itself, so check under the lock that the
+		// client has not been stopped meanwhile, or it would ping forever.
+		c.timerMutex.Lock()
+		defer c.timerMutex.Unlock()
+		if c.stopped {
+			return
+		}
+		// log.Printf("[DEBUG] Sending PING to %s at %s", c.callsign, c.addr.String())
+		s.sendPING(c.encodedCallsign, c.addr)
+		c.pingTimer.Reset(3 * time.Second)
+	})
+	return c
 }
 
-func (s *Server) addClient(c *client) {
+// stop stops the client's timers for good.
+func (c *client) stop() {
+	c.timerMutex.Lock()
+	defer c.timerMutex.Unlock()
+	c.stopped = true
+	c.pongTimer.Stop()
+	c.pingTimer.Stop()
+}
+
+// heard pushes back the client's timeout.
+func (c *client) heard() {
+	c.timerMutex.Lock()
+	defer c.timerMutex.Unlock()
+	if !c.stopped {
+		c.pongTimer.Reset(30 * time.Second)
+	}
+}
+
+// addClient adds c, replacing any client at the same address, which is
+// stopped. A new address is refused once the server or its IP address has
+// as many clients as allowed.
+func (s *Server) addClient(c *client) error {
+	key := c.addr.String()
 	s.mutex.Lock()
-	s.clients[c.addr.String()] = c
-	s.mutex.Unlock()
+	defer s.mutex.Unlock()
+	if old := s.clients[key]; old != nil {
+		old.stop()
+	} else {
+		if len(s.clients) >= s.maxClients {
+			return fmt.Errorf("server has %d clients", len(s.clients))
+		}
+		n := 0
+		for _, o := range s.clients {
+			if o.addr.IP.Equal(c.addr.IP) {
+				n++
+			}
+		}
+		if n >= s.maxClientsPerIP {
+			return fmt.Errorf("%s has %d clients", c.addr.IP, n)
+		}
+	}
+	s.clients[key] = c
+	return nil
 }
 
+// removeClient stops c and removes it, unless a newer client has since
+// connected from its address: that one is left alone.
 func (s *Server) removeClient(c *client) {
+	c.stop()
 	s.mutex.Lock()
-	delete(s.clients, c.addr.String())
-	s.mutex.Unlock()
+	defer s.mutex.Unlock()
+	if key := c.addr.String(); s.clients[key] == c {
+		delete(s.clients, key)
+	}
 }
 
 func (s *Server) lookupClient(addr *net.UDPAddr) *client {

@@ -80,7 +80,7 @@ func (m *APRSModule) Name() byte {
 // Must be called with m.mu held.
 func (m *APRSModule) connect() error {
 	filter := m.buildFilter()
-	log.Printf("[DEBUG] Calling Dial(%s, %s, %s, m17-bridge, 0.1, %s)", m.serverName+clientDefinedFilterPort, m.callsign, m.passcode, filter)
+	log.Printf("[DEBUG] Calling Dial(%s, %s, m17-bridge, 0.1, %s)", m.serverName+clientDefinedFilterPort, m.callsign, filter)
 	conn, err := fap.Dial(m.serverName+clientDefinedFilterPort, m.callsign, m.passcode, "m17-bridge", "0.1", filter)
 	if err != nil {
 		return err

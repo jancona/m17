@@ -66,7 +66,7 @@ func TestServerClientMapConcurrency(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := range 2000 {
-			c := &client{module: mod, addr: &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 10000 + i%50}}
+			c := s.newClient(make([]byte, 6), mod, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 10000 + i%50}, false)
 			s.addClient(c)
 			s.removeClient(c)
 		}

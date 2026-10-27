@@ -21,7 +21,8 @@ type DiscordModule struct {
 }
 
 func NewDiscordModule(name byte, server *inet.Server, channelName string, webhookURL string, botToken string) (*DiscordModule, error) {
-	log.Printf("[DEBUG] NewDiscordModule(%s, %s, %s, %s)", string(name), channelName, webhookURL, botToken)
+	// The webhook URL and bot token are credentials: never log them.
+	log.Printf("[DEBUG] NewDiscordModule(%s, %s)", string(name), channelName)
 	m := DiscordModule{
 		name:   name,
 		server: server,
@@ -42,7 +43,6 @@ func NewDiscordModule(name byte, server *inet.Server, channelName string, webhoo
 	if err != nil {
 		return nil, fmt.Errorf("error opening session: %v", err)
 	}
-	log.Printf("[DEBUG] NewDiscordModule: %#v", m)
 	return &m, nil
 }
 
@@ -52,12 +52,25 @@ func (m *DiscordModule) Name() byte {
 
 func (m *DiscordModule) HandlePacket(p m17.Packet) error {
 	log.Printf("[DEBUG] Received packet: %s", p.String())
-	err := m.channel.Send(p.LSF.Src.Callsign(), string(p.Payload))
+	if p.Type != m17.PacketTypeSMS {
+		return nil
+	}
+	err := m.channel.Send(p.LSF.Src.Callsign(), escapeMentions(p.SMSText()))
 	if err != nil {
 		log.Printf("[ERROR] Unable to send message to Discord: %v", err)
 	}
 	return err
 }
+
+// escapeMentions keeps text from M17 from pinging Discord users, roles,
+// @everyone or @here. Every mention starts with '@' (raw ones as <@...>),
+// and a zero-width space after it stops Discord parsing one without
+// changing how the text looks. The bridge library sets no AllowedMentions,
+// which would be the cleaner way.
+func escapeMentions(text string) string {
+	return strings.ReplaceAll(text, "@", "@​")
+}
+
 func (m *DiscordModule) HandleStreamDatagram(sd m17.StreamDatagram) error {
 	log.Printf("[DEBUG] Ignoring StreamDatagram: %v", sd)
 	return nil
