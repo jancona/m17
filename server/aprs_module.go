@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -79,7 +80,7 @@ func (m *APRSModule) Name() byte {
 // Must be called with m.mu held.
 func (m *APRSModule) connect() error {
 	filter := m.buildFilter()
-	log.Printf("[DEBUG] Calling Dial(%s, %s, %s, m17-bridge, 0.1, %s)", m.serverName+clientDefinedFilterPort, m.callsign, m.passcode, filter)
+	log.Printf("[DEBUG] Calling Dial(%s, %s, m17-bridge, 0.1, %s)", m.serverName+clientDefinedFilterPort, m.callsign, filter)
 	conn, err := fap.Dial(m.serverName+clientDefinedFilterPort, m.callsign, m.passcode, "m17-bridge", "0.1", filter)
 	if err != nil {
 		return err
@@ -186,14 +187,6 @@ func (m *APRSModule) handleAPRSMessage(pkt *fap.Packet) {
 	msg := pkt.Message
 	dst := msg.Destination
 	log.Printf("[DEBUG] dst: %s, msgText: %s, msgID: %s", dst, msg.Text, msg.ID)
-	if msg.ID != "" {
-		// Send ack using the destination callsign as the source
-		ackFrame := fmt.Sprintf("%s>%s::%-9s:ack%s", dst, deviceID, pkt.SrcCallsign, msg.ID)
-		log.Printf("[DEBUG] Sending ack frame: '%s'", ackFrame)
-		if err := m.sendLine(ackFrame); err != nil {
-			log.Printf("[INFO] Unable to send ack: %v", err)
-		}
-	}
 	// Find which M17 callsign this APRS destination maps to
 	m.mu.Lock()
 	var m17Callsign string
@@ -205,8 +198,18 @@ func (m *APRSModule) handleAPRSMessage(pkt *fap.Packet) {
 	}
 	m.mu.Unlock()
 	if m17Callsign == "" {
+		// Not ours, so not ours to ack: an ack tells the sender to stop
+		// retrying, and the message would be lost.
 		log.Printf("[DEBUG] No M17 user found for APRS destination %s", dst)
 		return
+	}
+	if msg.ID != "" {
+		// Send ack using the destination callsign as the source
+		ackFrame := fmt.Sprintf("%s>%s::%-9s:ack%s", dst, deviceID, pkt.SrcCallsign, msg.ID)
+		log.Printf("[DEBUG] Sending ack frame: '%s'", ackFrame)
+		if err := m.sendLine(ackFrame); err != nil {
+			log.Printf("[INFO] Unable to send ack: %v", err)
+		}
 	}
 	msgBytes := append([]byte(msg.Text), 0)
 	p, err := m17.NewPacket(m17Callsign, strings.ReplaceAll(pkt.SrcCallsign, "-", " "), m17.PacketTypeSMS, msgBytes)
@@ -219,13 +222,18 @@ func (m *APRSModule) handleAPRSMessage(pkt *fap.Packet) {
 
 // getOrAddUser returns the aprsUser for the given M17 callsign,
 // creating one and updating the APRS-IS filter if needed.
-// It always updates lastHeard to the current time.
+// It always updates lastHeard to the current time. It returns nil for a
+// callsign that is not a valid APRS-IS source.
 func (m *APRSModule) getOrAddUser(callsign string) *aprsUser {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	u, ok := m.users[callsign]
 	if !ok {
 		ac := aprsCallsign(callsign)
+		if !validAPRSCallsign(ac) {
+			log.Printf("[INFO] Ignoring M17 callsign %q: %q is not a valid APRS callsign", callsign, ac)
+			return nil
+		}
 		u = &aprsUser{
 			aprsCallsign: ac,
 		}
@@ -267,6 +275,9 @@ func (m *APRSModule) removeStaleUsers() {
 func (m *APRSModule) HandlePacket(p m17.Packet) error {
 	log.Printf("[DEBUG] Received packet: %s", p.String())
 	u := m.getOrAddUser(p.LSF.Src.Callsign())
+	if u == nil {
+		return fmt.Errorf("invalid APRS source callsign %q", p.LSF.Src.Callsign())
+	}
 	dst := aprsCallsign(p.LSF.Dst.Callsign())
 	msgText := strings.ReplaceAll(string(p.Payload), "\x00", "")
 	body, err := fap.EncodeMessage(&fap.Message{
@@ -296,6 +307,9 @@ func (m *APRSModule) HandlePacket(p m17.Packet) error {
 func (m *APRSModule) HandleStreamDatagram(sd m17.StreamDatagram) error {
 	if sd.LSF.GNSS() != nil && sd.LSF.GNSS().ValidLatLon {
 		u := m.getOrAddUser(sd.LSF.Src.Callsign())
+		if u == nil {
+			return nil
+		}
 		if time.Since(u.lastPositionReport) > 5*time.Minute {
 			if err := m.sendGNSSFrame(u, sd.LSF.GNSS()); err != nil {
 				log.Printf("[INFO] Unable to send location report: %v", err)
@@ -350,4 +364,13 @@ func aprsCallsign(callsign string) string {
 	}
 	log.Printf("[DEBUG] APRS callsign: %s", aprsCallsign)
 	return aprsCallsign
+}
+
+// aprsCallsignRE matches an APRS-IS source callsign: letters and digits
+// with an optional numeric SSID. M17 callsigns may also contain '/' and
+// '.', and a '/' would split a g/ filter entry, so they are rejected.
+var aprsCallsignRE = regexp.MustCompile(`^[A-Z0-9]{1,9}(-[0-9]{1,2})?$`)
+
+func validAPRSCallsign(cs string) bool {
+	return len(cs) <= 9 && aprsCallsignRE.MatchString(cs)
 }

@@ -34,7 +34,7 @@ func (m *capturingModem) sent() []m17.Packet {
 func noReflectorGateway(t *testing.T, duplex bool) (*Gateway, *capturingModem) {
 	t.Helper()
 	m := &capturingModem{}
-	g := &Gateway{modem: m, state: Idle, lastStreamID: 0xFFFF, duplex: duplex,
+	g := &Gateway{modem: m, state: Idle, duplex: duplex,
 		callsign: "N1ADJ G", packetQueue: make(chan func() error, packetQueueLen)}
 	cs, err := m17.EncodeCallsign("N1ADJ G")
 	if err != nil {

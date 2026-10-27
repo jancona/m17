@@ -2,6 +2,7 @@ package inet
 
 import (
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -52,4 +53,29 @@ func TestServerSurvivesShortPacket(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("server did not stop")
 	}
+}
+
+// Clients come and go on timer goroutines while packets are routed from
+// others. Under -race this fails if the client map is read without the lock;
+// without -race, Go aborts on the concurrent map access often enough.
+func TestServerClientMapConcurrency(t *testing.T) {
+	s := NewServer("TEST", "127.0.0.1:0", nil)
+	mod := &packetModule{}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := range 2000 {
+			c := s.newClient(make([]byte, 6), mod, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 10000 + i%50}, false)
+			s.addClient(c)
+			s.removeClient(c)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 2000 {
+			s.lookupClientsByModule('A')
+		}
+	}()
+	wg.Wait()
 }

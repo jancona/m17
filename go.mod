@@ -1,6 +1,6 @@
 module github.com/jancona/m17
 
-go 1.26
+go 1.26.0
 
 require github.com/hashicorp/logutils v1.0.0
 
@@ -15,7 +15,7 @@ require (
 	github.com/warthog618/go-gpiocdev v0.9.1
 	github.com/yobert/alsa v0.0.0-20230126204319-85bb7ee02e5b
 	go.bug.st/serial v1.6.2
-	golang.org/x/sys v0.40.0
+	golang.org/x/sys v0.48.0
 	gopkg.in/ini.v1 v1.67.0
 )
 
@@ -48,13 +48,13 @@ require (
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c // indirect
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
-	github.com/yuin/goldmark v1.7.8 // indirect
-	golang.org/x/crypto v0.47.0 // indirect
-	golang.org/x/image v0.24.0 // indirect
+	github.com/yuin/goldmark v1.7.17 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/image v0.43.0 // indirect
 	golang.org/x/mobile v0.0.0-20250106192035-c31d5b91ecc3 // indirect
-	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
