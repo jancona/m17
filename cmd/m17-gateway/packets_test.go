@@ -53,7 +53,7 @@ func (m *recordingModem) times() []time.Time {
 func testGateway(t *testing.T, holdoff, gap time.Duration) (*Gateway, *recordingModem) {
 	t.Helper()
 	m := &recordingModem{}
-	g := &Gateway{modem: m, state: Idle, lastStreamID: 0xFFFF, rxHoldoff: holdoff, packetGap: gap, packetQueue: make(chan func() error, packetQueueLen)}
+	g := &Gateway{modem: m, state: Idle, rxHoldoff: holdoff, packetGap: gap, packetQueue: make(chan func() error, packetQueueLen)}
 	go g.sendPackets()
 	t.Cleanup(func() { close(g.packetQueue) })
 	return g, m

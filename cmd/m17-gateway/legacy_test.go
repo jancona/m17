@@ -108,7 +108,7 @@ func linkedGateway(t *testing.T, parrot bool) (*Gateway, *lsfModem, *fakeReflect
 
 	refl := newFakeReflector(t, parrot)
 	m := &lsfModem{}
-	g := &Gateway{modem: m, state: Idle, lastStreamID: 0xFFFF, duplex: true,
+	g := &Gateway{modem: m, state: Idle, duplex: true,
 		callsign: "N1ADJ G", packetQueue: make(chan func() error, packetQueueLen)}
 	cs, err := m17.EncodeCallsign("N1ADJ G")
 	if err != nil {

@@ -216,3 +216,32 @@ func TestNetVoiceAfterRFLastFrame(t *testing.T) {
 		t.Error("local RF still active rfTurnaround after its last frame")
 	}
 }
+
+// TestNetVoiceStreamIDFFFF: 0xFFFF is a valid stream ID. A stream using it
+// is started and ended like any other, even when its first frame is also
+// its last.
+func TestNetVoiceStreamIDFFFF(t *testing.T) {
+	g, m := testGateway(t, 10*time.Millisecond, 10*time.Millisecond)
+	g.inetClient = &inet.Client{}
+	lsf, err := m17.NewLSF("@ALL", "W2JJT C", m17.LSFTypeStream, m17.LSFDataTypeVoice, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(fn uint16) {
+		sd := m17.NewStreamDatagram(0xFFFF, fn, &lsf, make([]byte, 16))
+		if err := g.TransmitVoiceStream(sd); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send(0 | 0x8000)
+	send(0)
+	send(1 | 0x8000)
+	if got, want := m.voiceFrames(), []uint16{0 | 0x8000, 0, 1 | 0x8000}; !slices.Equal(got, want) {
+		t.Errorf("transmitted frames %v, want %v", got, want)
+	}
+	g.netStreamMutex.Lock()
+	defer g.netStreamMutex.Unlock()
+	if g.netStreamActive || g.lastFrameTimer != nil {
+		t.Error("stream still active after its last frame")
+	}
+}

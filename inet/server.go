@@ -316,8 +316,13 @@ func (s *Server) lookupClient(addr *net.UDPAddr) *client {
 	return c
 }
 
+// lookupClientsByModule returns the clients linked to module m. Clients
+// time out on their own goroutines, and the bridge modules send from
+// theirs, so the map is only read under the lock.
 func (s *Server) lookupClientsByModule(m byte) []*client {
 	ret := []*client{}
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	for _, c := range s.clients {
 		if c.module.Name() == m {
 			ret = append(ret, c)

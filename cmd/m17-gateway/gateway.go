@@ -358,15 +358,20 @@ type Gateway struct {
 	packetGap        time.Duration
 	packetQueue      chan func() error
 
-	lastFrameTimer *time.Timer
-	lastLSF        *m17.LSF // Workaround for reflectors that change the SRC during the stream
-	lastStreamID   uint16
-	netStreamHeld  bool         // reflector voice is being held back
-	ownTX          atomic.Int32 // the gateway's own transmissions under way: announcements and echoes
-	rfToLegacy     bool         // the current RF stream is going to a legacy reflector
-	rfDirectLogged bool         // and a warning that it will probably be dropped was logged
-	echoStream     []m17.StreamDatagram
-	audioClips     map[string][]byte
+	// The current reflector voice stream; guarded by netStreamMutex, since
+	// lastFrameTimer fires on its own goroutine. Any stream ID is valid, so
+	// netStreamActive, not a sentinel ID, says whether there is one.
+	netStreamMutex  sync.Mutex
+	netStreamActive bool
+	lastFrameTimer  *time.Timer
+	lastLSF         *m17.LSF // Workaround for reflectors that change the SRC during the stream
+	lastStreamID    uint16
+	netStreamHeld   bool         // reflector voice is being held back
+	ownTX           atomic.Int32 // the gateway's own transmissions under way: announcements and echoes
+	rfToLegacy      bool         // the current RF stream is going to a legacy reflector
+	rfDirectLogged  bool         // and a warning that it will probably be dropped was logged
+	echoStream      []m17.StreamDatagram
+	audioClips      map[string][]byte
 }
 
 func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
@@ -387,7 +392,6 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 		encodedCallsign:  *cs,
 		callsign:         cfg.callsign,
 		state:            Idle,
-		lastStreamID:     0xFFFF,
 		rxHoldoff:        cfg.rxHoldoff,
 		packetGap:        cfg.packetGap,
 		packetQueue:      make(chan func() error, packetQueueLen),
@@ -498,40 +502,59 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 		}
 		g.voiceSent()
 	}
-	if g.lastFrameTimer != nil {
-		g.lastFrameTimer.Reset(time.Second)
-	}
 	// log.Printf("[DEBUG] received voice stream data from server: %#v", sd)
-	if g.lastStreamID != sd.StreamID {
+	g.netStreamMutex.Lock()
+	defer g.netStreamMutex.Unlock()
+	if !g.netStreamActive || g.lastStreamID != sd.StreamID {
 		if g.lastFrameTimer != nil {
 			g.lastFrameTimer.Stop()
 		}
 		log.Printf("[DEBUG] Start Internet voice stream: %s", sd)
 		g.dashLog.LogFrame(&lsf, "Internet", "Voice Start")
+		g.netStreamActive = true
 		g.lastStreamID = sd.StreamID
 		g.lastLSF = &lsf
 		// Provide a backstop if we don't receive a last frame packet
-		g.lastFrameTimer = time.AfterFunc(time.Second, func() {
-			log.Printf("[DEBUG] Timed out Internet voice stream %04x", sd.StreamID)
-			g.dashLog.LogFrame(g.lastLSF, "Internet", "Voice End")
-			g.lastStreamID = 0xFFFF
-			g.lastFrameTimer = nil
-			g.lastLSF = nil
-			if g.getState() == Echo {
-				g.echoStreamEnd()
-			}
-		})
+		var t *time.Timer
+		t = time.AfterFunc(time.Second, func() { g.netStreamTimedOut(t) })
+		g.lastFrameTimer = t
+	} else {
+		g.lastFrameTimer.Reset(time.Second)
 	}
 	g.dashLog.LogGNSS(&lsf, "Internet")
 	if sd.LastFrame {
 		log.Printf("[DEBUG] End Internet voice stream: %s", sd)
 		g.dashLog.LogFrame(g.lastLSF, "Internet", "Voice End")
-		g.lastStreamID = 0xFFFF
-		g.lastLSF = nil
 		g.lastFrameTimer.Stop()
-		g.lastFrameTimer = nil
+		g.clearNetStream()
 	}
 	return err
+}
+
+// netStreamTimedOut ends the reflector voice stream whose last frame never
+// came. t is the timer that fired: if the stream has since ended or been
+// replaced, it is no longer lastFrameTimer and there is nothing to do.
+func (g *Gateway) netStreamTimedOut(t *time.Timer) {
+	g.netStreamMutex.Lock()
+	if g.lastFrameTimer != t {
+		g.netStreamMutex.Unlock()
+		return
+	}
+	log.Printf("[DEBUG] Timed out Internet voice stream %04x", g.lastStreamID)
+	g.dashLog.LogFrame(g.lastLSF, "Internet", "Voice End")
+	g.clearNetStream()
+	g.netStreamMutex.Unlock()
+	if g.getState() == Echo {
+		g.echoStreamEnd()
+	}
+}
+
+// clearNetStream forgets the reflector voice stream. Must be called with
+// netStreamMutex held.
+func (g *Gateway) clearNetStream() {
+	g.netStreamActive = false
+	g.lastFrameTimer = nil
+	g.lastLSF = nil
 }
 
 // holdVoice holds reflector voice back while the gateway transmits
