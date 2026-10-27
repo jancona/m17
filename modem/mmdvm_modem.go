@@ -127,11 +127,21 @@ type MMDVM struct {
 	frameSink func(typ uint16, softBits []m17.SoftBit)
 	config    MMDVMConfig
 
-	port     io.ReadWriteCloser
+	// What it takes to open the port and set the modem up again.
+	portName    string
+	speed       int
+	rxFrequency uint32
+	txFrequency uint32
+	power       float32
+	openPort    func() (io.ReadWriteCloser, error)
+	sleep       func(time.Duration)
+
 	sendCmds chan []byte
 
 	mutex sync.Mutex
 	// protected by mutex
+	port            io.ReadWriteCloser
+	gone            bool // the port failed; reopening it
 	exit            bool
 	lastStatusCheck time.Time
 	lastTXData      time.Time
@@ -195,8 +205,14 @@ func NewMMDVM(
 	}
 
 	m := &MMDVM{
-		sendCmds:   make(chan []byte, 100), // 4 seconds
-		lastTXData: time.Now(),
+		portName:    port,
+		speed:       speed,
+		rxFrequency: rxFrequency + uint32(frequencyCorr),
+		txFrequency: txFrequency + uint32(frequencyCorr),
+		power:       power,
+		sleep:       time.Sleep,
+		sendCmds:    make(chan []byte, 100), // 4 seconds
+		lastTXData:  time.Now(),
 		config: MMDVMConfig{
 			duplex:     duplex,
 			rxInvert:   rxInvert,
@@ -212,29 +228,15 @@ func NewMMDVM(
 			m17TXHang:  byte(txHang),
 		},
 	}
-	log.Printf("[DEBUG] Opening modem")
-	mode := &serial.Mode{
-		BaudRate: speed,
+	m.openPort = func() (io.ReadWriteCloser, error) {
+		p, err := serial.Open(m.portName, &serial.Mode{BaudRate: m.speed})
+		if err != nil {
+			return nil, err
+		}
+		p.SetReadTimeout(0) // Non-blocking reads
+		return p, nil
 	}
-	p, err := serial.Open(port, mode)
-	if err != nil {
-		return nil, fmt.Errorf("modem open: %w", err)
-	}
-	p.SetReadTimeout(0) // Non-blocking reads
-	m.port = p
-	err = m.readVersion()
-	if err != nil {
-		return nil, err
-	}
-	err = m.setFrequency(rxFrequency+uint32(frequencyCorr), txFrequency+uint32(frequencyCorr), power)
-	if err != nil {
-		return nil, err
-	}
-	err = m.writeConfig()
-	if err != nil {
-		return nil, err
-	}
-	err = m.setMode(mmdvmModeM17)
+	err = m.open()
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +244,106 @@ func NewMMDVM(
 	go m.modemReceive()
 	go m.modemSend()
 	return m, nil
+}
+
+// open opens the port and sets the modem up: version, frequencies, config
+// and M17 mode.
+func (m *MMDVM) open() error {
+	log.Printf("[DEBUG] Opening modem")
+	p, err := m.openPort()
+	if err != nil {
+		return fmt.Errorf("modem open: %w", err)
+	}
+	m.setPort(p)
+	err = m.readVersion()
+	if err != nil {
+		return err
+	}
+	err = m.setFrequency(m.rxFrequency, m.txFrequency, m.power)
+	if err != nil {
+		return err
+	}
+	err = m.writeConfig()
+	if err != nil {
+		return err
+	}
+	return m.setMode(mmdvmModeM17)
+}
+
+func (m *MMDVM) getPort() io.ReadWriteCloser {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return m.port
+}
+
+func (m *MMDVM) setPort(p io.ReadWriteCloser) {
+	m.mutex.Lock()
+	m.port = p
+	m.mutex.Unlock()
+}
+
+func (m *MMDVM) isGone() bool {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return m.gone
+}
+
+func (m *MMDVM) setGone(gone bool) {
+	m.mutex.Lock()
+	m.gone = gone
+	m.mutex.Unlock()
+}
+
+// Reopening the port after it failed: the first try after a second, then
+// twice as long each time, up to half a minute between tries.
+const (
+	reconnectMinDelay = time.Second
+	reconnectMaxDelay = 30 * time.Second
+)
+
+// reconnectDelay is how long to wait before the given try, the first being 1.
+func reconnectDelay(try int) time.Duration {
+	d := reconnectMinDelay
+	for i := 1; i < try && d < reconnectMaxDelay; i++ {
+		d *= 2
+	}
+	return min(d, reconnectMaxDelay)
+}
+
+// reconnect reopens the port and sets the modem up again, trying for as long
+// as it takes, with the delay between tries growing as in reconnectDelay.
+// It returns false if Close() was called meanwhile.
+func (m *MMDVM) reconnect() bool {
+	m.setGone(true)
+	defer m.setGone(false)
+	for try := 1; ; try++ {
+		delay := reconnectDelay(try)
+		log.Printf("[INFO] Trying the modem again in %v", delay)
+		// In steps, so that Close() is not kept waiting for the whole delay.
+		for waited := time.Duration(0); waited < delay; waited += time.Second {
+			if m.isExit() {
+				return false
+			}
+			m.sleep(min(time.Second, delay-waited))
+		}
+		if m.isExit() {
+			return false
+		}
+		err := m.open()
+		if err == nil {
+			break
+		}
+		if p := m.getPort(); p != nil {
+			p.Close()
+		}
+		log.Printf("[WARN] Modem not back yet: %v", err)
+	}
+	// Whatever queued up meanwhile is stale.
+	for len(m.sendCmds) > 0 {
+		<-m.sendCmds
+	}
+	log.Printf("[INFO] Modem back on %s", m.portName)
+	return true
 }
 
 func (m *MMDVM) isExit() bool {
@@ -262,7 +364,19 @@ func (m *MMDVM) modemReceive() {
 		if err == ErrMMDVMReadTimeout {
 			// nothing to do
 		} else if err != nil {
-			log.Printf("[DEBUG] modemReceive getReponse() err: %v", err)
+			if m.isExit() {
+				// Close() closed the port under us.
+				break
+			}
+			// Any other read error means the port stopped working, as
+			// when the modem is unplugged. Retrying the read would only
+			// fail again as fast as it can; reopen the port instead.
+			log.Printf("[ERROR] Lost the modem: %v", err)
+			m.getPort().Close()
+			m.setSpace(0) // nothing goes out until it is back
+			if !m.reconnect() {
+				break
+			}
 		} else {
 			// log.Printf("[DEBUG] modemReceive getReponse(): %x", responseType)
 			switch responseType {
@@ -377,7 +491,7 @@ func (m *MMDVM) modemSend() {
 	log.Printf("[DEBUG] modemSend starting")
 	for !m.isExit() {
 		if m.getSpace() > 1 {
-			_, err := m.port.Write(<-m.sendCmds)
+			_, err := m.getPort().Write(<-m.sendCmds)
 			if err != nil {
 				log.Printf("[WARN] modemSend: Error writing to modem: %v", err)
 			}
@@ -420,7 +534,7 @@ func (m *MMDVM) checkStatus() error {
 		return nil
 	}
 	cmd := []byte{mmdvmFrameStart, 3, mmdvmGetStatus}
-	_, err := m.port.Write(cmd)
+	_, err := m.getPort().Write(cmd)
 	if err != nil {
 		return fmt.Errorf("error writing GetStatus cmd: %w", err)
 	}
@@ -447,7 +561,7 @@ retry:
 		}
 		if time.Since(sent) > time.Second {
 			log.Printf("[DEBUG] Trying GetVersion")
-			if _, err := m.port.Write(cmd); err != nil {
+			if _, err := m.getPort().Write(cmd); err != nil {
 				return fmt.Errorf("error writing GetVersion cmd: %w", err)
 			}
 			sent = time.Now()
@@ -564,7 +678,7 @@ func (m *MMDVM) setFrequency(rxFreq, txFreq uint32, power float32) error {
 	cmd[10] = byte((txFreq >> 16) & 0xFF)
 	cmd[11] = byte((txFreq >> 24) & 0xFF)
 
-	_, err := m.port.Write(cmd)
+	_, err := m.getPort().Write(cmd)
 	if err != nil {
 		return fmt.Errorf("error writing setFrequency cmd: %w", err)
 	}
@@ -679,7 +793,7 @@ func (m *MMDVM) setProtocol1Config() error {
 	cmd[25] = byte(m.config.m17TXHang)
 
 	// log.Printf("[DEBUG] cmd: [% x]", cmd)
-	_, err := m.port.Write(cmd)
+	_, err := m.getPort().Write(cmd)
 	if err != nil {
 		return fmt.Errorf("error writing SetConfig cmd: %w", err)
 	}
@@ -793,7 +907,7 @@ func (m *MMDVM) setProtocol2Config() error {
 	cmd[34] = 0x80
 
 	// log.Printf("[DEBUG] cmd: [% x]", cmd)
-	_, err := m.port.Write(cmd)
+	_, err := m.getPort().Write(cmd)
 	if err != nil {
 		return fmt.Errorf("error writing SetConfig cmd: %w", err)
 	}
@@ -805,7 +919,7 @@ func (m *MMDVM) setProtocol2Config() error {
 func (m *MMDVM) setMode(mode byte) error {
 	log.Printf("[DEBUG] setMode(%02x)", mode)
 	cmd := []byte{mmdvmFrameStart, 4, mmdvmSetMode, mode}
-	_, err := m.port.Write(cmd)
+	_, err := m.getPort().Write(cmd)
 	return err
 }
 
@@ -850,7 +964,7 @@ func (m *MMDVM) getResponse() (byte, []byte, error) {
 
 	if state == mmdvmSerialStateStart {
 		offset = 0
-		n, err = m.port.Read(buffer[offset : offset+1])
+		n, err = m.getPort().Read(buffer[offset : offset+1])
 		if err != nil {
 			log.Printf("[ERROR] mmdvmSerialStateStart read error: %v", err)
 			return responseType, nil, fmt.Errorf("mmdvmSerialStateStart read: %w", err)
@@ -868,7 +982,7 @@ func (m *MMDVM) getResponse() (byte, []byte, error) {
 	}
 
 	if state == mmdvmSerialStateLength1 {
-		n, err = m.port.Read(buffer[offset : offset+1])
+		n, err = m.getPort().Read(buffer[offset : offset+1])
 		if err != nil {
 			log.Printf("[ERROR] mmdvmSerialStateLength1 read error: %v", err)
 			state = mmdvmSerialStateStart
@@ -888,7 +1002,7 @@ func (m *MMDVM) getResponse() (byte, []byte, error) {
 	}
 
 	if state == mmdvmSerialStateLength2 {
-		n, err = m.port.Read(buffer[offset : offset+1])
+		n, err = m.getPort().Read(buffer[offset : offset+1])
 		if err != nil {
 			log.Printf("[ERROR] mmdvmSerialStateLength2 read error: %v", err)
 			state = mmdvmSerialStateStart
@@ -903,7 +1017,7 @@ func (m *MMDVM) getResponse() (byte, []byte, error) {
 	}
 
 	if state == mmdvmSerialStateType {
-		n, err = m.port.Read(buffer[offset : offset+1])
+		n, err = m.getPort().Read(buffer[offset : offset+1])
 		if err != nil {
 			log.Printf("[ERROR] mmdvmSerialStateType read error: %v", err)
 			state = mmdvmSerialStateStart
@@ -921,7 +1035,7 @@ func (m *MMDVM) getResponse() (byte, []byte, error) {
 	if state == mmdvmSerialStateData {
 		time.Sleep(10 * time.Millisecond)
 		for start := offset; start < length; start += n {
-			n, err = m.port.Read(buffer[start:length])
+			n, err = m.getPort().Read(buffer[start:length])
 			if err != nil {
 				log.Printf("[ERROR] mmdvmSerialStateData read error: %v", err)
 				state = mmdvmSerialStateStart
@@ -952,7 +1066,7 @@ func (m *MMDVM) Close() error {
 	log.Print("[DEBUG] modem Close()")
 	m.setExit(true)
 	close(m.sendCmds)
-	return m.port.Close()
+	return m.getPort().Close()
 }
 
 func (m *MMDVM) TransmitPacket(p m17.Packet) error {
@@ -1128,6 +1242,10 @@ func (m *MMDVM) writeEOT() {
 }
 
 func (m *MMDVM) sendToModem(cmd []byte) {
+	if m.isGone() {
+		// Dropped: by the time the modem is back this is old news.
+		return
+	}
 	select {
 	case m.sendCmds <- cmd:
 		// okay

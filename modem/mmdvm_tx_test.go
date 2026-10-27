@@ -73,13 +73,20 @@ type fakeModemPort struct {
 	mu      sync.Mutex
 	in      []byte
 	onWrite func(cmd []byte)
+	readErr error // returned by Read once in is drained
+	reads   int
+	closed  bool
 }
 
 func (p *fakeModemPort) Read(b []byte) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.reads++
 	n := copy(b, p.in)
 	p.in = p.in[n:]
+	if n == 0 && p.readErr != nil {
+		return 0, p.readErr
+	}
 	return n, nil
 }
 
@@ -90,7 +97,35 @@ func (p *fakeModemPort) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (p *fakeModemPort) Close() error { return nil }
+func (p *fakeModemPort) Close() error {
+	p.mu.Lock()
+	p.closed = true
+	p.mu.Unlock()
+	return nil
+}
+
+// fail makes every further Read, once the queued input is drained, return
+// err, as the real port does once the modem is unplugged.
+func (p *fakeModemPort) fail(err error) {
+	p.mu.Lock()
+	p.readErr = err
+	p.mu.Unlock()
+}
+
+// answerHandshake replies to the commands the driver sends when it sets
+// the modem up, so that open() succeeds against the fake.
+func (p *fakeModemPort) answerHandshake() {
+	p.onWrite = func(cmd []byte) {
+		switch cmd[2] {
+		case mmdvmGetVersion:
+			p.queue(modemMsg(mmdvmGetVersion, append([]byte{1}, "MMDVM_HS_Dual_Hat-v1.6.1 20251011 14.7456MHz dual ADF7021"...)))
+		case mmdvmGetStatus:
+			// not answered: modemReceive keeps polling
+		default:
+			p.queue(modemMsg(mmdvmACK, []byte{cmd[2]}))
+		}
+	}
+}
 
 func (p *fakeModemPort) queue(msg []byte) {
 	p.mu.Lock()
