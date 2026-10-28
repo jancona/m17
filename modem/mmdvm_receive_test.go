@@ -137,6 +137,26 @@ func TestCloseDuringReconnect(t *testing.T) {
 	}
 }
 
+// TestCloseWhileReopening: Close() while the port is being opened closes
+// the old port, so the driver closes the new one once it is open.
+func TestCloseWhileReopening(t *testing.T) {
+	first := &fakeModemPort{readErr: errors.New("device not configured")}
+	back := &fakeModemPort{}
+	back.answerHandshake()
+	m, _ := newReconnectTestModem(first)
+	m.openPort = func() (io.ReadWriteCloser, error) {
+		m.Close()
+		return back, nil
+	}
+
+	done := make(chan struct{})
+	go func() { m.modemReceive(); close(done) }()
+	waitReceive(t, done, 5*time.Second)
+	if !back.closed {
+		t.Error("the port opened during Close() was left open")
+	}
+}
+
 // TestModemReceiveQuietOnClose: when Close() closes the port, the loop's
 // read error is the expected one: no reopening, no complaint.
 func TestModemReceiveQuietOnClose(t *testing.T) {

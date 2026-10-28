@@ -331,6 +331,12 @@ func (m *MMDVM) reconnect() bool {
 		}
 		err := m.open()
 		if err == nil {
+			if m.isExit() {
+				// Close() ran while the port was being opened and
+				// closed the old one; close the new one too.
+				m.getPort().Close()
+				return false
+			}
 			break
 		}
 		if p := m.getPort(); p != nil {
