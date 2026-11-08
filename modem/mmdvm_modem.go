@@ -289,7 +289,7 @@ func (m *MMDVM) Ident() string {
 func (m *MMDVM) setIdent(description []byte) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.ident = strings.TrimRight(string(description), "\x00 \r\n")
+	m.ident = strings.TrimRight(string(description), " \r\n")
 }
 
 func (m *MMDVM) setPort(p io.ReadWriteCloser) {
@@ -606,6 +606,11 @@ retry:
 				description = buf[20:]
 			default:
 				description = buf[1:]
+			}
+			// The description is NUL-terminated. MMDVM_HS firmware follows
+			// it with the board's UDID in hex.
+			if i := bytes.IndexByte(description, 0); i >= 0 {
+				description = description[:i]
 			}
 			m.hwType = mmdvmHWTypeFromDescription(description)
 			m.protocolVersion = buf[0]

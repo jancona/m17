@@ -22,6 +22,25 @@ func TestMMDVMHWTypeFromDescription(t *testing.T) {
 	}
 }
 
+// TestReadVersionNULTerminated: the ident stops at the NUL that ends the
+// description, as sent by MMDVM_HS_Dual_Hat firmware v1.6.1.
+func TestReadVersionNULTerminated(t *testing.T) {
+	p := &fakeModemPort{}
+	description := "MMDVM_HS_Dual_Hat-v1.6.1 20251011 14.7456MHz dual ADF7021 FW by CA6JAU GitID #403e47c"
+	p.onWrite = func(cmd []byte) {
+		if cmd[2] == mmdvmGetVersion {
+			p.queue(modemMsg(mmdvmGetVersion, append(append([]byte{1}, description...), "\x00"+"00620046460000024E543547"...)))
+		}
+	}
+	m := &MMDVM{port: p, sendCmds: make(chan []byte, 10)}
+	if err := m.readVersion(); err != nil {
+		t.Fatalf("readVersion: %v", err)
+	}
+	if m.Ident() != description || m.hwType != mmdvmHWTypeMMDVM_HS_DUAL_HAT {
+		t.Errorf("ident %q, hardware %d; want %q, MMDVM_HS_Dual_Hat", m.Ident(), m.hwType, description)
+	}
+}
+
 // TestReadVersionShortReply: a GetVersion reply too short to hold what its
 // protocol version promises is skipped, not read past its end.
 func TestReadVersionShortReply(t *testing.T) {
