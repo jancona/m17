@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -147,6 +148,7 @@ type MMDVM struct {
 	lastTXData      time.Time
 	space           int
 	maxSpace        int // most free M17 buffer space seen: an empty buffer
+	ident           string
 	// end protected by mutex
 
 	// Stream being transmitted, and whether it is still open (its last frame
@@ -274,6 +276,20 @@ func (m *MMDVM) getPort() io.ReadWriteCloser {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	return m.port
+}
+
+// Ident returns the description the modem gave in its GetVersion reply, which
+// names the hardware and its firmware version.
+func (m *MMDVM) Ident() string {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return m.ident
+}
+
+func (m *MMDVM) setIdent(description []byte) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.ident = strings.TrimRight(string(description), "\x00 \r\n")
 }
 
 func (m *MMDVM) setPort(p io.ReadWriteCloser) {
@@ -579,41 +595,32 @@ retry:
 		}
 		if err == nil && responseType == mmdvmGetVersion {
 			log.Printf("[DEBUG] GetVersion response: [% x]", buf)
+			// Protocol 2 puts capabilities, CPU type and UDID ahead of the
+			// description.
+			var description []byte
 			switch {
-			case string(buf[1:1+6]) == "MMDVM " || string(buf[23:23+6]) == "MMDVM ":
-				m.hwType = mmdvmHWTypeMMDVM
-			case string(buf[1:1:6]) == "DVMEGA":
-				m.hwType = mmdvmHWTypeDVMEGA
-			case string(buf[1:1+7]) == "ZUMspot":
-				m.hwType = mmdvmHWTypeMMDVM_ZUMSPOT
-			case string(buf[1:1+12]) == "MMDVM_HS_Hat":
-				m.hwType = mmdvmHWTypeMMDVM_HS_HAT
-			case string(buf[1:1+17]) == "MMDVM_HS_Dual_Hat":
-				m.hwType = mmdvmHWTypeMMDVM_HS_DUAL_HAT
-			case string(buf[1:1+12]) == "Nano_hotSPOT":
-				m.hwType = mmdvmHWTypeNANO_HOTSPOT
-			case string(buf[1:1+7]) == "Nano_DV":
-				m.hwType = mmdvmHWTypeNANO_DV
-			case string(buf[1:1+13]) == "D2RG_MMDVM_HS":
-				m.hwType = mmdvmHWTypeD2RG_MMDVM_HS
-			case string(buf[1:1+9]) == "MMDVM_HS-":
-				m.hwType = mmdvmHWTypeMMDVM_HS
-			case string(buf[1:1+11]) == "OpenGD77_HS":
-				m.hwType = mmdvmHWTypeOPENGD77_HS
-			case string(buf[1:1+9]) == "SkyBridge":
-				m.hwType = mmdvmHWTypeSKYBRIDGE
+			case len(buf) == 0 || buf[0] == 2 && len(buf) < 20:
+				log.Printf("[WARN] GetVersion response too short: %d bytes", len(buf))
+				continue
+			case buf[0] == 2:
+				description = buf[20:]
+			default:
+				description = buf[1:]
 			}
+			m.hwType = mmdvmHWTypeFromDescription(description)
 			m.protocolVersion = buf[0]
 			switch m.protocolVersion {
 			case 1:
-				log.Printf("[INFO] MMDVM protocol version: 1, description: %s", buf[1:])
+				log.Printf("[INFO] MMDVM protocol version: 1, description: %s", description)
+				m.setIdent(description)
 				m.capabilities[0] =
 					mmdvmCapabilities1DSTAR | mmdvmCapabilities1DMR | mmdvmCapabilities1YSF |
 						mmdvmCapabilities1P25 | mmdvmCapabilities1NXDN | mmdvmCapabilities1M17
 				m.capabilities[1] = mmdvmCapabilities2POCSAG
 				break retry
 			case 2:
-				log.Printf("[INFO] MMDVM protocol version: 2, description: %s", buf[20:])
+				log.Printf("[INFO] MMDVM protocol version: 2, description: %s", description)
+				m.setIdent(description)
 				switch buf[3] {
 				case 0:
 					log.Printf("[INFO] CPU: Atmel ARM, UDID: %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X", buf[4], buf[5], buf[6], buf[7], buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15], buf[16], buf[17], buf[18], buf[19])
@@ -663,6 +670,32 @@ retry:
 	}
 	log.Printf("[INFO] %s", modeText)
 	return nil
+}
+
+// mmdvmHWTypeFromDescription identifies the board from the description in its
+// GetVersion reply, defaulting to MMDVM.
+func mmdvmHWTypeFromDescription(description []byte) byte {
+	for _, t := range []struct {
+		prefix string
+		hwType byte
+	}{
+		{"MMDVM ", mmdvmHWTypeMMDVM},
+		{"DVMEGA", mmdvmHWTypeDVMEGA},
+		{"ZUMspot", mmdvmHWTypeMMDVM_ZUMSPOT},
+		{"MMDVM_HS_Hat", mmdvmHWTypeMMDVM_HS_HAT},
+		{"MMDVM_HS_Dual_Hat", mmdvmHWTypeMMDVM_HS_DUAL_HAT},
+		{"Nano_hotSPOT", mmdvmHWTypeNANO_HOTSPOT},
+		{"Nano_DV", mmdvmHWTypeNANO_DV},
+		{"D2RG_MMDVM_HS", mmdvmHWTypeD2RG_MMDVM_HS},
+		{"MMDVM_HS-", mmdvmHWTypeMMDVM_HS},
+		{"OpenGD77_HS", mmdvmHWTypeOPENGD77_HS},
+		{"SkyBridge", mmdvmHWTypeSKYBRIDGE},
+	} {
+		if bytes.HasPrefix(description, []byte(t.prefix)) {
+			return t.hwType
+		}
+	}
+	return mmdvmHWTypeMMDVM
 }
 
 func (m *MMDVM) setFrequency(rxFreq, txFreq uint32, power float32) error {

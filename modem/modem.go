@@ -17,6 +17,9 @@ type Modem interface {
 	Close() error
 	TransmitPacket(m17.Packet) error
 	TransmitVoiceStream(m17.StreamDatagram) error
+	// Ident describes the modem hardware and firmware, in whatever form the
+	// modem reports it. It is empty if the modem didn't say.
+	Ident() string
 }
 
 // processSymbolStream reads RRC-filtered symbols from rxSymbols, detects sync bursts,

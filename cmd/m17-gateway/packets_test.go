@@ -21,6 +21,7 @@ func (m *recordingModem) StartDecoding(func(uint16, []m17.SoftBit)) {}
 func (m *recordingModem) Start() error                              { return nil }
 func (m *recordingModem) Reset() error                              { return nil }
 func (m *recordingModem) Close() error                              { return nil }
+func (m *recordingModem) Ident() string                             { return "recording" }
 func (m *recordingModem) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	m.mu.Lock()
 	m.voice = append(m.voice, sd.FrameNumber)

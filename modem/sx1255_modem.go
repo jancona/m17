@@ -143,6 +143,12 @@ type SX1255 struct {
 	mixerGain    float32
 }
 
+// Ident returns "SX1255". The HAT has no firmware of its own, and the chip
+// version is checked at startup.
+func (m *SX1255) Ident() string {
+	return "SX1255"
+}
+
 // NewSX1255 creates and initializes an SX1255 modem from INI configuration.
 func NewSX1255(
 	rxFrequency uint32,
