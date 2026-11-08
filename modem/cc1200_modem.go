@@ -34,7 +34,11 @@ const (
 	cc1200CmdTXData
 	cc1200CmdDbgEnable
 	cc1200CmdDbgTxt
-	//GET
+)
+
+// The GET commands get a block of their own, so iota restarts at 0 and they
+// number from 0x80 as in the firmware.
+const (
 	cc1200CmdGetIdent = iota + 0x80
 	cc1200CmdGetCaps
 	cc1200CmdGetRXFreq
@@ -185,6 +189,7 @@ type CC1200 struct {
 	boot0      gpioLine
 	debugLog   *os.File
 	lastTXData time.Time
+	ident      string
 }
 
 func NewCC1200(
@@ -268,6 +273,14 @@ func NewCC1200(
 	_, err = ret.commandWithResponse(newCommandV2(cc1200CmdPing, []byte{}))
 	if err != nil {
 		return nil, fmt.Errorf("test PING: %w", err)
+	}
+	// The IDENT string is informational, so a modem that doesn't answer is
+	// not an error.
+	ret.ident, err = ret.getIdent()
+	if err != nil {
+		log.Printf("[WARN] getIdent: %v", err)
+	} else {
+		log.Printf("[INFO] CC1200 modem ident: %q", ret.ident)
 	}
 	// ret.debugLog, err = os.OpenFile("/home/jim/debug.sym", os.O_CREATE|os.O_WRONLY, 0644)
 	// if err != nil {
@@ -748,6 +761,23 @@ func (m *CC1200) setAFC(afc bool) error {
 		return fmt.Errorf("send set AFC: %w", err)
 	}
 	return nil
+}
+func (m *CC1200) getIdent() (string, error) {
+	log.Printf("[DEBUG] getIdent()")
+	resp, err := m.commandWithResponse(newCommandV2(cc1200CmdGetIdent, []byte{}))
+	if err != nil {
+		return "", fmt.Errorf("send get ident: %w", err)
+	}
+	if resp.cmd != cc1200CmdGetIdent {
+		return "", fmt.Errorf("unexpected response to get ident: %v", resp)
+	}
+	return string(resp.data), nil
+}
+
+// Ident returns the IDENT string the modem reported at startup, which names
+// the hardware and its firmware version.
+func (m *CC1200) Ident() string {
+	return m.ident
 }
 func (m *CC1200) setFreqCorrection(corr int16) error {
 	log.Printf("[DEBUG] setFreqCorrection(%v)", corr)

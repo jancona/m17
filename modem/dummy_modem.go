@@ -29,6 +29,10 @@ func (m *Dummy) TransmitPacket(p m17.Packet) error {
 	return nil
 }
 
+func (m *Dummy) Ident() string {
+	return "Dummy"
+}
+
 func (m *Dummy) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	return nil
 }

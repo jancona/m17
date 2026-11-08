@@ -396,6 +396,7 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 		packetGap:        cfg.packetGap,
 		packetQueue:      make(chan func() error, packetQueueLen),
 	}
+	g.dashLog.Log("Gateway", "Start", "modem", cfg.modemType, "modemIdent", modem.Ident())
 	go g.sendPackets()
 	err = g.loadAudioClips(cfg.audioDir, cfg.callsign)
 	if err != nil {
