@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jancona/m17"
@@ -26,6 +27,17 @@ var (
 	connRetryInterval    = 5 * time.Second
 	maxConnRetryInterval = time.Minute
 )
+
+// dialUDP and resolveUDPAddr open the socket to the reflector; tests
+// replace them to simulate a network that isn't up yet.
+var (
+	dialUDP        = net.DialUDP
+	resolveUDPAddr = net.ResolveUDPAddr
+)
+
+// errNoSocket is returned by sends before the socket to the reflector has
+// been opened (the network isn't up yet).
+var errNoSocket = errors.New("no connection to the reflector yet")
 
 // ProbeInterval is the wait between PARROT probes, and after the last
 // one before an unanswered reflector is taken to be legacy.
@@ -57,7 +69,9 @@ type Client struct {
 	EncodedName     *m17.EncodedCallsign
 	encodedCallsign *m17.EncodedCallsign
 	callsign        string
-	conn            *net.UDPConn
+	connMu          sync.Mutex
+	conn            *net.UDPConn // nil until the socket is open
+	closed          atomic.Bool  // set by Close: stop reconnecting
 	connected       bool
 	connecting      bool
 	pingTimer       *time.Timer
@@ -115,9 +129,9 @@ func NewClient(name string, server string, port uint, module string, callsign st
 			r.stopProbe()
 			r.event("Disconnect")
 			r.retryCount = 0
-			for !r.connected && r.retryCount < maxRetries {
+			for !r.connected && r.retryCount < maxRetries && !r.closed.Load() {
 				// Close connection before retrying
-				r.conn.Close()
+				r.closeConn()
 				for r.running {
 					log.Printf("[DEBUG] Waiting for handler to stop...")
 					time.Sleep(10 * time.Second)
@@ -133,7 +147,10 @@ func NewClient(name string, server string, port uint, module string, callsign st
 				log.Printf("[DEBUG] Retry %d, connected: %v", r.retryCount, r.connected)
 			}
 			if !r.connected {
-				log.Printf("[DEBUG] Max retries exceeded, giving up")
+				// The last Connect keeps trying by itself: it resends CONN
+				// with backoff, or reopens the socket once the network is
+				// back
+				log.Printf("[DEBUG] Max retries exceeded; still trying in the background")
 			}
 		}),
 	}
@@ -141,38 +158,107 @@ func NewClient(name string, server string, port uint, module string, callsign st
 	return r, nil
 }
 
+// Connect starts linking to the reflector. If the socket can't be opened
+// yet (no route because the network isn't up, as at boot before WiFi has an
+// address, or a reflector name that doesn't resolve yet), Connect doesn't
+// fail: it keeps trying in the background, waiting connRetryInterval at
+// first and doubling up to maxConnRetryInterval, so a hotspot recovers by
+// itself. Once the socket is open, an unanswered CONN is resent the same way.
 func (r *Client) Connect() error {
-	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", r.Server, r.Port))
+	r.connecting = true
+	if err := r.dial(); err != nil {
+		log.Printf("[INFO] Can't reach reflector %s %s:%d yet (%v); retrying", r.Name, r.Server, r.Port, err)
+		go r.redial()
+		return nil
+	}
+	r.start()
+	return nil
+}
+
+// dial opens the UDP socket to the reflector.
+func (r *Client) dial() error {
+	addr, err := resolveUDPAddr("udp", fmt.Sprintf("%s:%d", r.Server, r.Port))
 	if err != nil {
 		return fmt.Errorf("failed to resolve address: %w", err)
 	}
-
-	// Dial UDP connection to server/reflector
-	r.conn, err = net.DialUDP("udp", nil, addr)
+	c, err := dialUDP("udp", nil, addr)
 	if err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
-
-	r.connecting = true
-	err = r.sendCONN()
-	if err != nil {
-		return fmt.Errorf("error sending CONN: %w", err)
-	}
-	log.Printf("[DEBUG] Sent connect to %s %s:%d", r.Name, r.Server, r.Port)
-	go r.handle()
+	r.connMu.Lock()
+	r.conn = c
+	r.connMu.Unlock()
 	return nil
 }
+
+// redial retries dial until it works or the client is closed, then starts
+// linking.
+func (r *Client) redial() {
+	gap := connRetryInterval
+	for {
+		time.Sleep(gap)
+		if r.closed.Load() {
+			return
+		}
+		if err := r.dial(); err != nil {
+			gap = min(2*gap, maxConnRetryInterval)
+			log.Printf("[DEBUG] Still can't reach reflector %s (%v); next try in %v", r.Name, err, gap)
+			continue
+		}
+		log.Printf("[INFO] Reached reflector %s %s:%d", r.Name, r.Server, r.Port)
+		r.start()
+		return
+	}
+}
+
+// start sends CONN on the open socket and handles what comes back. A CONN
+// that can't be sent is resent by handle when no answer arrives.
+func (r *Client) start() {
+	if err := r.sendCONN(); err != nil {
+		log.Printf("[DEBUG] %v; will resend", err)
+	} else {
+		log.Printf("[DEBUG] Sent connect to %s %s:%d", r.Name, r.Server, r.Port)
+	}
+	go r.handle(r.socket())
+}
+
+// socket returns the socket to the reflector, or nil if it isn't open.
+func (r *Client) socket() *net.UDPConn {
+	r.connMu.Lock()
+	defer r.connMu.Unlock()
+	return r.conn
+}
+
+// write sends b to the reflector.
+func (r *Client) write(b []byte) (int, error) {
+	c := r.socket()
+	if c == nil {
+		return 0, errNoSocket
+	}
+	return c.Write(b)
+}
+
+// closeConn closes the socket, if it is open.
+func (r *Client) closeConn() error {
+	c := r.socket()
+	if c == nil {
+		return nil
+	}
+	return c.Close()
+}
+
 func (r *Client) Close() error {
 	log.Print("[DEBUG] Client.Close()")
+	r.closed.Store(true)
 	r.running = false
 	r.pingTimer.Stop()
 	r.stopProbe()
 	r.sendDISC()
 	r.event("Disconnect")
-	return r.conn.Close()
+	return r.closeConn()
 }
 
-func (r *Client) handle() {
+func (r *Client) handle(conn *net.UDPConn) {
 	r.running = true
 	connGap := connRetryInterval // wait before resending an unanswered CONN
 	for r.connected || r.connecting {
@@ -182,10 +268,10 @@ func (r *Client) handle() {
 		}
 		// A read deadline only: SetDeadline would also expire writes, so a
 		// resent CONN, or any packet sent after a quiet spell, would fail.
-		r.conn.SetReadDeadline(time.Now().Add(wait))
+		conn.SetReadDeadline(time.Now().Add(wait))
 		// Receiving a message
 		buffer := make([]byte, 1024)
-		l, _, err := r.conn.ReadFromUDP(buffer)
+		l, _, err := conn.ReadFromUDP(buffer)
 		if err != nil {
 			switch {
 			case errors.Is(err, os.ErrDeadlineExceeded):
@@ -374,7 +460,7 @@ func (r *Client) SendPacket(p m17.Packet) error {
 	cmd = append(cmd, b...)
 	// log.Printf("[DEBUG] p: %#v, cmd: %#v", p, cmd)
 
-	_, err := r.conn.Write(cmd)
+	_, err := r.write(cmd)
 	if err != nil {
 		return fmt.Errorf("error sending packet message: %w", err)
 	}
@@ -383,7 +469,7 @@ func (r *Client) SendPacket(p m17.Packet) error {
 
 func (r *Client) SendStream(sd m17.StreamDatagram) error {
 	// log.Printf("[DEBUG] Send StreamDatagram: %s", sd)
-	_, err := r.conn.Write(sd.ToBytes())
+	_, err := r.write(sd.ToBytes())
 	if err != nil {
 		return fmt.Errorf("error sending stream message: %w", err)
 	}
@@ -396,7 +482,7 @@ func (r *Client) sendCONN() error {
 	copy(cmd[4:10], r.encodedCallsign[:])
 	cmd[10] = r.Module
 	log.Printf("[DEBUG] Sending CONN callsign: %s, module %s, cmd: %#v", r.callsign, string(r.Module), cmd)
-	_, err := r.conn.Write(cmd)
+	_, err := r.write(cmd)
 	if err != nil {
 		return fmt.Errorf("error sending CONN: %w", err)
 	}
@@ -407,7 +493,7 @@ func (r *Client) sendPONG() error {
 	cmd := make([]byte, 10)
 	copy(cmd, []byte(m17.MagicPONG))
 	copy(cmd[4:10], r.encodedCallsign[:])
-	_, err := r.conn.Write(cmd)
+	_, err := r.write(cmd)
 	if err != nil {
 		return fmt.Errorf("error sending PONG: %w", err)
 	}
@@ -418,7 +504,7 @@ func (r *Client) sendDISC() error {
 	copy(cmd, []byte(m17.MagicDISC))
 	copy(cmd[4:10], r.encodedCallsign[:])
 	log.Printf("[DEBUG] Sending DISC cmd: %#v", cmd)
-	_, err := r.conn.Write(cmd)
+	_, err := r.write(cmd)
 	if err != nil {
 		return fmt.Errorf("error sending DISC: %w", err)
 	}
