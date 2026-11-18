@@ -2,7 +2,10 @@ package inet
 
 import (
 	"bytes"
+	"errors"
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -402,5 +405,103 @@ func TestNoProbeByDefault(t *testing.T) {
 	case p := <-pkts:
 		t.Errorf("probe sent without ProbeReflector: %v", p)
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestClientLinksOnceNetworkIsUp: at boot the network may not be up when
+// the gateway starts (no route, so the socket can't be opened). Connect
+// must not fail: it keeps trying and links once the network is there.
+func TestClientLinksOnceNetworkIsUp(t *testing.T) {
+	oldInterval, oldDial := connRetryInterval, dialUDP
+	connRetryInterval = 50 * time.Millisecond
+	var mu sync.Mutex
+	failures := 3
+	dialUDP = func(network string, laddr, raddr *net.UDPAddr) (*net.UDPConn, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if failures > 0 {
+			failures--
+			return nil, &net.OpError{Op: "dial", Net: "udp", Err: errors.New("network is unreachable")}
+		}
+		return oldDial(network, laddr, raddr)
+	}
+	t.Cleanup(func() { connRetryInterval, dialUDP = oldInterval, oldDial })
+
+	refl, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { refl.Close() })
+	go func() {
+		buf := make([]byte, 64)
+		for {
+			n, from, err := refl.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			if n >= 4 && string(buf[:4]) == m17.MagicCONN {
+				refl.WriteToUDP([]byte(m17.MagicACKN), from)
+			}
+		}
+	}()
+
+	events := make(chan string, 10)
+	c, err := NewClient("M17-QTC", "127.0.0.1", uint(refl.LocalAddr().(*net.UDPAddr).Port), "A", "N1ADJ G",
+		func(event, _ string, _ byte) { events <- event }, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect with the network down: %v, want nil (retry in the background)", err)
+	}
+	t.Cleanup(func() { c.Close() })
+
+	select {
+	case ev := <-events:
+		if ev != "Connect" {
+			t.Errorf("first event %q, want Connect", ev)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("client never linked once the network was up")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if failures != 0 {
+		t.Errorf("%d simulated failures left; the client linked without retrying", failures)
+	}
+}
+
+// TestClientCloseWhileNetworkDown: closing a client that never managed to
+// open its socket must not panic, and must stop the retries.
+func TestClientCloseWhileNetworkDown(t *testing.T) {
+	oldInterval, oldDial := connRetryInterval, dialUDP
+	connRetryInterval = 20 * time.Millisecond
+	var attempts atomic.Int32
+	dialUDP = func(string, *net.UDPAddr, *net.UDPAddr) (*net.UDPConn, error) {
+		attempts.Add(1)
+		return nil, errors.New("network is unreachable")
+	}
+	t.Cleanup(func() { connRetryInterval, dialUDP = oldInterval, oldDial })
+
+	c, err := NewClient("M17-QTC", "127.0.0.1", 17000, "A", "N1ADJ G", nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if err := c.Close(); err != nil {
+		t.Errorf("Close with no socket: %v", err)
+	}
+	if err := c.sendCONN(); !errors.Is(err, errNoSocket) {
+		t.Errorf("send with no socket: %v, want errNoSocket", err)
+	}
+	// A retry already sleeping may make one more attempt; then they stop
+	time.Sleep(300 * time.Millisecond)
+	before := attempts.Load()
+	time.Sleep(300 * time.Millisecond)
+	if after := attempts.Load(); after != before {
+		t.Errorf("still retrying after Close: %d attempts became %d", before, after)
 	}
 }
