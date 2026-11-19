@@ -12,7 +12,8 @@ AudioDir=audio/
 ; ignore it, the radio connected to them setting the frequency.
 RXFrequency=439000000
 TXFrequency=439000000
-; dBm, CC1200 HAT only (-16 to 14); other modems don't use it
+; dBm, CC1200 HAT only (-16 to 14). The SX1255 HAT's transmit level is set
+; with DACGain and MixerGain under [Modem]; MMDVM boards don't take one.
 Power=10
 AFC=true
 FrequencyCorr=0
@@ -93,6 +94,9 @@ PGAGain = 0
 ; build, negate it to keep the same transmit level.
 DACGain = -3
 ; TX mixer gain (-37.5 to -7.5 dB in 2 dB steps)
+; DACGain and MixerGain together set the SX1255's transmit level ([Radio]
+; Power isn't used). Both are relative to the chip's full scale, not dBm at
+; the antenna.
 MixerGain = -12
 ; Diagnostics: dump raw received IQ to a file for off-line analysis, then stop.
 ; ALSA hw devices are exclusive, so arecord cannot read the SX1255 while the

@@ -15,8 +15,9 @@ type radioLimits struct {
 //   - The CC1200 HAT covers 420-450 MHz (its filters) and transmits at -16
 //     to 14 dBm.
 //   - The SX1255 HAT tunes 400-510 MHz (its datasheet range; the PLL
-//     register tops out at 512 MHz with the 32 MHz crystal). Power isn't
-//     set through the gateway.
+//     register tops out at 512 MHz with the 32 MHz crystal). Its transmit
+//     level is [Modem] DACGain and MixerGain, relative to the chip's full
+//     scale, so Power isn't used.
 //   - MMDVM boards check the frequency themselves: MMDVM_HS firmware
 //     allows its bands and refuses the rest with a NAK, and repeater
 //     boards ignore it, the external radio setting the frequency. Power
