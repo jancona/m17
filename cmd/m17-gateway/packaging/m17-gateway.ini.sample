@@ -1,3 +1,5 @@
+; Every setting is described in docs/m17-gateway-configuration.md
+; (https://github.com/jancona/m17/blob/master/docs/m17-gateway-configuration.md)
 [General]
 ; Example: N1ADJ or N1ADJ G
 Callsign=CALLSIGN_PLACEHOLDER
