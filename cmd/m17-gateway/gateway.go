@@ -102,21 +102,9 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 
 	callsign = m17.NormalizeCallsignModule(callsign)
 	_, callsignErr := m17.EncodeCallsign(callsign)
-	// TODO: Lots of these validations are CC1200 specific
-	if rxFrequencyErr == nil {
-		if rxFrequency < 420e6 || rxFrequency > 450e6 {
-			rxFrequencyErr = fmt.Errorf("configured RXFrequency %d out of range (420 to 450 MHz)", rxFrequency)
-		}
-	}
-	if txFrequencyErr == nil {
-		if txFrequency < 420e6 || txFrequency > 450e6 {
-			txFrequencyErr = fmt.Errorf("configured TXFrequency %d out of range (420 to 450 MHz)", txFrequency)
-		}
-	}
-	if powerErr == nil {
-		if power < -16 || power > 14 {
-			powerErr = fmt.Errorf("configured Power %f out of range (-16 to 14 dBm)", power)
-		}
+	// Frequency and power limits depend on the modem (radiocheck.go)
+	if rxFrequencyErr == nil && txFrequencyErr == nil && powerErr == nil {
+		rxFrequencyErr, txFrequencyErr, powerErr = checkRadio(modemType, uint64(rxFrequency), uint64(txFrequency), power)
 	}
 
 	var reflectorHostfile, reflectorOverrideHostfile *inet.Hostfile

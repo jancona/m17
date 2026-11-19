@@ -262,6 +262,13 @@ func (m *MMDVM) open() error {
 		return err
 	}
 	err = m.setFrequency(m.rxFrequency, m.txFrequency, m.power)
+	if errors.Is(err, ErrModemNAK) {
+		// MMDVM_HS firmware refuses frequencies outside its bands
+		// (144-148, 219-225, 420-475 and 842-950 MHz, without 145.8-146.0
+		// and 435-438 MHz, the satellite segments)
+		return fmt.Errorf("the modem refused RXFrequency %d / TXFrequency %d: outside the bands its firmware allows: %w",
+			m.rxFrequency, m.txFrequency, err)
+	}
 	if err != nil {
 		return err
 	}
@@ -983,7 +990,7 @@ func (m *MMDVM) getEmptyResponse() error {
 		case responseType == mmdvmACK:
 			return nil
 		case responseType == mmdvmNAK:
-			log.Printf("[ERROR] Received a NAK to the SetConfig command from the modem: % x", buf)
+			log.Printf("[ERROR] Received a NAK from the modem: % x", buf)
 			return ErrModemNAK
 		}
 	}
