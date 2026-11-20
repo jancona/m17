@@ -4,7 +4,7 @@ Status: **draft for review**. Nothing here is implemented yet.
 
 ## Goal
 
-m17-gateway publishes what it's doing over MQTT, in the format MMDVMHost already uses, so that:
+m17-gateway publishes what it's doing over MQTT, in the formats MMDVMHost and G4KLX's per-mode gateway programs already use, so that:
 
 - one dashboard can show either an MMDVMHost hotspot or an m17-gateway one;
 - the hotspot image's m17-admin (and later a Go UI) can show live activity and keep last-heard history without parsing log files;
@@ -31,7 +31,25 @@ From M17-Project/MMDVMHost `master` (its `schema.json`, `MQTTConnection.cpp`, `L
     - The end message repeats neither callsign: a consumer pairs it with the start.
   - `M17Packet` `{source, src_callsign, dst_callsign, protocol, length, text | data}`: `text` for SMS (protocol 5), otherwise `data` in hex.
   - `BER`, `RSSI`, `Text`: running values during a stream, and decoded META text.
+- **No reflector links.** In an MMDVMHost hotspot, linking is done by separate gateway programs (see below), so MMDVMHost has nothing to say about it.
 - **Callsigns are not padded.** The schema says an `m17_callsign` is exactly 9 characters, but MMDVMHost sends the decoded callsign as is: `N1ADJ`, `N1ADJ   G` (with a module letter), `ALL` for broadcast, `#ROOM`. **The gateway will send what MMDVMHost sends, not what the schema says**, and the schema should be corrected (see the schema changes below).
+
+## What the gateway programs do
+
+G4KLX's YSFGateway, P25Gateway, NXDNGateway, DGIdGateway and DMRGateway each publish over MQTT under their own `Name` (`ysf-gateway/json` and so on), each with its own `schema.json`. G4KLX's M17Gateway, and M17-Project's fork of it, have no MQTT yet. The two objects that matter, from YSFGateway:
+
+- `status` `{message}`: "YSFGateway is starting", "... is stopping". Not retained.
+- `link` `{action, reason, reflector, protocol}`, **retained**, so a dashboard that subscribes later still sees the current link.
+  - `action` is `linking`, `unlinked`, `relinking` or `failed`.
+  - `reason` is `user`, `timer`, `remote`, `startup` or `established`.
+  - A completed link is `action: "linking"` with `reason: "established"`. There's no separate "linked" action. It's odd, but it's the convention dashboards already read.
+  - `failed` was added recently, so a reflector that never answers no longer leaves a dashboard showing "linking" forever.
+
+A dashboard subscribes to both `mmdvm/json` and the gateway's topic.
+
+m17-gateway is both programs at once: the modem side of MMDVMHost and the reflector side of M17Gateway. So it publishes both kinds of message on its one topic: MMDVMHost's for the radio, and the gateway programs' `link` and `status` for the reflector.
+
+**M17-Project/M17Gateway may get MQTT later, and should publish the same `link` messages.** So everything in the link section below is limited to what M17Gateway can also produce: its link states map onto it directly. Its startup reflector is `startup`; RF link and `UNLINK` commands are `user`; UDP remote commands are `remote`; the hang-time return is `timer`; and its "Relinking to reflector" is `relinking`. The schema for it is written as M17Gateway's, so the same file can serve both programs.
 
 ## Configuration
 
@@ -64,13 +82,14 @@ All go to `<Name>/json`, using MMDVMHost's object names and fields unless marked
 
 | When | Message |
 |---|---|
-| Startup, once MQTT is connected | `MMDVM` `{"message": "m17-gateway is starting"}` |
+| Startup, once MQTT is connected | `MMDVM` `{"message": "m17-gateway is starting"}` and `status` `{"message": "m17-gateway is starting"}` |
 | The modem opened | `Modem` `{"open": true, "description": <ident>, "modes": ["M17"], "connection": "uart" or "spi", "port": ..., "speed": ...}`, plus `"protocol": 1 or 2` for MMDVM boards |
 | Ready, idle | `MMDVM` `{"mode": "idle"}` |
-| Clean shutdown | `MMDVM` `{"message": "m17-gateway is stopping"}`, then `Modem` `{"open": false}` |
+| Clean shutdown | `MMDVM` and `status` `{"message": "m17-gateway is stopping"}`, then `Modem` `{"open": false}` |
 | The modem failed or went away | `MMDVM` `{"mode": "error"}` |
 
 - `modes` and `connection: "spi"` (for the SX1255) need schema additions: MMDVMHost's `modem_mode` list lacks `M17`, and its `modem_connection` list lacks `spi`.
+- The lifecycle message goes out twice, as `MMDVM` (what MMDVMHost dashboards read) and as `status` (what gateway-program dashboards read). It's a small duplication, and it means neither kind of dashboard has to know about m17-gateway.
 - **Each time MQTT (re)connects**, the gateway also republishes the current `Modem` and `MMDVM` mode messages. Then a consumer that starts after the gateway, or a broker restart, still learns the current state without retained messages.
 
 ### Mode
@@ -120,15 +139,34 @@ dashboard.log reports positions decoded from the LSF META field (at most one per
 
 `altitude`, `speed`/`bearing` and `radius` are present only when the LSF marks them valid, as in dashboard.log. The field names use the schema's snake_case.
 
-### Reflector links (**new**)
+### Reflector links
 
-MMDVMHost's M17 support goes through a separate gateway program, so it has no link messages. A **new** object:
+The gateway programs' `link` object, published **retained**, with `"protocol": "m17"` and one M17-specific field, `module`:
 
 ```json
-{"M17Reflector": {"timestamp": "...", "action": "linked", "reflector": "M17-M17", "module": "C"}}
+{"link": {"timestamp": "...", "action": "linking", "reason": "established",
+  "reflector": "M17-M17", "module": "C", "protocol": "m17"}}
 ```
 
-`action` is `linked` or `unlinked`, from the gateway's existing connect and disconnect events. Running with no reflector publishes nothing.
+| Gateway event | `action` | `reason` |
+|---|---|---|
+| Startup with a reflector configured: sending CONN | `linking` | `startup` |
+| The reflector answered ACKN | `linking` | `established` |
+| No PINGs for 30 s, or the reflector sent DISC: reconnecting | `relinking` | |
+| Reconnected | `linking` | `established` |
+| No answer to CONN after three tries (about 35 s: the gaps are 5, 10 and 20 s); it keeps trying | `failed` | `timer` |
+| The reflector refused the link (NACK); the gateway stops trying | `failed` | `rejected` (**new**) |
+| Startup with no reflector (RF only) | `unlinked` | `startup` |
+| Clean shutdown | `unlinked` | `shutdown` (**new**) |
+
+- `reflector` and `module` are separate fields, so a consumer doesn't have to split `M17-M17 C`. `module` is left out when there is none.
+- Publishing `unlinked` at startup with no reflector, and at shutdown, keeps the retained message true. Otherwise a gateway that's stopped, or reconfigured to RF only, would leave "established" retained on the broker indefinitely.
+- m17-gateway has no RF link or unlink commands or remote commands today, so it never sends `user`, `remote` or `timer` on a successful change. M17Gateway would. The values are in the table only so both programs share one list.
+- `rejected` and `shutdown` are additions to the gateway programs' `reason` list. M17's NACK is a definite refusal, unlike a reflector that just doesn't answer, so it's worth telling apart. `shutdown` is needed because the link is retained.
+
+### GNSS placement
+
+GNSS positions (above) are kept as an MMDVMHost-style object, since they're decoded from the radio's LSF, which is MMDVMHost's side. M17Gateway also handles positions (its `GPSHandler` and `APRSWriter`), so if it publishes them later it should use the same `M17GNSS` object.
 
 ### What isn't published
 
@@ -153,15 +191,27 @@ MMDVMHost doesn't publish these either. They can be added later if a dashboard w
 - **QoS 2 and no retain**, as MMDVMHost.
 - **Timestamps:** UTC with milliseconds, formatted like MMDVMHost.
 
-## Schema changes to propose to M17-Project/MMDVMHost
+## Schema changes
 
-Opened as a PR against `schema.json` before the gateway's MQTT support is released:
+Two PRs, both opened before the gateway's MQTT support is released.
+
+**M17-Project/MMDVMHost `schema.json`** (the radio side):
 
 1. `m17_callsign`: `minLength` 1, `maxLength` 9. Today's exact-9 rule doesn't match what MMDVMHost sends.
 2. `modem_mode`: add `M17`. The fork also leaves M17 out of the `Modem` message's `modes`, which is a small bug to fix in the same PR.
 3. `modem_connection`: add `spi`.
 4. `M17`, `M17Packet`: optional `can`, an integer 0–15.
-5. New `M17GNSS` and `M17Reflector` objects, as above.
+5. A new `M17GNSS` object.
+
+**M17-Project/M17Gateway, a new `schema.json`** (the reflector side). It's modelled on YSFGateway's, so the file is ready when M17Gateway gets MQTT, and m17-gateway refers to it meanwhile:
+
+1. `status` `{timestamp, message}`.
+2. `link` `{timestamp, action, reason, reflector, module, protocol}`.
+   - `action`: `linking`, `unlinked`, `relinking`, `failed`.
+   - `reason`: `user`, `timer`, `remote`, `startup`, `established`, `rejected`, `shutdown`.
+   - `protocol`: `m17`.
+
+The two new reasons are also worth offering back to G4KLX's gateway schemas, but nothing here depends on that.
 
 ## Testing
 
@@ -177,11 +227,15 @@ Opened as a PR against `schema.json` before the gateway's MQTT support is releas
 
 1. This design, reviewed.
 2. The implementation on the `feature/mqtt` branch, not released until it's been tried on hardware.
-3. The schema PR to M17-Project/MMDVMHost.
+3. The schema PRs to M17-Project/MMDVMHost and M17-Project/M17Gateway.
 4. Released in an m17-gateway version. Then the hotspot image adds Mosquitto (localhost plus WebSocket) and turns `[MQTT] Enable` on, and m17-admin subscribes and keeps history: steps 2 and 3 of the plan.
 
 ## Open questions
 
-1. **Retained messages:** republishing `Modem` and mode on reconnect covers consumers that start late, but only while the gateway is connected. A retained `<Name>/state` topic would also cover a consumer that starts while the gateway is down. MMDVMHost doesn't do this. Worth adding as an extension, or keep strictly to MMDVMHost's behaviour?
-2. **A will message:** MMDVMHost has none, so a crashed gateway just goes quiet. A will message (`MMDVM` `{"mode": "error"}`) would make a crash visible, but it can't carry a correct timestamp. Add it?
-3. **Mode hang times:** fixed at MMDVMHost's defaults (10 s and 3 s), or settings?
+1. **A will message:** the retained `link` stays "established" if the gateway crashes, because only a clean shutdown publishes `unlinked`. An MQTT will message can fix that: the broker publishes it when the connection drops. The catch is that it's fixed when the gateway connects, so its `timestamp` would be the connect time, not the crash time. Options:
+   - a retained will of `{"link": {"action": "unlinked", "reason": "lost", "timestamp": <connect time>}}`, accepting the stale timestamp;
+   - or no will message, with consumers watching for the gateway going quiet.
+
+   G4KLX's gateways have no will message, so either way is consistent with them.
+2. **Mode hang times:** fixed at MMDVMHost's defaults (10 s and 3 s), or settings?
+3. **Retaining `Modem` and the mode:** `link` is retained, as the gateway programs do. MMDVMHost's `Modem` and `MMDVM` messages aren't, and the gateway republishes them on every reconnect instead. Keep that, or retain them too? Retaining them would differ from MMDVMHost.
