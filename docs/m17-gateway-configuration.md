@@ -2,7 +2,7 @@
 
 m17-gateway reads one ini file, given with `-config`. The default is `./gateway.ini`; the packages install `/etc/m17-gateway.ini`. [`m17-gateway.ini.sample`](../cmd/m17-gateway/packaging/m17-gateway.ini.sample) is a starting point.
 
-This page lists every key the gateway reads, what it does, which modems use it, and what values it accepts. It describes m17-gateway 0.9.5.
+This page lists every key the gateway reads, what it does, which modems use it, and what values it accepts. It describes m17-gateway as of the release after 0.9.5.
 
 ## How values are read
 
@@ -35,7 +35,7 @@ Summary of which keys each modem uses (details in the sections below):
 | `[Radio] Duplex` | keep `false` | ✓ | ✓ |
 | `[Modem] Port`, `Speed` | ✓ | | ✓ |
 | `[Modem] NRSTPin`, `Boot0Pin`, `ZMQPort` | ✓ | | |
-| `[Modem] Protocol`, `RXInvert` … `TXHang` | | | ✓ |
+| `[Modem] Protocol`, `RXInvert` … `TXHang`, `RFLevel` | | | ✓ |
 | `[Modem] SPIDevice` … `RawIQSeconds` | | ✓ | |
 
 ## [General]
@@ -52,7 +52,7 @@ Summary of which keys each modem uses (details in the sections below):
 |---|---|---|---|---|
 | `RXFrequency` | yes | | Hz; see the limits below | Receive frequency. In simplex it is also the transmit frequency, and `TXFrequency` should equal it. |
 | `TXFrequency` | yes | | Hz; see the limits below | Transmit frequency. Different from `RXFrequency` in duplex. |
-| `Power` | yes | | dBm. **CC1200: -16 to 14**, whole numbers (a fraction is dropped). Any number for other modems | CC1200 HAT transmit power. Other modems don't use it, but the key must still hold a number. The SX1255 HAT's level is set with `[Modem] DACGain` and `MixerGain`; m17-gateway doesn't send MMDVM boards a power level. |
+| `Power` | yes | | dBm. **CC1200: -16 to 14**, whole numbers (a fraction is dropped). Any number for other modems | CC1200 HAT transmit power. Other modems don't use it, but the key must still hold a number. The SX1255 HAT's level is set with `[Modem] DACGain` and `MixerGain`, and an MMDVM_HS board's with `[Modem] RFLevel`. |
 | `AFC` | yes | | Boolean | CC1200 HAT automatic frequency control: the receiver tracks the incoming signal's offset. The firmware applies a change at the next switch from transmit to receive. Required but unused for other modems. |
 | `FrequencyCorr` | yes | | Integer; see the next column | Corrects the radio's reference oscillator. **CC1200:** passed to the firmware's FREQOFF register, in the firmware's own units, and it must be -200 to 200, or the HAT refuses it and the gateway stops. **SX1255 and MMDVM:** hertz, added to both frequencies, -32768 to 32767. If the radio transmits high, use a negative value. `0` for none. |
 | `Duplex` | yes | | Boolean | Duplex (repeater) operation: receive and transmit at the same time on different frequencies. In duplex the gateway repeats received RF streams and packets on its transmit frequency, as well as sending them to the reflector. SX1255 and MMDVM support it (MMDVM_HS duplex boards such as the Dual Hat, and repeater boards). **The CC1200 HAT is half-duplex: keep this `false`.** |
@@ -145,6 +145,7 @@ These match MMDVMHost's settings of the same names.
 | `TXLevel` | no | `50` | Percent, 0–100 | M17 transmit level (deviation). |
 | `RXDCOffset` | no | `0` | -128 to 127 | Receive DC offset. Outside the range is a configuration error. |
 | `TXDCOffset` | no | `0` | -128 to 127 | Transmit DC offset. Outside the range is a configuration error. |
+| `RFLevel` | no | `100` | Percent, 0–100; fractions allowed. Outside the range is a configuration error | MMDVM_HS transmit power, sent to the firmware as 0–255, which sets the ADF7021's power amplifier (0–63). It's not in dB, and the actual output depends on the board. Repeater boards ignore it: the attached radio sets their power. m17-gateway 0.9.5 and earlier didn't send it, so MMDVM_HS boards always transmitted at full power. |
 
 `[Radio] Power` and `AFC` aren't used by MMDVM boards but must still be present. `[Radio] Duplex` is sent to the board, so set it to match: duplex hotspot boards and repeaters `true`, simplex hotspots `false`.
 

@@ -15,7 +15,7 @@ AudioDir=audio/
 RXFrequency=439000000
 TXFrequency=439000000
 ; dBm, CC1200 HAT only (-16 to 14). The SX1255 HAT's transmit level is set
-; with DACGain and MixerGain under [Modem]; MMDVM boards don't take one.
+; with DACGain and MixerGain under [Modem], an MMDVM_HS board's with RFLevel.
 Power=10
 AFC=true
 FrequencyCorr=0
@@ -63,6 +63,8 @@ RXLevel=50
 RXDCOffset=0
 TXLevel=50
 TXHang=5
+; MMDVM_HS transmit power, 0-100 percent (repeater boards ignore it)
+RFLevel=100
 ; SX1255-specific
 SPIDevice = /dev/spidev0.0
 GPIOChip = gpiochip0
