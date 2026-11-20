@@ -247,7 +247,7 @@ func main() {
 		}
 		log.Printf("[INFO] Connected to CC1200 modem on %s", cfg.modemCfg.Key("Port").String())
 	case "mmdvm":
-		mdm, err = modem.NewMMDVM(cfg.rxFrequency, cfg.txFrequency, cfg.power, cfg.frequencyCorr, cfg.afc, cfg.modemCfg, cfg.duplex)
+		mdm, err = modem.NewMMDVM(cfg.rxFrequency, cfg.txFrequency, cfg.frequencyCorr, cfg.afc, cfg.modemCfg, cfg.duplex)
 		if err != nil {
 			log.Fatalf("Error creating MMDVM modem: %v", err)
 		}

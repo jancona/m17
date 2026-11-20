@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -133,7 +134,7 @@ type MMDVM struct {
 	speed       int
 	rxFrequency uint32
 	txFrequency uint32
-	power       float32
+	rfLevel     byte // RF power for MMDVM_HS boards, 0-255 (sent with SetFrequency)
 	openPort    func() (io.ReadWriteCloser, error)
 	sleep       func(time.Duration)
 
@@ -164,7 +165,6 @@ type MMDVM struct {
 func NewMMDVM(
 	rxFrequency uint32,
 	txFrequency uint32,
-	power float32,
 	frequencyCorr int16,
 	afc bool,
 	modemCfg *ini.Section,
@@ -193,6 +193,7 @@ func NewMMDVM(
 	rxDCOffset, rxDCErr := dcOffset(modemCfg, "RXDCOffset")
 	txLevel := modemCfg.Key("TXLevel").MustUint(50)
 	txHang := modemCfg.Key("TXHang").MustUint(5)
+	rfLevel, rfLevelErr := mmdvmRFLevel(modemCfg)
 
 	var err error
 	err = errors.Join(
@@ -201,6 +202,7 @@ func NewMMDVM(
 		speedErr,
 		txDCErr,
 		rxDCErr,
+		rfLevelErr,
 	)
 	if err != nil {
 		return nil, err
@@ -211,7 +213,7 @@ func NewMMDVM(
 		speed:       speed,
 		rxFrequency: rxFrequency + uint32(frequencyCorr),
 		txFrequency: txFrequency + uint32(frequencyCorr),
-		power:       power,
+		rfLevel:     rfLevel,
 		sleep:       time.Sleep,
 		sendCmds:    make(chan []byte, 100), // 4 seconds
 		lastTXData:  time.Now(),
@@ -261,7 +263,7 @@ func (m *MMDVM) open() error {
 	if err != nil {
 		return err
 	}
-	err = m.setFrequency(m.rxFrequency, m.txFrequency, m.power)
+	err = m.setFrequency(m.rxFrequency, m.txFrequency, m.rfLevel)
 	if errors.Is(err, ErrModemNAK) {
 		// MMDVM_HS firmware refuses frequencies outside its bands
 		// (144-148, 219-225, 420-475 and 842-950 MHz, without 145.8-146.0
@@ -710,10 +712,10 @@ func mmdvmHWTypeFromDescription(description []byte) byte {
 	return mmdvmHWTypeMMDVM
 }
 
-func (m *MMDVM) setFrequency(rxFreq, txFreq uint32, power float32) error {
-	log.Printf("[DEBUG] setFrequency(%d, %d, %f)", rxFreq, txFreq, power)
+func (m *MMDVM) setFrequency(rxFreq, txFreq uint32, rfLevel byte) error {
+	log.Printf("[DEBUG] setFrequency(%d, %d, RF level %d)", rxFreq, txFreq, rfLevel)
 
-	cmd := make([]byte, 12)
+	cmd := make([]byte, 13)
 	cmd[0] = mmdvmFrameStart
 	cmd[1] = byte(len(cmd))
 	cmd[2] = mmdvmSetFrequency
@@ -728,6 +730,10 @@ func (m *MMDVM) setFrequency(rxFreq, txFreq uint32, power float32) error {
 	cmd[9] = byte((txFreq >> 8) & 0xFF)
 	cmd[10] = byte((txFreq >> 16) & 0xFF)
 	cmd[11] = byte((txFreq >> 24) & 0xFF)
+
+	// MMDVM_HS firmware takes the RF power from this byte, and uses full
+	// power when it's missing. Repeater firmware ignores it.
+	cmd[12] = rfLevel
 
 	_, err := m.getPort().Write(cmd)
 	if err != nil {
@@ -1308,6 +1314,16 @@ func (m *MMDVM) sendToModem(cmd []byte) {
 		log.Println("[DEBUG] sendToModem message send failed")
 	}
 	m.lastTXData = time.Now()
+}
+
+// mmdvmRFLevel reads RFLevel, the RF power in percent (0-100, default
+// 100, as in MMDVMHost), and encodes it for SetFrequency as 0-255.
+func mmdvmRFLevel(sec *ini.Section) (byte, error) {
+	v := sec.Key("RFLevel").MustFloat64(100)
+	if v < 0 || v > 100 {
+		return 0, fmt.Errorf("modem RFLevel is %g, must be between 0 and 100", v)
+	}
+	return byte(math.Round(v * 255 / 100)), nil
 }
 
 // dcOffset reads a TX or RX DC offset setting: a signed value, -128 to 127,
