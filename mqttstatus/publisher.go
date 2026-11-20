@@ -40,7 +40,7 @@ type Config struct {
 }
 
 // QoS 2 and no retain, as MMDVMHost, except for the messages the gateway
-// programs retain (link).
+// programs retain (link) and the state topics (State).
 const qos = 2
 
 // queueLen is how many messages wait for the broker before new ones are
@@ -253,6 +253,22 @@ func (p *Publisher) JSON(typ string, v any, retain bool) {
 		return
 	}
 	p.enqueue(message{topic: p.cfg.Name + "/json", payload: b, retain: retain})
+}
+
+// State publishes v as {"typ": v} on <Name>/state/<typ>, retained, so a
+// consumer that connects later learns the current state at once. MQTT keeps
+// one retained message per topic, so each kind of state has its own topic;
+// <Name>/json carries the events as MMDVMHost does.
+func (p *Publisher) State(typ string, v any) {
+	if p == nil {
+		return
+	}
+	b, err := json.Marshal(map[string]any{typ: v})
+	if err != nil {
+		log.Printf("[ERROR] MQTT: encoding %s: %v", typ, err)
+		return
+	}
+	p.enqueue(message{topic: p.cfg.Name + "/state/" + typ, payload: b, retain: true})
 }
 
 // logLine publishes a formatted log line on <Name>/log.

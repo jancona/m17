@@ -90,7 +90,20 @@ All go to `<Name>/json`, using MMDVMHost's object names and fields unless marked
 
 - `modes` and `connection: "spi"` (for the SX1255) need schema additions: MMDVMHost's `modem_mode` list lacks `M17`, and its `modem_connection` list lacks `spi`.
 - The lifecycle message goes out twice, as `MMDVM` (what MMDVMHost dashboards read) and as `status` (what gateway-program dashboards read). It's a small duplication, and it means neither kind of dashboard has to know about m17-gateway.
-- **Each time MQTT (re)connects**, the gateway also republishes the current `Modem` and `MMDVM` mode messages. Then a consumer that starts after the gateway, or a broker restart, still learns the current state without retained messages.
+- **Each time MQTT (re)connects**, the gateway also republishes the current `Modem` and `MMDVM` mode messages, so a restarted broker catches up.
+
+### Current state (**new**): `<Name>/state/<type>`, retained
+
+Events on `<Name>/json` aren't retained (as in MMDVMHost), so a consumer that connects after the gateway started wouldn't know the modem or the mode until they changed. The gateway therefore also publishes the latest of each kind of state, **retained**, on its own topic. MQTT keeps only one retained message per topic, which is why each kind has its own, and why `link` alone can be retained on `<Name>/json`.
+
+| Topic | Payload (same objects as on `/json`) |
+|---|---|
+| `<Name>/state/Modem` | the last `Modem` message (open with its description, or `{"open": false}` after shutdown) |
+| `<Name>/state/MMDVM` | the current mode: `{"mode": "idle"}`, `{"mode": "M17"}` |
+| `<Name>/state/link` | the current `link` (as retained on `/json`) |
+| `<Name>/state/status` | the last lifecycle message: "m17-gateway is starting" while it runs, "... is stopping" after |
+
+A consumer subscribes to `<Name>/json` for events and `<Name>/state/#` for the current state; the broker sends the state at once. These topics are an addition to MMDVMHost's conventions, so they go in the schema PR's description rather than in `schema.json` (which describes payloads, not topics).
 
 ### Mode
 
@@ -122,10 +135,10 @@ MMDVMHost switches its mode to `M17` while there's M17 activity, and back to `id
 
 | Gateway event | MQTT |
 |---|---|
-| RF packet | `M17Packet` `{source: "rf", src_callsign, dst_callsign, protocol, length, text or data, can}` |
+| RF packet | `M17Packet` `{source: "rf", src_callsign, dst_callsign, protocol, length, text or data, can, ber}` |
 | Network packet | the same with `source: "network"` |
 
-`can` is **new** here too. `text` is the SMS text without its terminating NUL. For other protocols, `data` is the payload in upper-case hex, as MMDVMHost does.
+`can` is **new** here too, and so is `ber` (percent, RF only, as on a voice stream's end): MMDVMHost's `M17Packet` has no error rate, but dashboard.log has always had one for RF packets. `text` is the SMS text without its terminating NUL. For other protocols, `data` is the payload in upper-case hex, as MMDVMHost does.
 
 ### GNSS (**new**)
 
@@ -188,7 +201,7 @@ MMDVMHost doesn't publish these either. They can be added later if a dashboard w
 - **Client:** `github.com/eclipse/paho.mqtt.golang`. It's pure Go, so the static `CGO_ENABLED=0` build stays as it is. It speaks MQTT 3.1.1 and reconnects on its own.
 - **Never blocks the radio path:** messages go into a buffered channel, about 256 messages, and one goroutine publishes them. When the buffer is full, or the broker is unreachable, new messages are dropped and counted, and the count is logged once a minute. A slow or dead broker can't delay audio.
 - **Startup doesn't wait for the broker:** a broker that's down at startup is retried in the background, like MMDVMHost.
-- **QoS 2 and no retain**, as MMDVMHost.
+- **QoS 2**, as MMDVMHost. Retained: `link` on `/json` (as the gateway programs) and the `state/` topics.
 - **Timestamps:** UTC with milliseconds, formatted like MMDVMHost.
 
 ## Schema changes
@@ -201,7 +214,9 @@ Two PRs, both opened before the gateway's MQTT support is released.
 2. `modem_mode`: add `M17`. The fork also leaves M17 out of the `Modem` message's `modes`, which is a small bug to fix in the same PR.
 3. `modem_connection`: add `spi`.
 4. `M17`, `M17Packet`: optional `can`, an integer 0–15.
-5. A new `M17GNSS` object.
+5. `M17Packet`: optional `ber`, a number (percent).
+6. A new `M17GNSS` object.
+7. In the PR description (not the schema): the retained `<Name>/state/<type>` topics, offered as a convention MMDVMHost could adopt.
 
 **M17-Project/M17Gateway, a new `schema.json`** (the reflector side). It's modelled on YSFGateway's, so the file is ready when M17Gateway gets MQTT, and m17-gateway refers to it meanwhile:
 
@@ -236,7 +251,7 @@ These were the open questions; each took the simpler choice for now and is easy 
 
 1. **No will message.** A crashed gateway leaves the retained `link` as it was. G4KLX's gateways behave the same way.
 2. **Mode hang times are fixed** at 10 s (RF) and 3 s (network only).
-3. **`Modem` and the mode aren't retained.** As in MMDVMHost, the gateway republishes them after a reconnection instead. Only `link` is retained.
+3. **Current state is retained on `<Name>/state/<type>`** (changed after the POC on the hotspot: m17-admin, restarted while the gateway ran, couldn't tell the modem or mode). `/json` stays as MMDVMHost's. A crashed gateway leaves its state topics as they were, as it does `link`; supervise-daemon restarts it, which republishes them.
 
 Other details:
 - **Log messages:** each log call is one MQTT message. A multi-line DEBUG dump goes out as a single message, with the level of its first line.

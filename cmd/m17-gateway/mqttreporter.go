@@ -33,7 +33,8 @@ type mqttReporter struct {
 	modem       *mqttstatus.Modem // current, republished on reconnect
 	mode        string
 	curLink     *mqttstatus.Link
-	activeRF    int // streams in progress
+	status      *mqttstatus.Status // last lifecycle message
+	activeRF    int                // streams in progress
 	activeNet   int
 	rfSinceIdle bool
 	hang        *time.Timer
@@ -57,18 +58,30 @@ func (r *mqttReporter) republish() {
 		m := *r.modem
 		m.Timestamp = r.ts()
 		r.p.JSON("Modem", m, false)
+		r.p.State("Modem", m)
 	}
 	if r.mode != "" {
-		r.p.JSON("MMDVM", mqttstatus.MMDVM{Timestamp: r.ts(), Mode: r.mode}, false)
+		m := mqttstatus.MMDVM{Timestamp: r.ts(), Mode: r.mode}
+		r.p.JSON("MMDVM", m, false)
+		r.p.State("MMDVM", m)
 	}
 	if r.curLink != nil {
 		r.p.JSON("link", *r.curLink, true)
+		r.p.State("link", *r.curLink)
+	}
+	if r.status != nil {
+		r.p.State("status", *r.status)
 	}
 }
 
 func (r *mqttReporter) lifecycle(msg string) {
+	st := mqttstatus.Status{Timestamp: r.ts(), Message: msg}
+	r.mu.Lock()
+	r.status = &st
+	r.mu.Unlock()
 	r.p.JSON("MMDVM", mqttstatus.MMDVM{Timestamp: r.ts(), Message: msg}, false)
-	r.p.JSON("status", mqttstatus.Status{Timestamp: r.ts(), Message: msg}, false)
+	r.p.JSON("status", st, false)
+	r.p.State("status", st)
 }
 
 func (r *mqttReporter) starting(_ string, mi modemInfo) {
@@ -86,6 +99,7 @@ func (r *mqttReporter) starting(_ string, mi modemInfo) {
 	r.mu.Lock()
 	r.modem = &m
 	r.p.JSON("Modem", m, false)
+	r.p.State("Modem", m)
 	r.setMode("idle")
 	r.mu.Unlock()
 }
@@ -101,6 +115,7 @@ func (r *mqttReporter) stopped() {
 	m := mqttstatus.Modem{Timestamp: r.ts(), Open: false}
 	r.modem = &m
 	r.p.JSON("Modem", m, false)
+	r.p.State("Modem", m)
 }
 
 func (r *mqttReporter) link(action, reason, reflector string, module byte) {
@@ -112,6 +127,7 @@ func (r *mqttReporter) link(action, reason, reflector string, module byte) {
 	r.curLink = &l
 	r.mu.Unlock()
 	r.p.JSON("link", l, true)
+	r.p.State("link", l)
 }
 
 // setMode publishes a mode change. r.mu is held.
@@ -120,7 +136,9 @@ func (r *mqttReporter) setMode(mode string) {
 		return
 	}
 	r.mode = mode
-	r.p.JSON("MMDVM", mqttstatus.MMDVM{Timestamp: r.ts(), Mode: mode}, false)
+	m := mqttstatus.MMDVM{Timestamp: r.ts(), Mode: mode}
+	r.p.JSON("MMDVM", m, false)
+	r.p.State("MMDVM", m)
 }
 
 // activityStart: a stream or packet began, so the mode is M17 until a hang
@@ -224,7 +242,7 @@ func (r *mqttReporter) voiceEnd(source string, _ *m17.LSF, frames int, ber float
 	r.activityEnd(source == "rf")
 }
 
-func (r *mqttReporter) packet(source string, lsf *m17.LSF, p *m17.Packet, _ float64) {
+func (r *mqttReporter) packet(source string, lsf *m17.LSF, p *m17.Packet, ber float64) {
 	r.activityStart(source == "rf")
 	can := int(lsf.CAN())
 	msg := mqttstatus.M17Packet{
@@ -235,6 +253,9 @@ func (r *mqttReporter) packet(source string, lsf *m17.LSF, p *m17.Packet, _ floa
 		Protocol:    int(p.Type),
 		Length:      1 + len(p.Payload),
 		CAN:         &can,
+	}
+	if source == "rf" {
+		msg.BER = &ber
 	}
 	if p.Type == m17.PacketTypeSMS {
 		text := p.SMSText()
