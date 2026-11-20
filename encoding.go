@@ -1,6 +1,7 @@
 package m17
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -40,6 +41,9 @@ var roomRegex = regexp.MustCompile(`^#[A-Z0-9 -/\.]+$`)
 var CallsignRegex = regexp.MustCompile(`([a-zA-Z0-9]{1,3}/)?[a-zA-Z0-9]{1,3}[0-9][a-zA-Z0-9]{0,3}[a-zA-Z](/[a-zA-Z0-9]{1,3})?`)
 
 func EncodeCallsign(callsign string) (*EncodedCallsign, error) {
+	if callsign == "" {
+		return nil, errors.New("callsign is empty")
+	}
 	if len(callsign) > MaxCallsignLen {
 		return nil, fmt.Errorf("callsign '%s' too long, max %d", callsign, MaxCallsignLen)
 	}
@@ -134,6 +138,9 @@ func DecodeCallsign(encoded []byte) (string, error) {
 // For regular callsigns, if the callsign ends with a space followed by a module letter,
 // put the module letter in position 9 (the convention) with spaces preceding it
 func NormalizeCallsignModule(callsign string) string {
+	if callsign == "" {
+		return ""
+	}
 	old := callsign
 	callsign = strings.ToUpper(callsign)
 	l := len(callsign)

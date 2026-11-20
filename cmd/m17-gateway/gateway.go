@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -56,6 +57,14 @@ type config struct {
 	audioDir         string
 }
 
+// keyErr names a [Radio] key in its parse error; nil stays nil.
+func keyErr(key string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("configured %s is missing or not valid: %w", key, err)
+}
+
 func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	log.Printf("[INFO] Loading settings from '%s'", iniFile)
 	cfg, err := ini.Load(iniFile)
@@ -79,6 +88,14 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	afc, afcErr := cfg.Section("Radio").Key("AFC").Bool()
 	frequencyCorr, frequencyCorrErr := cfg.Section("Radio").Key("FrequencyCorr").Int()
 	duplex, duplexErr := cfg.Section("Radio").Key("Duplex").Bool()
+	// Name the key in a parse error ("parsing \"\": invalid syntax" alone
+	// doesn't say which)
+	rxFrequencyErr = keyErr("RXFrequency", rxFrequencyErr)
+	txFrequencyErr = keyErr("TXFrequency", txFrequencyErr)
+	powerErr = keyErr("Power", powerErr)
+	afcErr = keyErr("AFC", afcErr)
+	frequencyCorrErr = keyErr("FrequencyCorr", frequencyCorrErr)
+	duplexErr = keyErr("Duplex", duplexErr)
 	rxHoldoff := cfg.Section("Radio").Key("RXHoldoff").MustDuration(500 * time.Millisecond)
 	packetGap := cfg.Section("Radio").Key("PacketGap").MustDuration(250 * time.Millisecond)
 
@@ -102,9 +119,28 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 
 	callsign = m17.NormalizeCallsignModule(callsign)
 	_, callsignErr := m17.EncodeCallsign(callsign)
+	if callsign == "" {
+		callsignErr = errors.New("configured Callsign must be set")
+	}
+	// Power and AFC are the CC1200 HAT's: other modems don't need them set
+	limits := limitsFor(modemType)
+	if !limits.usesPower {
+		if !cfg.Section("Radio").HasKey("Power") || cfg.Section("Radio").Key("Power").String() == "" {
+			power, powerErr = 0, nil
+		}
+		if !cfg.Section("Radio").HasKey("AFC") || cfg.Section("Radio").Key("AFC").String() == "" {
+			afc, afcErr = false, nil
+		}
+	}
 	// Frequency and power limits depend on the modem (radiocheck.go)
 	if rxFrequencyErr == nil && txFrequencyErr == nil && powerErr == nil {
 		rxFrequencyErr, txFrequencyErr, powerErr = checkRadio(modemType, uint64(rxFrequency), uint64(txFrequency), power)
+	}
+	if frequencyCorrErr == nil && (frequencyCorr < math.MinInt16 || frequencyCorr > math.MaxInt16) {
+		frequencyCorrErr = fmt.Errorf("configured FrequencyCorr %d out of range (%d to %d)", frequencyCorr, math.MinInt16, math.MaxInt16)
+	}
+	if duplexErr == nil && duplex && !limits.duplex {
+		duplexErr = fmt.Errorf("configured Duplex is true, but modem type %s is half-duplex", modemType)
 	}
 
 	var reflectorHostfile, reflectorOverrideHostfile *inet.Hostfile
