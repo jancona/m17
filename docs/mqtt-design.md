@@ -1,6 +1,6 @@
 # MQTT status for m17-gateway: design
 
-Status: **draft for review**. Nothing here is implemented yet.
+Status: **implemented on the `feature/mqtt` branch**, and tried on an MMDVM_HS_Dual_Hat. It isn't released, and the schema PRs below haven't been opened yet.
 
 ## Goal
 
@@ -103,7 +103,7 @@ MMDVMHost switches its mode to `M17` while there's M17 activity, and back to `id
 | Gateway event (today's `dashboard.log`) | MQTT |
 |---|---|
 | RF voice start | `M17` `{src_callsign, dst_callsign, source: "rf", action: "start", traffic_type, can}` |
-| RF voice joined mid-stream (LSF rebuilt from the LICH) | the same with `action: "late_entry"` |
+| RF voice joined mid-stream (LSF rebuilt from the LICH) | not detected yet: reported as `start` |
 | RF voice end (EOT or last-frame flag) | `M17` `{source: "rf", action: "end", duration, ber}` |
 | RF voice timed out, with no last frame | `M17` `{source: "rf", action: "lost", duration, ber}` |
 | Network voice start | `M17` `{src_callsign, dst_callsign, source: "network", action: "start", traffic_type, can}` |
@@ -230,12 +230,14 @@ The two new reasons are also worth offering back to G4KLX's gateway schemas, but
 3. The schema PRs to M17-Project/MMDVMHost and M17-Project/M17Gateway.
 4. Released in an m17-gateway version. Then the hotspot image adds Mosquitto (localhost plus WebSocket) and turns `[MQTT] Enable` on, and m17-admin subscribes and keeps history: steps 2 and 3 of the plan.
 
-## Open questions
+## Decisions made while implementing
 
-1. **A will message:** the retained `link` stays "established" if the gateway crashes, because only a clean shutdown publishes `unlinked`. An MQTT will message can fix that: the broker publishes it when the connection drops. The catch is that it's fixed when the gateway connects, so its `timestamp` would be the connect time, not the crash time. Options:
-   - a retained will of `{"link": {"action": "unlinked", "reason": "lost", "timestamp": <connect time>}}`, accepting the stale timestamp;
-   - or no will message, with consumers watching for the gateway going quiet.
+These were the open questions; each took the simpler choice for now and is easy to revisit:
 
-   G4KLX's gateways have no will message, so either way is consistent with them.
-2. **Mode hang times:** fixed at MMDVMHost's defaults (10 s and 3 s), or settings?
-3. **Retaining `Modem` and the mode:** `link` is retained, as the gateway programs do. MMDVMHost's `Modem` and `MMDVM` messages aren't, and the gateway republishes them on every reconnect instead. Keep that, or retain them too? Retaining them would differ from MMDVMHost.
+1. **No will message.** A crashed gateway leaves the retained `link` as it was. G4KLX's gateways behave the same way.
+2. **Mode hang times are fixed** at 10 s (RF) and 3 s (network only).
+3. **`Modem` and the mode aren't retained.** As in MMDVMHost, the gateway republishes them after a reconnection instead. Only `link` is retained.
+
+Other details:
+- **Log messages:** each log call is one MQTT message. A multi-line DEBUG dump goes out as a single message, with the level of its first line.
+- **Republishing:** the first connection doesn't trigger a republish, because the queue already holds everything published before it.

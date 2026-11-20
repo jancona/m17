@@ -8,6 +8,7 @@ require (
 	fyne.io/fyne/v2 v2.5.5
 	github.com/StalkR/discordgo-bridge v1.0.10
 	github.com/bwmarrin/discordgo v0.29.0
+	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/ergochat/irc-go v0.5.0
 	github.com/go-zeromq/zmq4 v0.17.0
 	github.com/hessu/go-aprs-fap v0.0.7

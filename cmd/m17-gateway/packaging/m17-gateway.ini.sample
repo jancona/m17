@@ -40,6 +40,22 @@ Module=C
 ; Logging levels: ERROR, INFO, DEBUG
 Level=DEBUG
 
+[MQTT]
+; Publish status over MQTT, in MMDVMHost's format (see
+; docs/mqtt-design.md): events on <Name>/json, log lines on <Name>/log.
+; Independent of DashboardLog.
+Enable=false
+Host=127.0.0.1
+Port=1883
+Auth=false
+Username=
+Password=
+; Seconds
+Keepalive=60
+Name=m17-gateway
+; Lowest log level sent to <Name>/log: NONE, ERROR, WARN, INFO or DEBUG
+LogLevel=INFO
+
 [Modem]
 ; Change Type to mmdvm or sx1255 for MMDVM or SX1255 hardware
 Type=cc1200
