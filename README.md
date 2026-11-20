@@ -47,7 +47,7 @@ Usage of gateway:
 
 #### Configuration
 
-Bu default, the gateway looks for configuration in `gateway.ini` in the working directory. See `m17-gateway/gateway.ini.sample` for details.
+By default, the gateway looks for configuration in `gateway.ini` in the working directory. [`cmd/m17-gateway/packaging/m17-gateway.ini.sample`](cmd/m17-gateway/packaging/m17-gateway.ini.sample) is a starting point, and [docs/m17-gateway-configuration.md](docs/m17-gateway-configuration.md) describes every setting.
 
 ### GUI Messaging Client
 
