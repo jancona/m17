@@ -26,6 +26,18 @@ func testPublisher(t *testing.T) *mqttstatus.Publisher {
 	return p
 }
 
+// events is the queued messages on <Name>/json, leaving out the retained
+// state topics.
+func events(p *mqttstatus.Publisher) []mqttstatus.Message {
+	var out []mqttstatus.Message
+	for _, m := range p.Drain() {
+		if m.Topic == "m17-gateway/json" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // testReporter is an MQTT reporter on an unstarted publisher (so messages
 // stay queued) with a fixed clock.
 func testReporter(t *testing.T) (*mqttReporter, *mqttstatus.Publisher) {
@@ -108,11 +120,19 @@ func TestMQTTMessages(t *testing.T) {
 	r, p := testReporter(t)
 	scenario(t, r)
 	var lines []string
+	state := map[string]string{} // last retained message on each state topic
 	for _, m := range p.Drain() {
+		checkSchema(t, m.Payload)
+		if typ, ok := strings.CutPrefix(m.Topic, "m17-gateway/state/"); ok {
+			if !m.Retain || !strings.HasPrefix(m.Payload, `{"`+typ+`":`) {
+				t.Errorf("state topic %s: retain %v, %s", m.Topic, m.Retain, m.Payload)
+			}
+			state[typ] = m.Payload
+			continue
+		}
 		if m.Topic != "m17-gateway/json" {
 			t.Errorf("topic %s", m.Topic)
 		}
-		checkSchema(t, m.Payload)
 		retained := strings.HasPrefix(m.Payload, `{"link":`)
 		if m.Retain != retained {
 			t.Errorf("retain %v for %s", m.Retain, m.Payload)
@@ -132,6 +152,21 @@ func TestMQTTMessages(t *testing.T) {
 	}
 	if got != string(want) {
 		t.Errorf("messages differ from %s:\n%s", path, got)
+	}
+
+	// What a consumer connecting after the session would be told
+	for typ, want := range map[string]string{
+		"Modem":  `"open":false`,
+		"MMDVM":  `"mode":"M17"`,
+		"link":   `"action":"unlinked","reason":"shutdown"`,
+		"status": `"message":"m17-gateway is stopping"`,
+	} {
+		if !strings.Contains(state[typ], want) {
+			t.Errorf("state/%s = %s, want %s", typ, state[typ], want)
+		}
+	}
+	if len(state) != 4 {
+		t.Errorf("state topics: %v", state)
 	}
 }
 
@@ -200,7 +235,7 @@ func TestModeHang(t *testing.T) {
 	r.rfHang, r.netHang = 80*time.Millisecond, 20*time.Millisecond
 	modes := func() []string {
 		var out []string
-		for _, m := range p.Drain() {
+		for _, m := range events(p) {
 			var top map[string]mqttstatus.MMDVM
 			if json.Unmarshal([]byte(m.Payload), &top) == nil && top["MMDVM"].Mode != "" {
 				out = append(out, top["MMDVM"].Mode)
@@ -240,8 +275,12 @@ func TestRepublishOnConnect(t *testing.T) {
 	r.link(linkLinking, reasonEstablished, "M17-M17", 'C')
 	p.Drain()
 	r.republish()
-	var types []string
+	var types, state []string
 	for _, m := range p.Drain() {
+		if typ, ok := strings.CutPrefix(m.Topic, "m17-gateway/state/"); ok {
+			state = append(state, typ)
+			continue
+		}
 		var top map[string]json.RawMessage
 		json.Unmarshal([]byte(m.Payload), &top)
 		for k := range top {
@@ -254,6 +293,9 @@ func TestRepublishOnConnect(t *testing.T) {
 	if got := strings.Join(types, " "); got != "Modem MMDVM link" {
 		t.Errorf("republished %q", got)
 	}
+	if got := strings.Join(state, " "); got != "Modem MMDVM link status" {
+		t.Errorf("republished state %q", got)
+	}
 }
 
 // TestLinkEvents maps the reflector client's events.
@@ -264,7 +306,7 @@ func TestLinkEvents(t *testing.T) {
 		g.linkEvent(ev, "M17-M17", 'C')
 	}
 	var got []string
-	for _, m := range p.Drain() {
+	for _, m := range events(p) {
 		var top map[string]mqttstatus.Link
 		json.Unmarshal([]byte(m.Payload), &top)
 		got = append(got, top["link"].Action+"/"+top["link"].Reason)

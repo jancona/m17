@@ -48,15 +48,16 @@ type M17 struct {
 
 // M17Packet is a packet: SMS text, or other data in hex.
 type M17Packet struct {
-	Timestamp   string  `json:"timestamp"`
-	Source      string  `json:"source"`
-	SrcCallsign string  `json:"src_callsign"`
-	DstCallsign string  `json:"dst_callsign"`
-	Protocol    int     `json:"protocol"`
-	Length      int     `json:"length"`
-	Text        *string `json:"text,omitempty"`
-	Data        string  `json:"data,omitempty"`
-	CAN         *int    `json:"can,omitempty"`
+	Timestamp   string   `json:"timestamp"`
+	Source      string   `json:"source"`
+	SrcCallsign string   `json:"src_callsign"`
+	DstCallsign string   `json:"dst_callsign"`
+	Protocol    int      `json:"protocol"`
+	Length      int      `json:"length"`
+	Text        *string  `json:"text,omitempty"`
+	Data        string   `json:"data,omitempty"`
+	CAN         *int     `json:"can,omitempty"`
+	BER         *float64 `json:"ber,omitempty"` // percent, RF only
 }
 
 // M17GNSS is a position from the LSF META field.

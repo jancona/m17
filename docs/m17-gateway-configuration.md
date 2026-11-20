@@ -100,7 +100,7 @@ Status over MQTT, in the format MMDVMHost and G4KLX's gateway programs use. [mqt
 | `Auth` | `false` | Boolean (`0`/`1` too, as MMDVMHost) | Log in with `Username` and `Password`. |
 | `Username`, `Password` | empty | Text | The broker login, when `Auth` is on. |
 | `Keepalive` | `60` | Seconds, at least 5 | How often the connection is checked. |
-| `Name` | `m17-gateway` | Text without `/`, `#` or `+` | The topic prefix: events on `<Name>/json`, log lines on `<Name>/log`. |
+| `Name` | `m17-gateway` | Text without `/`, `#` or `+` | The topic prefix: events on `<Name>/json`, log lines on `<Name>/log`, current state (retained) on `<Name>/state/<type>`. |
 | `LogLevel` | `INFO` | `NONE`, `ERROR`, `WARN`, `INFO` or `DEBUG` | The lowest level sent to `<Name>/log`. It's separate from `[Log] Level`. |
 
 A value outside these ranges is a configuration error when `Enable` is on. The gateway starts even if the broker can't be reached, and keeps trying in the background. While it's unreachable, messages wait in a small queue, and once that's full the newest are dropped.
