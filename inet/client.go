@@ -13,8 +13,8 @@ import (
 	"github.com/jancona/m17"
 )
 
-// EventFunc is called on link state changes: event is "Connect" or
-// "Disconnect", with the reflector name and module as arguments.
+// EventFunc is called on link state changes, with the reflector name and
+// module as arguments. event is one of the Event constants.
 const maxRetries = 10
 
 // An unanswered CONN is resent after connRetryInterval, the wait doubling
@@ -54,6 +54,27 @@ const (
 )
 
 type EventFunc func(event string, name string, module byte)
+
+// The link events an EventFunc receives.
+const (
+	// EventConnect: the reflector accepted the link (ACKN).
+	EventConnect = "Connect"
+	// EventDisconnect: the link was lost (no PINGs, or the reflector sent
+	// DISC). The client is trying to link again.
+	EventDisconnect = "Disconnect"
+	// EventNoAnswer: noAnswerTries CONNs in a row went unanswered. The
+	// client keeps trying; sent once until the link is made.
+	EventNoAnswer = "NoAnswer"
+	// EventRejected: the reflector refused the link (NACK). The client
+	// gives up.
+	EventRejected = "Rejected"
+	// EventClosed: the client was closed.
+	EventClosed = "Closed"
+)
+
+// noAnswerTries is how many unanswered CONNs make an EventNoAnswer: with
+// the backoff, about 35 seconds.
+const noAnswerTries = 3
 
 func (r *Client) event(event string) {
 	if r.events != nil {
@@ -127,7 +148,7 @@ func NewClient(name string, server string, port uint, module string, callsign st
 			r.pingTimer.Stop()
 			r.connected = false
 			r.stopProbe()
-			r.event("Disconnect")
+			r.event(EventDisconnect)
 			r.retryCount = 0
 			for !r.connected && r.retryCount < maxRetries && !r.closed.Load() {
 				// Close connection before retrying
@@ -254,13 +275,14 @@ func (r *Client) Close() error {
 	r.pingTimer.Stop()
 	r.stopProbe()
 	r.sendDISC()
-	r.event("Disconnect")
+	r.event(EventClosed)
 	return r.closeConn()
 }
 
 func (r *Client) handle(conn *net.UDPConn) {
 	r.running = true
 	connGap := connRetryInterval // wait before resending an unanswered CONN
+	unanswered := 0              // CONNs in a row with no reply
 	for r.connected || r.connecting {
 		wait := 10 * time.Second
 		if r.connecting {
@@ -276,6 +298,10 @@ func (r *Client) handle(conn *net.UDPConn) {
 			switch {
 			case errors.Is(err, os.ErrDeadlineExceeded):
 				if r.connecting {
+					unanswered++
+					if unanswered == noAnswerTries {
+						r.event(EventNoAnswer)
+					}
 					connGap = min(2*connGap, maxConnRetryInterval)
 					log.Printf("[DEBUG] No answer to CONN; resending (next in %v)", connGap)
 					if err := r.sendCONN(); err != nil {
@@ -314,7 +340,8 @@ func (r *Client) handle(conn *net.UDPConn) {
 			r.connected = true
 			r.connecting = false
 			connGap = connRetryInterval
-			r.event("Connect")
+			unanswered = 0
+			r.event(EventConnect)
 			r.pingTimer.Reset(30 * time.Second)
 			log.Printf("[DEBUG] Received ACKN")
 			if r.ProbeReflector {
@@ -329,7 +356,7 @@ func (r *Client) handle(conn *net.UDPConn) {
 			r.connecting = false
 			r.stopProbe()
 			log.Print("[INFO] Reflector refused the link (NACK); not retrying")
-			r.event("Disconnect")
+			r.event(EventRejected)
 		case m17.MagicDISC:
 			// Dropped by the reflector. The spec says the reflector can be
 			// assumed to be going down for maintenance, and the client may
@@ -341,7 +368,7 @@ func (r *Client) handle(conn *net.UDPConn) {
 			r.connecting = true
 			r.stopProbe()
 			log.Printf("[INFO] Reflector disconnected us (DISC); relinking in %v", connGap)
-			r.event("Disconnect")
+			r.event(EventDisconnect)
 		case m17.MagicPING:
 			r.sendPONG()
 			r.pingTimer.Reset(30 * time.Second)

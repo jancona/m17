@@ -185,7 +185,7 @@ func TestClientGivesUpAfterNACK(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { c.Close() })
-	waitEvent(t, events, "Disconnect")
+	waitEvent(t, events, EventRejected)
 	<-clients // the first CONN
 	select {
 	case <-clients:
@@ -503,5 +503,57 @@ func TestClientCloseWhileNetworkDown(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if after := attempts.Load(); after != before {
 		t.Errorf("still retrying after Close: %d attempts became %d", before, after)
+	}
+}
+
+// TestNoAnswerEvent: after noAnswerTries unanswered CONNs the client
+// reports EventNoAnswer once, keeps trying, and links when the reflector
+// finally answers.
+func TestNoAnswerEvent(t *testing.T) {
+	old := connRetryInterval
+	connRetryInterval = 20 * time.Millisecond
+	t.Cleanup(func() { connRetryInterval = old })
+	refl, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { refl.Close() })
+	go func() {
+		buf := make([]byte, 64)
+		conns := 0
+		for {
+			n, from, err := refl.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			if n >= 4 && string(buf[:4]) == m17.MagicCONN {
+				conns++
+				if conns > noAnswerTries+1 {
+					refl.WriteToUDP([]byte(m17.MagicACKN), from)
+				}
+			}
+		}
+	}()
+	events := make(chan string, 16)
+	c, err := NewClient("M17-M17", "127.0.0.1", uint(refl.LocalAddr().(*net.UDPAddr).Port), "C", "N1ADJ G",
+		func(event, _ string, _ byte) { events <- event }, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	var got []string
+	for len(got) == 0 || got[len(got)-1] != EventConnect {
+		select {
+		case ev := <-events:
+			got = append(got, ev)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("events %v, no Connect", got)
+		}
+	}
+	if len(got) != 2 || got[0] != EventNoAnswer {
+		t.Errorf("events %v, want [NoAnswer Connect]", got)
 	}
 }
