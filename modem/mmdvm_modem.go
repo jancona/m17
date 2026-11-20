@@ -116,13 +116,13 @@ type MMDVMConfig struct {
 	pttInvert  bool
 	debug      bool
 	txDCOffset int8
-	txDelay    byte
+	txDelay    uint16 // ms; sent in 10 ms units
 	rxLevel    float32
 	rxDCOffset int8
 
 	m17Enabled bool
 	m17TXLevel float32
-	m17TXHang  byte
+	m17TXHang  byte // seconds
 }
 
 type MMDVM struct {
@@ -188,11 +188,11 @@ func NewMMDVM(
 	pttInvert := modemCfg.Key("PTTInvert").MustBool(false)
 	debug := modemCfg.Key("Debug").MustBool(false)
 	txDCOffset, txDCErr := dcOffset(modemCfg, "TXDCOffset")
-	txDelay := modemCfg.Key("TXDelay").MustUint(100)
-	rxLevel := modemCfg.Key("RXLevel").MustUint(50)
+	txDelay, txDelayErr := uintSetting(modemCfg, "TXDelay", 100, 2550, "ms")
+	rxLevel, rxLevelErr := uintSetting(modemCfg, "RXLevel", 50, 100, "%")
 	rxDCOffset, rxDCErr := dcOffset(modemCfg, "RXDCOffset")
-	txLevel := modemCfg.Key("TXLevel").MustUint(50)
-	txHang := modemCfg.Key("TXHang").MustUint(5)
+	txLevel, txLevelErr := uintSetting(modemCfg, "TXLevel", 50, 100, "%")
+	txHang, txHangErr := uintSetting(modemCfg, "TXHang", 5, 255, "s")
 	rfLevel, rfLevelErr := mmdvmRFLevel(modemCfg)
 
 	var err error
@@ -203,6 +203,10 @@ func NewMMDVM(
 		txDCErr,
 		rxDCErr,
 		rfLevelErr,
+		txDelayErr,
+		rxLevelErr,
+		txLevelErr,
+		txHangErr,
 	)
 	if err != nil {
 		return nil, err
@@ -224,7 +228,7 @@ func NewMMDVM(
 			pttInvert:  pttInvert,
 			debug:      debug,
 			txDCOffset: txDCOffset,
-			txDelay:    byte(txDelay),
+			txDelay:    uint16(txDelay),
 			rxLevel:    float32(rxLevel),
 			rxDCOffset: rxDCOffset,
 			m17Enabled: true,
@@ -801,7 +805,7 @@ func (m *MMDVM) setProtocol1Config() error {
 		cmd[4] |= 0x40
 	}
 
-	cmd[5] = m.config.txDelay / 10 // In 10ms units
+	cmd[5] = byte(m.config.txDelay / 10) // In 10ms units
 
 	cmd[6] = mmdvmModeIdle
 
@@ -912,7 +916,7 @@ func (m *MMDVM) setProtocol2Config() error {
 	// if ax25Enabled
 	// 	cmd[5] |= 0x02
 
-	cmd[6] = m.config.txDelay / 10 // In 10ms units
+	cmd[6] = byte(m.config.txDelay / 10) // In 10ms units
 	cmd[7] = mmdvmModeIdle
 	cmd[8] = dcOffsetByte(m.config.txDCOffset)
 	cmd[9] = dcOffsetByte(m.config.rxDCOffset)
@@ -1314,6 +1318,17 @@ func (m *MMDVM) sendToModem(cmd []byte) {
 		log.Println("[DEBUG] sendToModem message send failed")
 	}
 	m.lastTXData = time.Now()
+}
+
+// uintSetting reads an unsigned setting, def if unset (or not a number,
+// as for the other settings), and refuses one above max: the modem takes
+// these in a byte, so a larger value would wrap around.
+func uintSetting(sec *ini.Section, key string, def, max uint, unit string) (uint, error) {
+	v := sec.Key(key).MustUint(def)
+	if v > max {
+		return 0, fmt.Errorf("modem %s is %d, must be between 0 and %d%s", key, v, max, unit)
+	}
+	return v, nil
 }
 
 // mmdvmRFLevel reads RFLevel, the RF power in percent (0-100, default

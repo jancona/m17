@@ -204,6 +204,7 @@ func TestNormalizeCallsignModule(t *testing.T) {
 		{"N1ADJABCD A",
 			args{"N1ADJABCD A"},
 			"N1ADJABCD A"},
+		{"empty", args{""}, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -275,5 +276,11 @@ func TestIsBroadcast(t *testing.T) {
 		if got := IsBroadcast(tt.dst); got != tt.want {
 			t.Errorf("IsBroadcast(%s) = %v, want %v", tt.dst.Callsign(), got, tt.want)
 		}
+	}
+}
+
+func TestEncodeEmptyCallsign(t *testing.T) {
+	if _, err := EncodeCallsign(""); err == nil {
+		t.Error("EncodeCallsign(\"\") succeeded")
 	}
 }

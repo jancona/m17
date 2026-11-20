@@ -8,12 +8,13 @@ type radioLimits struct {
 	minHz, maxHz       uint64
 	usesPower          bool
 	minPower, maxPower float64
+	duplex             bool // can receive and transmit at once
 }
 
 // limitsFor returns the [Radio] limits for a modem type.
 //
 //   - The CC1200 HAT covers 420-450 MHz (its filters) and transmits at -16
-//     to 14 dBm.
+//     to 14 dBm. It's half-duplex.
 //   - The SX1255 HAT tunes 400-510 MHz (its datasheet range; the PLL
 //     register tops out at 512 MHz with the 32 MHz crystal). Its transmit
 //     level is [Modem] DACGain and MixerGain, relative to the chip's full
@@ -27,9 +28,9 @@ func limitsFor(modemType string) radioLimits {
 	case "cc1200", "cc1200v2":
 		return radioLimits{minHz: 420e6, maxHz: 450e6, usesPower: true, minPower: -16, maxPower: 14}
 	case "sx1255":
-		return radioLimits{minHz: 400e6, maxHz: 510e6}
+		return radioLimits{minHz: 400e6, maxHz: 510e6, duplex: true}
 	}
-	return radioLimits{}
+	return radioLimits{duplex: true}
 }
 
 // checkRadio checks the configured frequencies and power for modemType,

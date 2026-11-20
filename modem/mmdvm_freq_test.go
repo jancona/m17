@@ -87,3 +87,29 @@ func TestRFLevel(t *testing.T) {
 		}
 	}
 }
+
+func TestUintSetting(t *testing.T) {
+	for _, tc := range []struct {
+		key, value string // value "" for no key
+		def, max   uint
+		want       uint
+		wantErr    bool
+	}{
+		{"TXDelay", "", 100, 2550, 100, false},
+		{"TXDelay", "300", 100, 2550, 300, false}, // wrapped to 44 before
+		{"TXDelay", "2550", 100, 2550, 2550, false},
+		{"TXDelay", "2560", 100, 2550, 0, true},
+		{"RXLevel", "100", 50, 100, 100, false},
+		{"RXLevel", "101", 50, 100, 0, true},
+		{"TXHang", "256", 5, 255, 0, true},
+	} {
+		sec := ini.Empty().Section("Modem")
+		if tc.value != "" {
+			sec.Key(tc.key).SetValue(tc.value)
+		}
+		got, err := uintSetting(sec, tc.key, tc.def, tc.max, "")
+		if (err != nil) != tc.wantErr || got != tc.want {
+			t.Errorf("%s=%q: got %d, %v", tc.key, tc.value, got, err)
+		}
+	}
+}
