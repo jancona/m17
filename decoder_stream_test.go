@@ -156,6 +156,36 @@ func TestDecoderDropsRepeatedFrame(t *testing.T) {
 	}
 }
 
+// TestDecoderCorruptLastFlag: a frame number that decodes with the
+// last-frame bit set but out of sequence (00bc read as f0bc on air) neither
+// ends the stream nor reaches the callback with the bit set, so a stream
+// built from the callbacks isn't cut short. A genuine last frame still ends
+// it.
+func TestDecoderCorruptLastFlag(t *testing.T) {
+	a := streamLSF(t, "W2JJT")
+	var ev []streamEvent
+	d := recordingDecoder(&ev)
+	d.DecodeFrame(LSFSync, encodeSoftBits(t, a.ToBytes(), LSFPuncturePattern, LSFFinalBit))
+	for _, fn := range []uint16{0xba, 0xbb, 0xf0bc, 0xbd, 0xbe | 0x8000} {
+		d.DecodeFrame(StreamSync, encodeStreamFrame(t, a, fn))
+	}
+	var got []streamEvent
+	for _, e := range ev {
+		if e.kind != "lich" {
+			got = append(got, streamEvent{kind: e.kind, fn: e.fn})
+		}
+	}
+	want := []streamEvent{
+		{kind: "frame", fn: 0xba}, {kind: "frame", fn: 0xbb},
+		{kind: "frame", fn: 0x70bc}, // flag cleared, not an end
+		{kind: "frame", fn: 0xbd},
+		{kind: "frame", fn: 0xbe | 0x8000}, {kind: "end", fn: 0xbe | 0x8000},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("events %+v, want %+v", got, want)
+	}
+}
+
 // TestDecoderLICHStartedStreamEnds: a stream whose LSF was missed, picked up
 // from the LICH, still ends on an EOT marker.
 func TestDecoderLICHStartedStreamEnds(t *testing.T) {

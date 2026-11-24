@@ -195,6 +195,13 @@ func (d *Decoder) DecodeFrame(typ uint16, softBits []SoftBit) {
 		// terminates the stream. This only gives up the fast path, not the
 		// reliable one.
 		lastFrame := fn&0x8000 == 0x8000 && fn7 == (d.lastStreamFN+1)&0x7fff
+		if !lastFrame {
+			// Clear a last-frame flag rejected above before passing the frame
+			// on, or whoever builds a stream from it (the gateway, for the
+			// reflector and the duplex relay) ends the stream there anyway.
+			// Seen on air as 00bb, f0bc, 00bd: the reflector got two streams.
+			fn = fn7
+		}
 		if d.gotLSF {
 			d.streamFN = fn
 			d.receivedRFStream(*d.lsf, d.frameData, d.streamID, d.streamFN, float64(d.errors)/float64(d.bits)*100)
