@@ -95,10 +95,10 @@ func TestUintSetting(t *testing.T) {
 		want       uint
 		wantErr    bool
 	}{
-		{"TXDelay", "", 100, 2550, 100, false},
-		{"TXDelay", "300", 100, 2550, 300, false}, // wrapped to 44 before
-		{"TXDelay", "2550", 100, 2550, 2550, false},
-		{"TXDelay", "2560", 100, 2550, 0, true},
+		{"TXDelay", "", 100, 500, 100, false},
+		{"TXDelay", "300", 100, 500, 300, false}, // wrapped to 44 before
+		{"TXDelay", "500", 100, 500, 500, false},
+		{"TXDelay", "1000", 100, 500, 0, true}, // firmware NAKs over 50 (500 ms)
 		{"RXLevel", "100", 50, 100, 100, false},
 		{"RXLevel", "101", 50, 100, 0, true},
 		{"TXHang", "256", 5, 255, 0, true},

@@ -188,7 +188,8 @@ func NewMMDVM(
 	pttInvert := modemCfg.Key("PTTInvert").MustBool(false)
 	debug := modemCfg.Key("Debug").MustBool(false)
 	txDCOffset, txDCErr := dcOffset(modemCfg, "TXDCOffset")
-	txDelay, txDelayErr := uintSetting(modemCfg, "TXDelay", 100, 2550, "ms")
+	// The firmware (MMDVM and MMDVM_HS) NAKs SetConfig above 50 (500 ms)
+	txDelay, txDelayErr := uintSetting(modemCfg, "TXDelay", 100, 500, "ms")
 	rxLevel, rxLevelErr := uintSetting(modemCfg, "RXLevel", 50, 100, "%")
 	rxDCOffset, rxDCErr := dcOffset(modemCfg, "RXDCOffset")
 	txLevel, txLevelErr := uintSetting(modemCfg, "TXLevel", 50, 100, "%")
@@ -241,7 +242,11 @@ func NewMMDVM(
 		if err != nil {
 			return nil, err
 		}
-		p.SetReadTimeout(0) // Non-blocking reads
+		// Reads wait up to mmdvmReadTimeout for data. A non-blocking read
+		// (timeout 0) made modemReceive spin on an idle port, using a
+		// whole core; on a Pi 3 with a Repeater Builder board that load
+		// raised the board's receive error rate.
+		p.SetReadTimeout(mmdvmReadTimeout)
 		return p, nil
 	}
 	err = m.open()
@@ -531,6 +536,10 @@ func (m *MMDVM) modemSend() {
 				log.Printf("[WARN] modemSend: Error writing to modem: %v", err)
 			}
 			m.decrementSpace()
+		} else {
+			// Wait for a status reply to report space; spinning here
+			// used a whole core whenever the modem's buffer was full.
+			time.Sleep(mmdvmSpacePoll)
 		}
 	}
 	log.Printf("[DEBUG] modemSend stopping")
@@ -1010,6 +1019,16 @@ func (m *MMDVM) getEmptyResponse() error {
 
 // modemReplyTimeoutMMDVM bounds the wait for the modem's reply to a command.
 const modemReplyTimeoutMMDVM = 3 * time.Second
+
+// mmdvmReadTimeout is how long a serial read waits for data. Within a frame
+// the next byte is microseconds away, so only an idle port waits the full
+// time; it must stay well under the 250 ms status interval, which
+// modemReceive's loop drives.
+const mmdvmReadTimeout = 20 * time.Millisecond
+
+// mmdvmSpacePoll is how often modemSend rechecks the modem's buffer space
+// while it is full: a fraction of the 40 ms M17 frame time.
+const mmdvmSpacePoll = 5 * time.Millisecond
 
 func (m *MMDVM) getResponse() (byte, []byte, error) {
 	var n int
