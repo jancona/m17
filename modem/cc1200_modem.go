@@ -192,6 +192,34 @@ type CC1200 struct {
 	ident      string
 }
 
+// cc1200Config is the CC1200 HAT's [Modem] settings.
+type cc1200Config struct {
+	port                     string
+	speed, nRSTPin, boot0Pin int
+	zmqPort                  int
+}
+
+// cc1200Settings reads and checks the CC1200 HAT's [Modem] settings: Speed,
+// NRSTPin and Boot0Pin must be set.
+func cc1200Settings(modemCfg *ini.Section) (cc1200Config, error) {
+	var errs []error
+	required := func(key string) int {
+		v, err := modemCfg.Key(key).Int()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("modem %s must be set to a whole number", key))
+		}
+		return v
+	}
+	c := cc1200Config{
+		port:     modemCfg.Key("Port").String(),
+		speed:    required("Speed"),
+		nRSTPin:  required("NRSTPin"),
+		boot0Pin: required("Boot0Pin"),
+		zmqPort:  modemCfg.Key("ZMQPort").MustInt(),
+	}
+	return c, errors.Join(errs...)
+}
+
 func NewCC1200(
 	rxFrequency uint32,
 	txFrequency uint32,
@@ -199,21 +227,11 @@ func NewCC1200(
 	frequencyCorr int16,
 	afc bool,
 	modemCfg *ini.Section) (*CC1200, error) {
-	port := modemCfg.Key("Port").String()
-	baudRate, baudRateErr := modemCfg.Key("Speed").Int()
-	nRSTPin, nRSTPinErr := modemCfg.Key("NRSTPin").Int()
-	boot0Pin, boot0PinErr := modemCfg.Key("Boot0Pin").Int()
-	zmqPort := modemCfg.Key("ZMQPort").MustInt()
-
-	var err error
-	err = errors.Join(
-		baudRateErr,
-		nRSTPinErr,
-		boot0PinErr,
-	)
+	st, err := cc1200Settings(modemCfg)
 	if err != nil {
 		return nil, err
 	}
+	port, baudRate, nRSTPin, boot0Pin, zmqPort := st.port, st.speed, st.nRSTPin, st.boot0Pin, st.zmqPort
 
 	ret := &CC1200{
 		rxSymbols:  make(chan float32, 1),

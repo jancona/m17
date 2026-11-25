@@ -36,6 +36,8 @@ To build it just run `go build` in the `m17-gateway` directory. Because Go nativ
 
 ```
 Usage of gateway:
+  -check-config
+    	Check the configuration file and exit: one problem per line, exit status 1 if it has errors
   -config string
     	Configuration file (default "./gateway.ini")
   -h	Print arguments
