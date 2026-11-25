@@ -425,6 +425,7 @@ type Gateway struct {
 	lastNetFN       uint16   // the current Internet stream's latest frame number
 	lastStreamID    uint16
 	netStreamHeld   bool         // reflector voice is being held back
+	ownReport       *ownReport   // the gateway's own transmission being reported as network voice
 	ownTX           atomic.Int32 // the gateway's own transmissions under way: announcements and echoes
 	rfToLegacy      bool         // the current RF stream is going to a legacy reflector
 	rfDirectLogged  bool         // and a warning that it will probably be dropped was logged
@@ -565,6 +566,9 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 			g.lastFrameTimer.Stop()
 		}
 		log.Printf("[DEBUG] Start Internet voice stream: %s", sd)
+		// Reported network voice never overlaps: end the report of the
+		// gateway's own transmission, which the stream is waiting for
+		g.endOwnReport(g.ownReport, -1)
 		// A first frame other than 0: joined a stream already under way
 		g.report().voiceStart("network", &lsf, sd.FrameNumber&0x7fff != 0, 0)
 		g.netStreamActive = true
@@ -855,7 +859,7 @@ func (g *Gateway) echoPacket(p m17.Packet) error {
 	p.LSF.Dst = p.LSF.Src
 	p.LSF.Src = g.encodedCallsign
 	p.LSF.CalcCRC()
-	err = g.queueLocalPacket(p)
+	err = g.queueOwnPacket(p)
 	return err
 }
 
@@ -872,6 +876,6 @@ func (g *Gateway) infoPacket(p m17.Packet) error {
 	}
 	p.Payload = append(([]byte)(msg), 0) // NULL terminate the string
 	p.CalcCRC()
-	err = g.queueLocalPacket(p)
+	err = g.queueOwnPacket(p)
 	return err
 }

@@ -25,6 +25,7 @@ From M17-Project/MMDVMHost `master` (its `schema.json`, `MQTTConnection.cpp`, `L
   - `Modem` `{open, protocol, description, modes, connection, port, speed}`: when the modem opens or closes.
   - `M17` `{src_callsign, dst_callsign, source, action, traffic_type}` at the start of a voice stream. `{action, duration, ber, rssi}` at its end.
     - `source` is `rf` or `network`.
+    - The gateway's own transmissions (echo replies, info replies and spoken messages) are `network`, from the gateway's callsign. In an MMDVMHost hotspot the gateway program sends these to MMDVMHost like reflector traffic, and MMDVMHost reports them so. A reflector stream arriving during one ends its report first, so reported network voice never overlaps; one starting during a reflector stream isn't reported.
     - `action` is `start`, `late_entry`, `end`, `lost` or `rejected`.
     - `duration` is in seconds: frames ÷ 25.
     - `ber` is a percentage.
