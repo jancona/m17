@@ -103,6 +103,8 @@ Status over MQTT, in the format MMDVMHost and G4KLX's gateway programs use. [mqt
 | `Name` | `m17-gateway` | Text without `/`, `#` or `+` | The topic prefix: events on `<Name>/json`, log lines on `<Name>/log`, current state (retained) on `<Name>/state/<type>`. |
 | `LogLevel` | `INFO` | `NONE`, `ERROR`, `WARN`, `INFO` or `DEBUG` | The lowest level sent to `<Name>/log`. It's separate from `[Log] Level`. |
 
+MQTT is off unless `Enable` is set, and the gateway needs no broker otherwise. To use it on Raspberry Pi OS, install a broker (`sudo apt install mosquitto`, which listens on localhost), set `Enable=true` and restart the gateway. m17-hotspot-os runs Mosquitto and turns it on.
+
 A value outside these ranges is a configuration error when `Enable` is on. The gateway starts even if the broker can't be reached, and keeps trying in the background. While it's unreachable, messages wait in a small queue, and once that's full the newest are dropped.
 
 ## [Modem]
