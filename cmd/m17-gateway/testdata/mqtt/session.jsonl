@@ -1,0 +1,21 @@
+{"MMDVM":{"timestamp":"2026-11-20T01:02:03.004Z","message":"m17-gateway is starting"}}
+{"status":{"timestamp":"2026-11-20T01:02:03.004Z","message":"m17-gateway is starting"}}
+{"Modem":{"timestamp":"2026-11-20T01:02:03.004Z","open":true,"protocol":1,"description":"MMDVM_HS_Dual_Hat-v1.6.1 20261116 14.7456MHz dual ADF7021 FW by CA6JAU (M17) GitID #02e5646","modes":["M17"],"connection":"uart","port":"/dev/ttyAMA0","speed":115200}}
+{"MMDVM":{"timestamp":"2026-11-20T01:02:03.004Z","mode":"idle"}}
+{"link":{"timestamp":"2026-11-20T01:02:03.004Z","action":"linking","reason":"startup","reflector":"M17-M17","module":"C","protocol":"m17"}}
+{"link":{"timestamp":"2026-11-20T01:02:03.004Z","action":"linking","reason":"established","reflector":"M17-M17","module":"C","protocol":"m17"}}
+{"MMDVM":{"timestamp":"2026-11-20T01:02:03.004Z","mode":"M17"}}
+{"M17":{"timestamp":"2026-11-20T01:02:03.004Z","src_callsign":"N1ADJ","dst_callsign":"ALL","source":"rf","action":"start","traffic_type":"audio","can":2}}
+{"M17":{"timestamp":"2026-11-20T01:02:03.004Z","source":"rf","action":"end","duration":6,"ber":1.5}}
+{"M17":{"timestamp":"2026-11-20T01:02:03.004Z","src_callsign":"AA5RL","dst_callsign":"M17-M17 C","source":"network","action":"late_entry","traffic_type":"audio_data","can":0}}
+{"M17":{"timestamp":"2026-11-20T01:02:03.004Z","source":"network","action":"lost","duration":1.6}}
+{"M17Packet":{"timestamp":"2026-11-20T01:02:03.004Z","source":"rf","src_callsign":"N1ADJ","dst_callsign":"PARROT","protocol":5,"length":4,"text":"hi","can":0,"ber":7.25}}
+{"M17Packet":{"timestamp":"2026-11-20T01:02:03.004Z","source":"network","src_callsign":"DK1MI","dst_callsign":"ALL","protocol":129,"length":3,"data":"81DEAD","can":0}}
+{"M17GNSS":{"timestamp":"2026-11-20T01:02:03.004Z","source":"rf","src_callsign":"N1ADJ","data_source":1,"station_type":2,"latitude":43.878414,"longitude":-69.991547,"altitude":39,"speed":62,"bearing":35}}
+{"link":{"timestamp":"2026-11-20T01:02:03.004Z","action":"relinking","reflector":"M17-M17","module":"C","protocol":"m17"}}
+{"link":{"timestamp":"2026-11-20T01:02:03.004Z","action":"failed","reason":"timer","reflector":"M17-M17","module":"C","protocol":"m17"}}
+{"link":{"timestamp":"2026-11-20T01:02:03.004Z","action":"failed","reason":"rejected","reflector":"M17-M17","module":"C","protocol":"m17"}}
+{"MMDVM":{"timestamp":"2026-11-20T01:02:03.004Z","message":"m17-gateway is stopping"}}
+{"status":{"timestamp":"2026-11-20T01:02:03.004Z","message":"m17-gateway is stopping"}}
+{"link":{"timestamp":"2026-11-20T01:02:03.004Z","action":"unlinked","reason":"shutdown","reflector":"M17-M17","module":"C","protocol":"m17"}}
+{"Modem":{"timestamp":"2026-11-20T01:02:03.004Z","open":false}}

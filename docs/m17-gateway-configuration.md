@@ -88,6 +88,25 @@ Staying inside the amateur band you're licensed for is up to you; the gateway ch
 | `Root` | no | empty | A file name, without `.log` | If set, the log goes to `Path/Root.log` (appended) instead of standard error. Leave empty under systemd or OpenRC, which collect standard error. |
 | `Path` | no | empty | A directory | Directory for the `Root` log file. Used only when `Root` is set. |
 
+## [MQTT]
+
+Status over MQTT, in the format MMDVMHost and G4KLX's gateway programs use. [mqtt-design.md](mqtt-design.md) describes the messages. It's independent of `[General] DashboardLog`. Every key is optional.
+
+| Key | Default | Values | What it does |
+|---|---|---|---|
+| `Enable` | `false` | Boolean | Publish status. When it's off, the other keys aren't read. |
+| `Host` | `127.0.0.1` | Host name or address | The broker. |
+| `Port` | `1883` | 1–65535 | The broker's port. |
+| `Auth` | `false` | Boolean (`0`/`1` too, as MMDVMHost) | Log in with `Username` and `Password`. |
+| `Username`, `Password` | empty | Text | The broker login, when `Auth` is on. |
+| `Keepalive` | `60` | Seconds, at least 5 | How often the connection is checked. |
+| `Name` | `m17-gateway` | Text without `/`, `#` or `+` | The topic prefix: events on `<Name>/json`, log lines on `<Name>/log`, current state (retained) on `<Name>/state/<type>`. |
+| `LogLevel` | `INFO` | `NONE`, `ERROR`, `WARN`, `INFO` or `DEBUG` | The lowest level sent to `<Name>/log`. It's separate from `[Log] Level`. |
+
+MQTT is off unless `Enable` is set, and the gateway needs no broker otherwise. To use it on Raspberry Pi OS, install a broker (`sudo apt install mosquitto`, which listens on localhost), set `Enable=true` and restart the gateway. m17-hotspot-os runs Mosquitto and turns it on.
+
+A value outside these ranges is a configuration error when `Enable` is on. The gateway starts even if the broker can't be reached, and keeps trying in the background. While it's unreachable, messages wait in a small queue, and once that's full the newest are dropped.
+
 ## [Modem]
 
 `Type` selects the modem; the other keys apply to one modem type each.

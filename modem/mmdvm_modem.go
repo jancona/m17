@@ -296,6 +296,10 @@ func (m *MMDVM) getPort() io.ReadWriteCloser {
 	return m.port
 }
 
+// ProtocolVersion is the modem's protocol version (1 or 2), known once it
+// has answered GetVersion.
+func (m *MMDVM) ProtocolVersion() int { return int(m.protocolVersion) }
+
 // Ident returns the description the modem gave in its GetVersion reply, which
 // names the hardware and its firmware version.
 func (m *MMDVM) Ident() string {

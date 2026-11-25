@@ -1,10 +1,10 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"math"
@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jancona/m17/dashboard"
 	"github.com/jancona/m17/inet"
+	"github.com/jancona/m17/mqttstatus"
 
 	"github.com/hashicorp/logutils"
 	"github.com/jancona/m17"
@@ -55,9 +55,29 @@ type config struct {
 	hostfile         *inet.Hostfile
 	overrideHostfile *inet.Hostfile
 	audioDir         string
+	mqtt             *mqttstatus.Publisher // nil when [MQTT] Enable is off
 }
 
 // keyErr names a [Radio] key in its parse error; nil stays nil.
+// loadMQTT reads the [MQTT] section: a Publisher (not started yet) when
+// Enable is on, nil when it's off.
+func loadMQTT(cfg *ini.File) (*mqttstatus.Publisher, error) {
+	sec := cfg.Section("MQTT")
+	if !sec.Key("Enable").MustBool(false) {
+		return nil, nil
+	}
+	return mqttstatus.New(mqttstatus.Config{
+		Host:      sec.Key("Host").MustString("127.0.0.1"),
+		Port:      sec.Key("Port").MustInt(1883),
+		Auth:      sec.Key("Auth").MustBool(false),
+		Username:  sec.Key("Username").String(),
+		Password:  sec.Key("Password").String(),
+		Keepalive: time.Duration(sec.Key("Keepalive").MustInt(60)) * time.Second,
+		Name:      sec.Key("Name").MustString("m17-gateway"),
+		LogLevel:  sec.Key("LogLevel").MustString("INFO"),
+	})
+}
+
 func keyErr(key string, err error) error {
 	if err == nil {
 		return nil
@@ -173,6 +193,8 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		symbolsOut, symbolsOutErr = os.Create(outFile)
 	}
 
+	mqttPub, mqttErr := loadMQTT(cfg)
+
 	var dashboardLogFile *os.File
 	var dashboardLogErr error
 	var dashboardLogger *slog.Logger
@@ -210,6 +232,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		dashboardLogErr,
 		reflectorHostfileErr,
 		reflectorOverrideHostfileErr,
+		mqttErr,
 	)
 
 	return config{
@@ -239,6 +262,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		hostfile:         reflectorHostfile,
 		overrideHostfile: reflectorOverrideHostfile,
 		audioDir:         audioDir,
+		mqtt:             mqttPub,
 	}, err
 }
 
@@ -264,6 +288,10 @@ func main() {
 		log.Fatalf("Bad configuration: %v", err)
 	}
 
+	if cfg.mqtt != nil {
+		cfg.mqtt.Start()
+		defer cfg.mqtt.Close() // after g.Close (deferred later), so its messages go out
+	}
 	setupLogging(cfg)
 
 	// // Server for pprof
@@ -336,7 +364,12 @@ func setupLogging(c config) {
 		MinLevel: logutils.LogLevel(minLogLevel),
 		Writer:   logWriter,
 	}
-	log.SetOutput(filter)
+	if c.mqtt != nil {
+		// The MQTT log writer has its own level ([MQTT] LogLevel)
+		log.SetOutput(io.MultiWriter(filter, c.mqtt.LogWriter()))
+	} else {
+		log.SetOutput(filter)
+	}
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	// log.SetFlags(0)
 	log.Print("[DEBUG] Debug is on")
@@ -368,7 +401,7 @@ type Gateway struct {
 	inetClient       *inet.Client
 	duplex           bool
 	done             bool
-	dashLog          *dashboard.Logger
+	rep              reporter // dashboard.log and MQTT
 	hostfile         *inet.Hostfile
 	overrideHostfile *inet.Hostfile
 	encodedCallsign  m17.EncodedCallsign
@@ -389,6 +422,7 @@ type Gateway struct {
 	netStreamActive bool
 	lastFrameTimer  *time.Timer
 	lastLSF         *m17.LSF // Workaround for reflectors that change the SRC during the stream
+	lastNetFN       uint16   // the current Internet stream's latest frame number
 	lastStreamID    uint16
 	netStreamHeld   bool         // reflector voice is being held back
 	ownTX           atomic.Int32 // the gateway's own transmissions under way: announcements and echoes
@@ -410,7 +444,7 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 		Module:           cfg.defaultModule,
 		modem:            modem,
 		duplex:           cfg.duplex,
-		dashLog:          dashboard.New(cfg.dashboardLogger),
+		rep:              cfg.reporter(),
 		hostfile:         cfg.hostfile,
 		overrideHostfile: cfg.overrideHostfile,
 		encodedCallsign:  *cs,
@@ -420,7 +454,7 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 		packetGap:        cfg.packetGap,
 		packetQueue:      make(chan func() error, packetQueueLen),
 	}
-	g.dashLog.Log("Gateway", "Start", "modem", cfg.modemType, "modemIdent", modem.Ident())
+	g.report().starting(cfg.modemType, cfg.modemInfo(modem))
 	go g.sendPackets()
 	err = g.loadAudioClips(cfg.audioDir, cfg.callsign)
 	if err != nil {
@@ -430,6 +464,7 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 		// No reflector: RF only. Nothing is sent to or received from the
 		// network; local RF works as usual, and a duplex hotspot repeats.
 		log.Printf("[INFO] No reflector configured: RF only")
+		g.report().link(linkUnlinked, reasonStartup, "", 0)
 	} else {
 		var h inet.Host
 		var ok bool
@@ -445,9 +480,9 @@ func NewGateway(cfg config, modem modem.Modem) (*Gateway, error) {
 		g.Server = h.Server
 		g.Port = h.Port
 		log.Printf("[DEBUG] Connecting to %s, %s:%d, module %s", g.Name, g.Server, g.Port, g.Module)
-		g.inetClient, err = inet.NewClient(g.Name, g.Server, g.Port, g.Module, cfg.callsign, func(event, name string, module byte) {
-			g.dashLog.Log("Reflector", event, "name", name, "module", string(module))
-		}, g.queuePacket, g.TransmitVoiceStream)
+		g.report().link(linkLinking, reasonStartup, g.Name, moduleByte(g.Module))
+		g.inetClient, err = inet.NewClient(g.Name, g.Server, g.Port, g.Module, cfg.callsign, g.linkEvent,
+			g.queuePacket, g.TransmitVoiceStream)
 		if err != nil {
 			return nil, fmt.Errorf("error creating client: %v", err)
 		}
@@ -477,13 +512,8 @@ func (g *Gateway) transmitNetPacket(p m17.Packet) error {
 		return err
 	}
 	// log.Printf("[DEBUG] received packet from server: %#v", p)
-	if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
-		msg := p.SMSText()
-		g.dashLog.LogFrame(&lsf, "Internet", "Packet", "packetType", p.Type, "smsMessage", msg)
-	} else {
-		g.dashLog.LogFrame(&lsf, "Internet", "Packet", "packetType", p.Type)
-	}
-	g.dashLog.LogGNSS(&lsf, "Internet")
+	g.report().packet("network", &lsf, &p, 0)
+	g.report().gnss("network", &lsf)
 
 	return nil
 }
@@ -535,7 +565,8 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 			g.lastFrameTimer.Stop()
 		}
 		log.Printf("[DEBUG] Start Internet voice stream: %s", sd)
-		g.dashLog.LogFrame(&lsf, "Internet", "Voice Start")
+		// A first frame other than 0: joined a stream already under way
+		g.report().voiceStart("network", &lsf, sd.FrameNumber&0x7fff != 0, 0)
 		g.netStreamActive = true
 		g.lastStreamID = sd.StreamID
 		g.lastLSF = &lsf
@@ -546,10 +577,11 @@ func (g *Gateway) TransmitVoiceStream(sd m17.StreamDatagram) error {
 	} else {
 		g.lastFrameTimer.Reset(time.Second)
 	}
-	g.dashLog.LogGNSS(&lsf, "Internet")
+	g.lastNetFN = sd.FrameNumber & 0x7fff
+	g.report().gnss("network", &lsf)
 	if sd.LastFrame {
 		log.Printf("[DEBUG] End Internet voice stream: %s", sd)
-		g.dashLog.LogFrame(g.lastLSF, "Internet", "Voice End")
+		g.report().voiceEnd("network", g.lastLSF, int(g.lastNetFN)+1, 0, false)
 		g.lastFrameTimer.Stop()
 		g.clearNetStream()
 	}
@@ -566,7 +598,7 @@ func (g *Gateway) netStreamTimedOut(t *time.Timer) {
 		return
 	}
 	log.Printf("[DEBUG] Timed out Internet voice stream %04x", g.lastStreamID)
-	g.dashLog.LogFrame(g.lastLSF, "Internet", "Voice End")
+	g.report().voiceEnd("network", g.lastLSF, int(g.lastNetFN)+1, 0, true)
 	g.clearNetStream()
 	g.netStreamMutex.Unlock()
 	if g.getState() == Echo {
@@ -606,8 +638,8 @@ func (g *Gateway) receivedRFLSF(lsf m17.LSF, ber float64) error {
 	g.rxHeard()
 	if g.getState() == Idle &&
 		lsf.Type[1]&byte(m17.LSFTypeStream) == byte(m17.LSFTypeStream) {
-		g.dashLog.LogFrame(&lsf, "RF", "Voice Start", "mer", json.Number(fmt.Sprintf("%f", ber)))
-		g.dashLog.LogGNSS(&lsf, "RF")
+		g.report().voiceStart("rf", &lsf, false, ber)
+		g.report().gnss("rf", &lsf)
 		switch lsf.Dst.Callsign() {
 		case "/ECHO", "#ECHO":
 			log.Printf("[DEBUG] receivedRFLSF() Echo")
@@ -673,7 +705,7 @@ func (g *Gateway) receivedRFStreamLICH(lsf m17.LSF, ber float64) error {
 		return g.receivedRFLSF(lsf, ber)
 	}
 	if g.getState() == RFStreamRX {
-		g.dashLog.LogGNSS(&lsf, "RF")
+		g.report().gnss("rf", &lsf)
 	}
 	return nil
 }
@@ -705,7 +737,8 @@ func (g *Gateway) receivedRFStreamEOT(lsf m17.LSF, sid, fn uint16, ber float64) 
 	// stream. It means the same for every modem, soft bits or hard.
 	log.Printf("[DEBUG] RF voice stream %04x ended at frame %04x, bit error rate %.2f%% before FEC",
 		sid, fn&0x7fff, ber)
-	g.dashLog.LogFrame(&lsf, "RF", "Voice End", "mer", json.Number(fmt.Sprintf("%f", ber)))
+	// A stream that timed out has no last-frame flag
+	g.report().voiceEnd("rf", &lsf, int(fn&0x7fff)+1, ber, fn&0x8000 == 0)
 	return nil
 }
 func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) error {
@@ -716,13 +749,8 @@ func (g *Gateway) receivedRFPacket(lsf m17.LSF, payload []byte, ber float64) err
 		log.Printf("[INFO] Dropping bad RF packet: %v", err)
 		return nil
 	}
-	g.dashLog.LogGNSS(&lsf, "RF")
-	if p.Type == m17.PacketTypeSMS && len(p.Payload) > 0 {
-		msg := p.SMSText()
-		g.dashLog.LogFrame(&lsf, "RF", "Packet", "mer", json.Number(fmt.Sprintf("%f", ber)), "packetType", p.Type, "smsMessage", msg)
-	} else {
-		g.dashLog.LogFrame(&lsf, "RF", "Packet", "mer", json.Number(fmt.Sprintf("%f", ber)), "packetType", p.Type)
-	}
+	g.report().gnss("rf", &lsf)
+	g.report().packet("rf", &lsf, &p, ber)
 	switch lsf.Dst.Callsign() {
 	case "/ECHO", "#ECHO":
 		g.setState(Echo)
@@ -804,12 +832,14 @@ func (g *Gateway) Run() {
 func (g *Gateway) Close() {
 	log.Print("[DEBUG] Gateway.Close()")
 	g.done = true
+	g.report().stopping()
 	if g.inetClient != nil {
 		g.inetClient.Close()
 	}
 	if g.modem != nil {
 		g.modem.Close()
 	}
+	g.report().stopped()
 	if g.in != os.Stdin {
 		g.in.Close()
 	}

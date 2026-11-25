@@ -64,6 +64,11 @@ func TestLoadConfigChecks(t *testing.T) {
 		{"mmdvm without Power", strings.Replace(withKey("Radio", "Power", "-"), "Type=cc1200", "Type=mmdvm", 1), ""},
 		{"mmdvm without AFC", strings.Replace(withKey("Radio", "AFC", "-"), "Type=cc1200", "Type=mmdvm", 1), ""},
 		{"mmdvm with a bad Power", strings.Replace(withKey("Radio", "Power", "lots"), "Type=cc1200", "Type=mmdvm", 1), "Power"},
+		{"MQTT on", configIni + "[MQTT]\nEnable=true\n", ""},
+		{"MQTT off ignores bad values", configIni + "[MQTT]\nEnable=false\nPort=0\n", ""},
+		{"MQTT bad port", configIni + "[MQTT]\nEnable=true\nPort=70000\n", "MQTT Port 70000"},
+		{"MQTT bad name", configIni + "[MQTT]\nEnable=true\nName=a/b\n", "MQTT Name"},
+		{"MQTT bad log level", configIni + "[MQTT]\nEnable=true\nLogLevel=LOUD\n", "MQTT LogLevel"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := filepath.Join(t.TempDir(), "gateway.ini")
@@ -78,5 +83,24 @@ func TestLoadConfigChecks(t *testing.T) {
 				t.Errorf("got %v, want an error containing %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestMQTTConfigDefaults(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "gateway.ini")
+	if err := os.WriteFile(p, []byte(configIni+"[MQTT]\nEnable=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := loadConfig(p, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.mqtt == nil {
+		t.Fatal("Enable=1 didn't turn MQTT on")
+	}
+	p2 := filepath.Join(t.TempDir(), "gateway.ini")
+	os.WriteFile(p2, []byte(configIni), 0o644)
+	if c, _ := loadConfig(p2, "", ""); c.mqtt != nil {
+		t.Error("MQTT on without an [MQTT] section")
 	}
 }
