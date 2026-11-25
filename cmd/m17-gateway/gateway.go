@@ -91,6 +91,13 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 	if err != nil {
 		log.Fatalf("Fail to read config from %s: %v", iniFile, err)
 	}
+	return parseConfig(cfg, inFile, outFile, false)
+}
+
+// parseConfig reads and checks the settings. check: only check them,
+// opening nothing (-check-config), and check the modem's settings too.
+func parseConfig(cfg *ini.File, inFile string, outFile string, check bool) (config, error) {
+	var err error
 	callsign := cfg.Section("General").Key("Callsign").String()
 	dashboardLog := cfg.Section("General").Key("DashboardLog").String()
 	audioDir := cfg.Section("General").Key("AudioDir").MustString("audio/")
@@ -195,10 +202,20 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 
 	mqttPub, mqttErr := loadMQTT(cfg)
 
+	// The modem's own settings, which it otherwise checks when it opens
+	var modemErr error
+	if check && modemTypeErr == nil {
+		modemErr = modem.CheckConfig(modemType, modemCfg)
+	}
+
 	var dashboardLogFile *os.File
 	var dashboardLogErr error
 	var dashboardLogger *slog.Logger
-	if dashboardLog != "" {
+	if check && dashboardLog != "" {
+		if fi, err := os.Stat(filepath.Dir(dashboardLog)); err != nil || !fi.IsDir() {
+			dashboardLogErr = fmt.Errorf("configured DashboardLog %s is in a directory that doesn't exist", dashboardLog)
+		}
+	} else if dashboardLog != "" {
 		dashboardLogFile, dashboardLogErr = os.OpenFile(dashboardLog, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if dashboardLogFile != nil {
 			opts := &slog.HandlerOptions{
@@ -233,6 +250,7 @@ func loadConfig(iniFile string, inFile string, outFile string) (config, error) {
 		reflectorHostfileErr,
 		reflectorOverrideHostfileErr,
 		mqttErr,
+		modemErr,
 	)
 
 	return config{
@@ -271,6 +289,7 @@ var (
 	outArg     *string = flag.String("out", "", "M17 symbol output (default stdout)")
 	configFile *string = flag.String("config", "./gateway.ini", "Configuration file")
 	reset      *bool   = flag.Bool("reset", false, "Reset modem and exit")
+	checkArg   *bool   = flag.Bool("check-config", false, "Check the configuration file and exit: one problem per line, exit status 1 if it has errors")
 	helpArg    *bool   = flag.Bool("h", false, "Print arguments")
 )
 
@@ -282,6 +301,9 @@ func main() {
 	if *helpArg {
 		flag.Usage()
 		return
+	}
+	if *checkArg {
+		os.Exit(checkConfig(*configFile, os.Stdout))
 	}
 	cfg, err := loadConfig(*configFile, *inArg, *outArg)
 	if err != nil {

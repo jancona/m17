@@ -169,46 +169,7 @@ func NewMMDVM(
 	afc bool,
 	modemCfg *ini.Section,
 	duplex bool) (*MMDVM, error) {
-	var protocolErr, portErr error
-	protocol := modemCfg.Key("Protocol").In("BAD", []string{"uart"})
-	if protocol == "BAD" {
-		protocolErr = fmt.Errorf("modem Protocol value is '%s', must be 'uart'", modemCfg.Key("Protocol").String())
-	}
-	port := modemCfg.Key("Port").String()
-	if port == "" {
-		portErr = errors.New("modem Port must have a value")
-	}
-	speed, speedErr := modemCfg.Key("Speed").Int()
-	if speedErr == nil && !slices.Contains(mmdvmValidSpeeds, speed) {
-		speedErr = fmt.Errorf("modem Speed value is %d, must be one of %d", speed, mmdvmValidSpeeds)
-	}
-	// Defaults here are values that typically work
-	rxInvert := modemCfg.Key("RXInvert").MustBool(false)
-	txInvert := modemCfg.Key("TXInvert").MustBool(true)
-	pttInvert := modemCfg.Key("PTTInvert").MustBool(false)
-	debug := modemCfg.Key("Debug").MustBool(false)
-	txDCOffset, txDCErr := dcOffset(modemCfg, "TXDCOffset")
-	// The firmware (MMDVM and MMDVM_HS) NAKs SetConfig above 50 (500 ms)
-	txDelay, txDelayErr := uintSetting(modemCfg, "TXDelay", 100, 500, "ms")
-	rxLevel, rxLevelErr := uintSetting(modemCfg, "RXLevel", 50, 100, "%")
-	rxDCOffset, rxDCErr := dcOffset(modemCfg, "RXDCOffset")
-	txLevel, txLevelErr := uintSetting(modemCfg, "TXLevel", 50, 100, "%")
-	txHang, txHangErr := uintSetting(modemCfg, "TXHang", 5, 255, "s")
-	rfLevel, rfLevelErr := mmdvmRFLevel(modemCfg)
-
-	var err error
-	err = errors.Join(
-		protocolErr,
-		portErr,
-		speedErr,
-		txDCErr,
-		rxDCErr,
-		rfLevelErr,
-		txDelayErr,
-		rxLevelErr,
-		txLevelErr,
-		txHangErr,
-	)
+	port, speed, rfLevel, config, err := mmdvmSettings(modemCfg, duplex)
 	if err != nil {
 		return nil, err
 	}
@@ -222,20 +183,7 @@ func NewMMDVM(
 		sleep:       time.Sleep,
 		sendCmds:    make(chan []byte, 100), // 4 seconds
 		lastTXData:  time.Now(),
-		config: MMDVMConfig{
-			duplex:     duplex,
-			rxInvert:   rxInvert,
-			txInvert:   txInvert,
-			pttInvert:  pttInvert,
-			debug:      debug,
-			txDCOffset: txDCOffset,
-			txDelay:    uint16(txDelay),
-			rxLevel:    float32(rxLevel),
-			rxDCOffset: rxDCOffset,
-			m17Enabled: true,
-			m17TXLevel: float32(txLevel),
-			m17TXHang:  byte(txHang),
-		},
+		config:      config,
 	}
 	m.openPort = func() (io.ReadWriteCloser, error) {
 		p, err := serial.Open(m.portName, &serial.Mode{BaudRate: m.speed})
@@ -1341,6 +1289,66 @@ func (m *MMDVM) sendToModem(cmd []byte) {
 		log.Println("[DEBUG] sendToModem message send failed")
 	}
 	m.lastTXData = time.Now()
+}
+
+// mmdvmSettings reads and checks the [Modem] settings of an MMDVM modem.
+func mmdvmSettings(modemCfg *ini.Section, duplex bool) (port string, speed int, rfLevel byte, config MMDVMConfig, err error) {
+	var protocolErr, portErr error
+	protocol := modemCfg.Key("Protocol").In("BAD", []string{"uart"})
+	if protocol == "BAD" {
+		protocolErr = fmt.Errorf("modem Protocol value is '%s', must be 'uart'", modemCfg.Key("Protocol").String())
+	}
+	port = modemCfg.Key("Port").String()
+	if port == "" {
+		portErr = errors.New("modem Port must have a value")
+	}
+	speed, speedErr := modemCfg.Key("Speed").Int()
+	if speedErr == nil && !slices.Contains(mmdvmValidSpeeds, speed) {
+		speedErr = fmt.Errorf("modem Speed value is %d, must be one of %d", speed, mmdvmValidSpeeds)
+	}
+	// Defaults here are values that typically work
+	rxInvert := modemCfg.Key("RXInvert").MustBool(false)
+	txInvert := modemCfg.Key("TXInvert").MustBool(true)
+	pttInvert := modemCfg.Key("PTTInvert").MustBool(false)
+	debug := modemCfg.Key("Debug").MustBool(false)
+	txDCOffset, txDCErr := dcOffset(modemCfg, "TXDCOffset")
+	// The firmware (MMDVM and MMDVM_HS) NAKs SetConfig above 50 (500 ms)
+	txDelay, txDelayErr := uintSetting(modemCfg, "TXDelay", 100, 500, "ms")
+	rxLevel, rxLevelErr := uintSetting(modemCfg, "RXLevel", 50, 100, "%")
+	rxDCOffset, rxDCErr := dcOffset(modemCfg, "RXDCOffset")
+	txLevel, txLevelErr := uintSetting(modemCfg, "TXLevel", 50, 100, "%")
+	txHang, txHangErr := uintSetting(modemCfg, "TXHang", 5, 255, "s")
+	rfLevel, rfLevelErr := mmdvmRFLevel(modemCfg)
+
+	err = errors.Join(
+		protocolErr,
+		portErr,
+		speedErr,
+		txDCErr,
+		rxDCErr,
+		rfLevelErr,
+		txDelayErr,
+		rxLevelErr,
+		txLevelErr,
+		txHangErr,
+	)
+	if err != nil {
+		return "", 0, 0, MMDVMConfig{}, err
+	}
+	return port, speed, rfLevel, MMDVMConfig{
+		duplex:     duplex,
+		rxInvert:   rxInvert,
+		txInvert:   txInvert,
+		pttInvert:  pttInvert,
+		debug:      debug,
+		txDCOffset: txDCOffset,
+		txDelay:    uint16(txDelay),
+		rxLevel:    float32(rxLevel),
+		rxDCOffset: rxDCOffset,
+		m17Enabled: true,
+		m17TXLevel: float32(txLevel),
+		m17TXHang:  byte(txHang),
+	}, nil
 }
 
 // uintSetting reads an unsigned setting, def if unset (or not a number,

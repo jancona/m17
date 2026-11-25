@@ -177,6 +177,7 @@ No `[Modem]` keys. Symbols are read from standard input and written to standard 
 | Option | What it does |
 |---|---|
 | `-config FILE` | The configuration file (default `./gateway.ini`). |
+| `-check-config` | Check the configuration file and exit, without opening the modem, the network or the dashboard log. Prints one problem per line, `error: ` or `warning: ` then the message, and exits 1 if there are errors. Errors are what would stop the gateway starting, including the modem's own settings and a reflector missing from the host files; warnings are settings it would ignore, such as a mistyped key. |
 | `-reset` | Reset the modem and exit. |
 | `-in FILE`, `-out FILE` | Symbol input and output for the `dummy` modem (default standard input and output). |
 | `-h` | List the options. |
