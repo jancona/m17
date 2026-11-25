@@ -139,6 +139,8 @@ func (g *Gateway) playMessage(msg ...string) error {
 	}
 	sid := uint16(rand.Intn(0x10000))
 	fn := uint16(0)
+	end := g.reportOwnVoice(lsf)
+	defer func() { end(int(fn & 0x7fff)) }() // fn is the next frame's number
 	err = g.sendSilence(sid, &fn, lsf, 8*m17.FrameTime)
 	if err != nil {
 		return err
@@ -205,11 +207,16 @@ func (g *Gateway) echoStreamEnd() error {
 		log.Printf("[DEBUG] echoStreamEnd() %d frames", len(g.echoStream))
 		time.Sleep(250 * time.Millisecond)
 		sid := uint16(rand.Intn(0x10000))
-		for _, sd := range g.echoStream {
+		sent := 0
+		for i, sd := range g.echoStream {
 			sd.StreamID = sid
 			sd.LSF.Dst = sd.LSF.Src
 			sd.LSF.Src = g.encodedCallsign
 			sd.LSF.CalcCRC()
+			if i == 0 {
+				end := g.reportOwnVoice(*sd.LSF)
+				defer func() { end(sent) }()
+			}
 			// log.Printf("[DEBUG] echoStreamEnd id: %04x, fn: %04x, last: %v, payload: [% 02x]", sd.StreamID, sd.FrameNumber, sd.LastFrame, sd.Payload)
 			err = g.modem.TransmitVoiceStream(sd)
 			if err != nil {
@@ -217,6 +224,7 @@ func (g *Gateway) echoStreamEnd() error {
 				break
 			}
 			g.voiceSent()
+			sent++
 		}
 	}
 	g.echoStream = nil

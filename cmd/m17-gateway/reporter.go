@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/jancona/m17"
 	"github.com/jancona/m17/dashboard"
@@ -220,4 +221,55 @@ func (c config) modemInfo(mdm modem.Modem) modemInfo {
 		mi.protocol = v.ProtocolVersion()
 	}
 	return mi
+}
+
+// The gateway's own transmissions (echoes, info replies and spoken
+// messages) are reported as network traffic: in an MMDVMHost hotspot the
+// gateway program sends them to MMDVMHost like reflector traffic, and
+// MMDVMHost reports them so. Dashboards then show the radio transmitting.
+
+// ownReport is the gateway's own voice transmission being reported.
+type ownReport struct {
+	lsf   m17.LSF
+	start time.Time
+}
+
+// reportOwnVoice reports the start of the gateway's own voice
+// transmission, unless a reflector stream is being reported (reported
+// network voice never overlaps). Call the returned function with the
+// number of frames sent when it ends.
+func (g *Gateway) reportOwnVoice(lsf m17.LSF) func(frames int) {
+	g.netStreamMutex.Lock()
+	defer g.netStreamMutex.Unlock()
+	if g.netStreamActive {
+		return func(int) {}
+	}
+	g.endOwnReport(g.ownReport, -1)
+	r := &ownReport{lsf: lsf, start: time.Now()}
+	g.ownReport = r
+	g.report().voiceStart("network", &r.lsf, false, 0)
+	return func(frames int) {
+		g.netStreamMutex.Lock()
+		defer g.netStreamMutex.Unlock()
+		g.endOwnReport(r, frames)
+	}
+}
+
+// endOwnReport reports the end of r, if it's still the one being reported.
+// frames < 0: ended early, so count the frames from the time it started.
+// Must be called with netStreamMutex held.
+func (g *Gateway) endOwnReport(r *ownReport, frames int) {
+	if r == nil || g.ownReport != r {
+		return
+	}
+	if frames < 0 {
+		frames = int(time.Since(r.start) / m17.FrameTime)
+	}
+	g.report().voiceEnd("network", &r.lsf, frames, 0, false)
+	g.ownReport = nil
+}
+
+// reportOwnPacket reports a packet the gateway sends of its own.
+func (g *Gateway) reportOwnPacket(p *m17.Packet) {
+	g.report().packet("network", p.LSF, p, 0)
 }

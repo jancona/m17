@@ -87,6 +87,15 @@ func (g *Gateway) queueLocalPacket(p m17.Packet) error {
 	return g.enqueue(func() error { return g.modem.TransmitPacket(p) }, p)
 }
 
+// queueOwnPacket queues a packet of the gateway's own (an echo or info
+// reply), reported as network traffic when it goes out.
+func (g *Gateway) queueOwnPacket(p m17.Packet) error {
+	return g.enqueue(func() error {
+		g.reportOwnPacket(&p)
+		return g.modem.TransmitPacket(p)
+	}, p)
+}
+
 func (g *Gateway) enqueue(send func() error, p m17.Packet) error {
 	select {
 	case g.packetQueue <- send:
